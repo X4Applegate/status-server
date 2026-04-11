@@ -2384,7 +2384,7 @@ app.use(async (req, res, next) => {
   // Only intercept top-level page GETs — never API routes, never /dashboard/<slug> (already works),
   // never /admin / /login / /static.
   if (req.method !== "GET") return next();
-  if (req.path.startsWith("/api/") || req.path.startsWith("/admin") || req.path.startsWith("/login") || req.path.startsWith("/dashboard/")) return next();
+  if (req.path.startsWith("/api/") || req.path.startsWith("/admin") || req.path.startsWith("/login") || req.path.startsWith("/dashboard/") || req.path === "/privacy" || req.path === "/terms") return next();
   const host = (req.hostname || "").toLowerCase();
   if (!host) return next();
   try {
