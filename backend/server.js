@@ -239,6 +239,25 @@ async function initDB() {
     await db.query("ALTER TABLE status_omada_controllers ADD COLUMN group_id INT DEFAULT NULL");
   } catch(e) { /* column already exists */ }
 
+  // Many-to-many: Omada controller ↔ groups (replaces the single group_id column)
+  await db.query(`
+    CREATE TABLE IF NOT EXISTS status_omada_controller_groups (
+      controller_id INT NOT NULL,
+      group_id      INT NOT NULL,
+      PRIMARY KEY (controller_id, group_id),
+      INDEX idx_ctrl  (controller_id),
+      INDEX idx_group (group_id)
+    )
+  `);
+  // One-time migration: seed the map table from the legacy group_id column
+  try {
+    const [legacy] = await db.query("SELECT id, group_id FROM status_omada_controllers WHERE group_id IS NOT NULL");
+    if (legacy.length) {
+      const vals = legacy.map(r => [r.id, r.group_id]);
+      await db.query("INSERT IGNORE INTO status_omada_controller_groups (controller_id, group_id) VALUES ?", [vals]);
+    }
+  } catch(e) { /* already migrated */ }
+
   // Add mode column on existing installs
   try {
     await db.query("ALTER TABLE status_omada_controllers ADD COLUMN mode VARCHAR(16) NOT NULL DEFAULT 'standard'");
@@ -1929,44 +1948,57 @@ app.delete("/api/admin/groups/:id", requireAdmin, async (req, res) => {
 });
 
 // -- Omada Controllers admin ---------------------------------------------------
-// Helper: viewers can write a controller iff its group_id is in their allowed list.
-// Returns true if the user is allowed to manage the given controller row.
-async function userCanManageOmadaCtrl(req, ctrlGroupId) {
-  if (req.session.role === "admin") return true;
-  if (!ctrlGroupId) return false;     // global controllers are admin-only
-  const allowed = await getUserAllowedGroupIds(req.session.userId, req.session.role);
-  return Array.isArray(allowed) && allowed.includes(parseInt(ctrlGroupId));
+// Helper: load group_ids array for a list of controller ids from the map table
+async function omadaLoadGroupIds(controllerIds) {
+  if (!controllerIds.length) return {};
+  const [rows] = await db.query(
+    "SELECT controller_id, group_id FROM status_omada_controller_groups WHERE controller_id IN (?)",
+    [controllerIds]
+  );
+  const map = {};
+  for (const r of rows) (map[r.controller_id] ||= []).push(r.group_id);
+  return map;
 }
 
-// List controllers — admin sees all; viewer sees only those in their allowed groups
+// Helper: viewers can manage a controller iff any of its group_ids overlap with their allowed list.
+async function userCanManageOmadaCtrl(req, ctrlGroupIds) {
+  if (req.session.role === "admin") return true;
+  if (!Array.isArray(ctrlGroupIds) || !ctrlGroupIds.length) return false;
+  const allowed = await getUserAllowedGroupIds(req.session.userId, req.session.role);
+  return Array.isArray(allowed) && ctrlGroupIds.some(gid => allowed.includes(gid));
+}
+
+// List controllers — admin sees all; viewer sees only those sharing at least one allowed group
 app.get("/api/admin/omada-controllers", requireAuth, async (req, res) => {
   try {
     const [rows] = await db.query(
-      "SELECT id, name, base_url, client_id, omadac_id, verify_tls, mode, group_id, last_error, created_at FROM status_omada_controllers ORDER BY created_at"
+      "SELECT id, name, base_url, client_id, omadac_id, verify_tls, mode, last_error, created_at FROM status_omada_controllers ORDER BY created_at"
     );
+    const groupMap = await omadaLoadGroupIds(rows.map(r => r.id));
+    const withGroups = rows.map(r => ({ ...r, group_ids: groupMap[r.id] || [] }));
     const allowed = await getUserAllowedGroupIds(req.session.userId, req.session.role);
-    const filtered = (allowed === null) ? rows : rows.filter(r => r.group_id && allowed.includes(r.group_id));
+    const filtered = (allowed === null)
+      ? withGroups
+      : withGroups.filter(r => r.group_ids.some(gid => allowed.includes(gid)));
     res.json(filtered);
   } catch(e) { res.status(500).json({ error: e.message }); }
 });
 
 // Create controller — auto-discovers omadacId, tests auth, stores everything
 app.post("/api/admin/omada-controllers", requireAuth, async (req, res) => {
-  const { name, base_url, client_id, client_secret, verify_tls, group_id } = req.body;
+  const { name, base_url, client_id, client_secret, verify_tls, group_ids } = req.body;
   if (!name || !base_url || !client_id || !client_secret) {
     return res.status(400).json({ error: "name, base_url, client_id and client_secret are required" });
   }
-  // Viewers must scope the controller to one of their allowed groups; admin may omit (= global)
-  let groupIdToStore = null;
+  // Normalize group_ids to a clean int array
+  let cleanGroupIds = Array.isArray(group_ids) ? group_ids.map(Number).filter(Boolean) : [];
+  // Viewers must scope to at least one of their allowed groups
   if (req.session.role !== "admin") {
-    if (!group_id) return res.status(400).json({ error: "Must assign a group (viewers cannot create global controllers)" });
+    if (!cleanGroupIds.length) return res.status(400).json({ error: "Must assign at least one group" });
     const allowed = await getUserAllowedGroupIds(req.session.userId, req.session.role);
-    if (!Array.isArray(allowed) || !allowed.includes(parseInt(group_id))) {
-      return res.status(403).json({ error: "You don't have access to that group" });
+    if (!Array.isArray(allowed) || !cleanGroupIds.every(gid => allowed.includes(gid))) {
+      return res.status(403).json({ error: "You don't have access to one or more of those groups" });
     }
-    groupIdToStore = parseInt(group_id);
-  } else if (group_id) {
-    groupIdToStore = parseInt(group_id);
   }
   const url = String(base_url).replace(/\/$/, "");
   const vtls = verify_tls !== false;
@@ -1975,10 +2007,17 @@ app.post("/api/admin/omada-controllers", requireAuth, async (req, res) => {
     const omadacId = info.omadacId || info.omadacid;
     if (!omadacId) throw new Error("/api/info returned no omadacId");
     const [result] = await db.query(
-      "INSERT INTO status_omada_controllers (name, base_url, client_id, client_secret, omadac_id, verify_tls, group_id) VALUES (?,?,?,?,?,?,?)",
-      [name, url, client_id, client_secret, omadacId, vtls ? 1 : 0, groupIdToStore]
+      "INSERT INTO status_omada_controllers (name, base_url, client_id, client_secret, omadac_id, verify_tls) VALUES (?,?,?,?,?,?)",
+      [name, url, client_id, client_secret, omadacId, vtls ? 1 : 0]
     );
     const newId = result.insertId;
+    // Write group associations
+    if (cleanGroupIds.length) {
+      await db.query(
+        "INSERT IGNORE INTO status_omada_controller_groups (controller_id, group_id) VALUES ?",
+        [cleanGroupIds.map(gid => [newId, gid])]
+      );
+    }
     const ctrlForAuth = { id: newId, base_url: url, client_id, client_secret, omadac_id: omadacId, verify_tls: vtls };
     try {
       await omadaGetToken(ctrlForAuth);
@@ -1999,7 +2038,7 @@ app.post("/api/admin/omada-controllers", requireAuth, async (req, res) => {
 
 app.put("/api/admin/omada-controllers/:id", requireAuth, async (req, res) => {
   const id = parseInt(req.params.id);
-  const { name, base_url, client_id, client_secret, verify_tls, group_id } = req.body;
+  const { name, base_url, client_id, client_secret, verify_tls, group_ids } = req.body;
   if (!name || !base_url || !client_id) {
     return res.status(400).json({ error: "name, base_url and client_id are required" });
   }
@@ -2009,35 +2048,37 @@ app.put("/api/admin/omada-controllers/:id", requireAuth, async (req, res) => {
     const [rows] = await db.query("SELECT * FROM status_omada_controllers WHERE id=?", [id]);
     if (!rows.length) return res.status(404).json({ error: "Controller not found" });
     const existing = rows[0];
-    // Permission: viewers can only edit controllers in their groups
-    if (!(await userCanManageOmadaCtrl(req, existing.group_id))) {
+    const existingGroupMap = await omadaLoadGroupIds([id]);
+    const existingGroupIds = existingGroupMap[id] || [];
+    if (!(await userCanManageOmadaCtrl(req, existingGroupIds))) {
       return res.status(403).json({ error: "You don't have access to this controller" });
     }
-    // Determine the new group_id. Viewers can only move it within their allowed groups
-    // (and it must remain group-scoped — viewers can't make it global). Admins are unrestricted.
-    let newGroupId = existing.group_id;
-    if (req.session.role === "admin") {
-      newGroupId = group_id ? parseInt(group_id) : null;
-    } else if (group_id !== undefined) {
-      if (!group_id) return res.status(400).json({ error: "Cannot remove group ownership as a viewer" });
+    let cleanGroupIds = Array.isArray(group_ids) ? group_ids.map(Number).filter(Boolean) : existingGroupIds;
+    if (req.session.role !== "admin") {
+      if (!cleanGroupIds.length) return res.status(400).json({ error: "Must keep at least one group as a viewer" });
       const allowed = await getUserAllowedGroupIds(req.session.userId, req.session.role);
-      if (!Array.isArray(allowed) || !allowed.includes(parseInt(group_id))) {
-        return res.status(403).json({ error: "Controller must remain in one of your allowed groups" });
+      if (!Array.isArray(allowed) || !cleanGroupIds.every(gid => allowed.includes(gid))) {
+        return res.status(403).json({ error: "Controller must remain in your allowed groups" });
       }
-      newGroupId = parseInt(group_id);
     }
-    // If client_secret is blank, keep the existing one
     const finalSecret = (client_secret && client_secret.length) ? client_secret : existing.client_secret;
-    // Re-discover omadacId in case the URL changed
     let omadacId = existing.omadac_id;
     try {
       const info = await omadaGetInfo(url, vtls);
       omadacId = info.omadacId || info.omadacid || omadacId;
-    } catch(e) { /* keep old, surface error below */ }
+    } catch(e) { /* keep old */ }
     await db.query(
-      "UPDATE status_omada_controllers SET name=?, base_url=?, client_id=?, client_secret=?, omadac_id=?, verify_tls=?, group_id=?, last_error=NULL WHERE id=?",
-      [name, url, client_id, finalSecret, omadacId, vtls ? 1 : 0, newGroupId, id]
+      "UPDATE status_omada_controllers SET name=?, base_url=?, client_id=?, client_secret=?, omadac_id=?, verify_tls=?, last_error=NULL WHERE id=?",
+      [name, url, client_id, finalSecret, omadacId, vtls ? 1 : 0, id]
     );
+    // Replace group associations
+    await db.query("DELETE FROM status_omada_controller_groups WHERE controller_id=?", [id]);
+    if (cleanGroupIds.length) {
+      await db.query(
+        "INSERT IGNORE INTO status_omada_controller_groups (controller_id, group_id) VALUES ?",
+        [cleanGroupIds.map(gid => [id, gid])]
+      );
+    }
     delete omadaTokens[id];
     const ctrlForAuth = { id, base_url:url, client_id, client_secret:finalSecret, omadac_id:omadacId, verify_tls:vtls };
     try {
@@ -2058,11 +2099,13 @@ app.put("/api/admin/omada-controllers/:id", requireAuth, async (req, res) => {
 app.delete("/api/admin/omada-controllers/:id", requireAuth, async (req, res) => {
   const id = parseInt(req.params.id);
   try {
-    const [rows] = await db.query("SELECT name, group_id FROM status_omada_controllers WHERE id=?", [id]);
+    const [rows] = await db.query("SELECT name FROM status_omada_controllers WHERE id=?", [id]);
     if (!rows.length) return res.status(404).json({ error: "Controller not found" });
-    if (!(await userCanManageOmadaCtrl(req, rows[0].group_id))) {
+    const groupMap = await omadaLoadGroupIds([id]);
+    if (!(await userCanManageOmadaCtrl(req, groupMap[id] || []))) {
       return res.status(403).json({ error: "You don't have access to this controller" });
     }
+    await db.query("DELETE FROM status_omada_controller_groups WHERE controller_id=?", [id]);
     await db.query("DELETE FROM status_omada_controllers WHERE id=?", [id]);
     delete omadaTokens[id];
     addLog({ level:"warn", server:"omada", message:`Controller removed: ${rows[0].name} by ${req.session.username}` });
@@ -2076,7 +2119,8 @@ app.get("/api/admin/omada-controllers/:id/sites", requireAuth, async (req, res) 
   try {
     const [rows] = await db.query("SELECT * FROM status_omada_controllers WHERE id=?", [id]);
     if (!rows.length) return res.status(404).json({ error: "Controller not found" });
-    if (!(await userCanManageOmadaCtrl(req, rows[0].group_id))) {
+    const groupMap = await omadaLoadGroupIds([id]);
+    if (!(await userCanManageOmadaCtrl(req, groupMap[id] || []))) {
       return res.status(403).json({ error: "You don't have access to this controller" });
     }
     const sites = await omadaListSites(rows[0]);

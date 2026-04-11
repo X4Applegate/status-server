@@ -577,7 +577,11 @@ body{font-family:var(--sans);background:var(--bg);color:var(--text);min-height:1
           <div class="fg full"><label class="flabel">Base URL *</label><input class="finput" id="oUrl" placeholder="https://omada162.example.io"></div>
           <div class="fg"><label class="flabel">Client ID *</label><input class="finput" id="oClientId" autocomplete="off"></div>
           <div class="fg"><label class="flabel">Client Secret <span id="oSecretHint" style="font-weight:400;text-transform:none;letter-spacing:0">*</span></label><input class="finput" id="oClientSecret" type="password" autocomplete="new-password"></div>
-          <div class="fg full"><label class="flabel">Owner Group <span style="font-weight:400;text-transform:none;letter-spacing:0;color:var(--text-2)" id="oGroupHint">(scopes the controller to a dashboard's admins)</span></label><select class="fselect" id="oGroup"></select></div>
+          <div class="fg full">
+            <label class="flabel">Groups with Access <span style="font-weight:400;text-transform:none;letter-spacing:0;color:var(--text-2)">(select which dashboards can use this controller)</span></label>
+            <div id="oGroupPicker" style="background:var(--input-bg);border:1px solid var(--border-hi);border-radius:var(--r-sm);max-height:180px;overflow-y:auto;padding:8px"></div>
+            <div style="font-size:11px;color:var(--text-2);margin-top:4px">Admin: leave all unchecked to make it global (accessible from all groups)</div>
+          </div>
           <div class="fg full"><label class="flabel"><input type="checkbox" id="oVerifyTls" checked style="vertical-align:middle;margin-right:6px">Verify TLS certificate <span style="font-weight:400;text-transform:none;letter-spacing:0;color:var(--text-2)">(uncheck for self-signed)</span></label></div>
         </div>
         <div class="form-footer">
@@ -2414,11 +2418,14 @@ function renderAdminOmadaList(list){
   el.innerHTML = list.map((c, idx) => {
     const modeBadge = c.mode === "msp" ? ` <span style="font-size:9px;font-weight:600;padding:1px 6px;border-radius:8px;background:var(--blue-soft);color:var(--blue);letter-spacing:.04em;vertical-align:middle">MSP</span>` : "";
     const errorBadge = c.last_error ? `<div class="admin-checks-label" style="color:var(--red)">⚠ ${c.last_error}</div>` : `<div class="admin-checks-label">omadacId: <span style="font-family:var(--mono)">${(c.omadac_id||"—").slice(0,16)}…</span></div>`;
+    const groupNames = (c.group_ids||[]).map(gid => { const g = adminGroups.find(x=>x.id===gid); return g ? g.name : null; }).filter(Boolean);
+    const groupBadge = groupNames.length ? `<div class="admin-checks-label">${groupNames.join(", ")}</div>` : `<div class="admin-checks-label" style="color:var(--text-2)">Global (all groups)</div>`;
     return `<div class="admin-server-item" onclick="showOmadaSites(adminOmada[${idx}])">
       <div class="admin-dot ${c.last_error ? 'down' : 'up'}"></div>
       <div class="admin-info">
         <div class="admin-name">${c.name}${modeBadge}</div>
         <div class="admin-host">${c.base_url}</div>
+        ${groupBadge}
         ${errorBadge}
       </div>
       <div class="admin-row-actions" onclick="event.stopPropagation()">
@@ -2464,15 +2471,19 @@ async function showOmadaForm(c){
   document.getElementById("oVerifyTls").checked  = c ? !!c.verify_tls : true;
   document.getElementById("oSecretHint").textContent = c ? "(leave blank to keep existing)" : "*";
   document.getElementById("oErr").textContent = "";
-  // Populate the Owner Group dropdown — admin can pick "Global" (no group), viewers must pick one of theirs
+  // Populate the group picker checkboxes
   await ensureGroupsLoaded();
-  const sel = document.getElementById("oGroup");
-  if (isAdmin()) {
-    sel.innerHTML = `<option value="">— Global (admin only) —</option>` +
-      adminGroups.map(g => `<option value="${g.id}" ${c && c.group_id == g.id ? "selected" : ""}>${g.name}</option>`).join("");
+  const pickedIds = new Set((c?.group_ids || []).map(Number));
+  const picker = document.getElementById("oGroupPicker");
+  const visibleGroups = isAdmin() ? adminGroups : adminGroups.filter(g => (sessionAllowedGroupIds||[]).includes(g.id));
+  if (!visibleGroups.length) {
+    picker.innerHTML = `<div style="font-size:12px;color:var(--text-2);padding:4px">No groups available</div>`;
   } else {
-    const defaultId = (c && c.group_id) || (adminGroups[0] && adminGroups[0].id) || "";
-    sel.innerHTML = adminGroups.map(g => `<option value="${g.id}" ${defaultId == g.id ? "selected" : ""}>${g.name}</option>`).join("");
+    picker.innerHTML = visibleGroups.map(g => `
+      <label style="display:flex;align-items:center;gap:8px;padding:5px 4px;cursor:pointer;border-radius:4px;font-size:13px;color:var(--text-hi)">
+        <input type="checkbox" value="${g.id}" ${pickedIds.has(g.id) ? "checked" : ""} style="accent-color:var(--accent)">
+        ${g.name}
+      </label>`).join("");
   }
 }
 
@@ -2482,8 +2493,8 @@ async function submitOmadaForm(){
   const client_id     = document.getElementById("oClientId").value.trim();
   const client_secret = document.getElementById("oClientSecret").value;
   const verify_tls    = document.getElementById("oVerifyTls").checked;
-  const groupSel      = document.getElementById("oGroup").value;
   const id            = document.getElementById("oId").value;
+  const group_ids     = Array.from(document.querySelectorAll("#oGroupPicker input[type=checkbox]:checked")).map(el => parseInt(el.value));
   if (!name || !base_url || !client_id) {
     document.getElementById("oErr").textContent = "Name, URL and Client ID are required.";
     return;
@@ -2497,7 +2508,7 @@ async function submitOmadaForm(){
     const r = await fetch(id ? `/api/admin/omada-controllers/${id}` : "/api/admin/omada-controllers", {
       method: id ? "PUT" : "POST",
       headers: {"Content-Type":"application/json"},
-      body: JSON.stringify({ name, base_url, client_id, client_secret, verify_tls, group_id: groupSel ? parseInt(groupSel) : null })
+      body: JSON.stringify({ name, base_url, client_id, client_secret, verify_tls, group_ids })
     });
     const d = await r.json();
     if (!r.ok) { document.getElementById("oErr").textContent = d.error || "Failed"; return; }
