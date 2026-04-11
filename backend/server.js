@@ -280,6 +280,12 @@ async function initDB() {
   try {
     await db.query("ALTER TABLE status_groups ADD COLUMN logo_size INT NOT NULL DEFAULT 42");
   } catch(e) { /* column already exists */ }
+  try {
+    await db.query("ALTER TABLE status_groups ADD COLUMN privacy_text MEDIUMTEXT DEFAULT NULL");
+  } catch(e) { /* column already exists */ }
+  try {
+    await db.query("ALTER TABLE status_groups ADD COLUMN terms_text MEDIUMTEXT DEFAULT NULL");
+  } catch(e) { /* column already exists */ }
 
   // Add group_id column to status_servers if upgrading from older version
   try {
@@ -1828,7 +1834,7 @@ function cleanCustomDomain(s) {
 }
 
 app.post("/api/admin/groups", requireAdmin, async (req, res) => {
-  const { name, slug, description, logo_text, logo_image, logo_size, accent_color, bg_color, default_theme, custom_domain, server_ids } = req.body;
+  const { name, slug, description, logo_text, logo_image, logo_size, accent_color, bg_color, default_theme, custom_domain, server_ids, privacy_text, terms_text } = req.body;
   if (!name) return res.status(400).json({ error: "Name is required" });
   const finalSlug = slugify(slug || name);
   if (!finalSlug) return res.status(400).json({ error: "Slug is required" });
@@ -1844,8 +1850,8 @@ app.post("/api/admin/groups", requireAdmin, async (req, res) => {
   const cleanLogoSize = Math.max(20, Math.min(120, parseInt(logo_size) || 42));
   try {
     const [result] = await db.query(
-      "INSERT INTO status_groups (slug, name, description, logo_text, logo_image, logo_size, accent_color, bg_color, default_theme, custom_domain) VALUES (?,?,?,?,?,?,?,?,?,?)",
-      [finalSlug, name, description || "", logo_text || "", cleanLogo, cleanLogoSize, accent_color || "#2a7fff", cleanBg, cleanTheme, cleanDomain]
+      "INSERT INTO status_groups (slug, name, description, logo_text, logo_image, logo_size, accent_color, bg_color, default_theme, custom_domain, privacy_text, terms_text) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)",
+      [finalSlug, name, description || "", logo_text || "", cleanLogo, cleanLogoSize, accent_color || "#2a7fff", cleanBg, cleanTheme, cleanDomain, privacy_text || null, terms_text || null]
     );
     const newId = result.insertId;
     if (Array.isArray(server_ids) && server_ids.length) {
@@ -1863,7 +1869,7 @@ app.post("/api/admin/groups", requireAdmin, async (req, res) => {
 });
 
 app.put("/api/admin/groups/:id", requireAdmin, async (req, res) => {
-  const { name, slug, description, logo_text, logo_image, logo_size, accent_color, bg_color, default_theme, custom_domain, server_ids } = req.body;
+  const { name, slug, description, logo_text, logo_image, logo_size, accent_color, bg_color, default_theme, custom_domain, server_ids, privacy_text, terms_text } = req.body;
   if (!name) return res.status(400).json({ error: "Name is required" });
   const finalSlug = slugify(slug || name);
   if (!finalSlug) return res.status(400).json({ error: "Slug is required" });
@@ -1884,8 +1890,8 @@ app.put("/api/admin/groups/:id", requireAdmin, async (req, res) => {
   const cleanLogoSize = Math.max(20, Math.min(120, parseInt(logo_size) || 42));
   try {
     const [result] = await db.query(
-      "UPDATE status_groups SET slug=?, name=?, description=?, logo_text=?, logo_image=?, logo_size=?, accent_color=?, bg_color=?, default_theme=?, custom_domain=? WHERE id=?",
-      [finalSlug, name, description || "", logo_text || "", cleanLogo, cleanLogoSize, accent_color || "#2a7fff", cleanBg, cleanTheme, cleanDomain, gid]
+      "UPDATE status_groups SET slug=?, name=?, description=?, logo_text=?, logo_image=?, logo_size=?, accent_color=?, bg_color=?, default_theme=?, custom_domain=?, privacy_text=?, terms_text=? WHERE id=?",
+      [finalSlug, name, description || "", logo_text || "", cleanLogo, cleanLogoSize, accent_color || "#2a7fff", cleanBg, cleanTheme, cleanDomain, privacy_text || null, terms_text || null, gid]
     );
     if (result.affectedRows === 0) return res.status(404).json({ error: "Group not found" });
     if (Array.isArray(server_ids)) {
@@ -2366,7 +2372,7 @@ app.use((req, res, next) => {
 // -- Page routes (EJS templates) ----------------------------------------------
 const DEFAULT_BRANDING = {
   groupSlug:    null,
-  groupName:    "Status.Monitor",
+  groupName:    "Applegate Monitor",
   groupSubtitle: "",
   accentColor:  "#2a7fff",
   bgColor:      null,
@@ -2374,7 +2380,9 @@ const DEFAULT_BRANDING = {
   logoImage:    null,
   logoSize:     42,
   defaultTheme: "dark",
-  pageTitle:    "System Status"
+  pageTitle:    "System Status",
+  privacyUrl:   "/privacy",
+  termsUrl:     "/terms",
 };
 
 // Custom-domain middleware: if the request's Host header matches any group's custom_domain,
@@ -2384,13 +2392,22 @@ app.use(async (req, res, next) => {
   // Only intercept top-level page GETs — never API routes, never /dashboard/<slug> (already works),
   // never /admin / /login / /static.
   if (req.method !== "GET") return next();
-  if (req.path.startsWith("/api/") || req.path.startsWith("/admin") || req.path.startsWith("/login") || req.path.startsWith("/dashboard/") || req.path === "/privacy" || req.path === "/terms") return next();
+  if (req.path.startsWith("/api/") || req.path.startsWith("/admin") || req.path.startsWith("/login") || req.path.startsWith("/dashboard/")) return next();
   const host = (req.hostname || "").toLowerCase();
   if (!host) return next();
   try {
     const [rows] = await db.query("SELECT * FROM status_groups WHERE LOWER(custom_domain)=?", [host]);
     if (rows.length) {
       const g = rows[0];
+      // Serve group-specific privacy/terms pages on the custom domain
+      if (req.path === "/privacy") {
+        if (!g.privacy_text) return res.redirect("/privacy"); // fall back to global (won't loop since no custom domain match)
+        return res.render("group-legal", { g, type: "privacy", content: g.privacy_text });
+      }
+      if (req.path === "/terms") {
+        if (!g.terms_text) return res.redirect("/terms");
+        return res.render("group-legal", { g, type: "terms", content: g.terms_text });
+      }
       return res.render("index", {
         adminHref:    null,
         groupSlug:    g.slug,
@@ -2402,7 +2419,9 @@ app.use(async (req, res, next) => {
         logoImage:    g.logo_image || null,
         logoSize:     g.logo_size || 42,
         defaultTheme: g.default_theme || "dark",
-        pageTitle:    `${g.name} — Status`
+        pageTitle:    `${g.name} — Status`,
+        privacyUrl:   g.privacy_text ? "/privacy" : null,
+        termsUrl:     g.terms_text   ? "/terms"   : null,
       });
     }
   } catch(e) { /* silent — fall through to normal routing */ }
@@ -2424,7 +2443,7 @@ app.get("/dashboard/:slug", async (req, res) => {
     if (!rows.length) return res.status(404).render("404", { slug: req.params.slug });
     const g = rows[0];
     res.render("index", {
-      adminHref:    null,                  // Public dashboards hide the Admin link
+      adminHref:    null,
       groupSlug:    g.slug,
       groupName:    g.name,
       groupSubtitle: g.description || "",
@@ -2434,11 +2453,34 @@ app.get("/dashboard/:slug", async (req, res) => {
       logoImage:    g.logo_image || null,
       logoSize:     g.logo_size || 42,
       defaultTheme: g.default_theme || "dark",
-      pageTitle:    `${g.name} — Status`
+      pageTitle:    `${g.name} — Status`,
+      privacyUrl:   g.privacy_text ? `/dashboard/${g.slug}/privacy` : "/privacy",
+      termsUrl:     g.terms_text   ? `/dashboard/${g.slug}/terms`   : "/terms",
     });
   } catch(e) {
     res.status(500).send("Server error");
   }
+});
+
+// Per-group privacy and terms pages
+app.get("/dashboard/:slug/privacy", async (req, res) => {
+  try {
+    const [rows] = await db.query("SELECT * FROM status_groups WHERE slug=?", [req.params.slug]);
+    if (!rows.length) return res.status(404).render("404", { slug: req.params.slug });
+    const g = rows[0];
+    if (!g.privacy_text) return res.redirect("/privacy");
+    res.render("group-legal", { g, type: "privacy", content: g.privacy_text });
+  } catch(e) { res.status(500).send("Server error"); }
+});
+
+app.get("/dashboard/:slug/terms", async (req, res) => {
+  try {
+    const [rows] = await db.query("SELECT * FROM status_groups WHERE slug=?", [req.params.slug]);
+    if (!rows.length) return res.status(404).render("404", { slug: req.params.slug });
+    const g = rows[0];
+    if (!g.terms_text) return res.redirect("/terms");
+    res.render("group-legal", { g, type: "terms", content: g.terms_text });
+  } catch(e) { res.status(500).send("Server error"); }
 });
 
 // Legacy .html URLs → permanent redirect to clean paths

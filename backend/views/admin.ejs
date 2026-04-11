@@ -652,6 +652,22 @@ body{font-family:var(--sans);background:var(--bg);color:var(--text);min-height:1
           <div class="fg full"><label class="flabel">Servers in this Group <span style="font-weight:400;text-transform:none;letter-spacing:0" id="gPickCount">(0 selected)</span></label>
             <div id="gServerPicker" style="background:var(--input-bg);border:1px solid var(--border-hi);border-radius:var(--r-sm);max-height:220px;overflow-y:auto;padding:8px"></div>
           </div>
+
+          <div class="fg full" style="border-top:1px solid var(--border);padding-top:16px;margin-top:4px">
+            <div style="font-size:12px;font-weight:600;color:var(--text-hi);margin-bottom:12px;letter-spacing:.03em">Legal Pages <span style="font-weight:400;color:var(--text-2);letter-spacing:0">(optional — shown in the footer of this dashboard)</span></div>
+            <div style="display:flex;flex-direction:column;gap:14px">
+              <div>
+                <label class="flabel">Privacy Policy</label>
+                <textarea class="finput" id="gPrivacyText" rows="6" placeholder="Paste or write your Privacy Policy here. Plain text or basic markdown (# headings, **bold**, - lists) is supported." style="resize:vertical;font-family:var(--mono);font-size:12px;line-height:1.6"></textarea>
+                <div style="font-size:11px;color:var(--text-2);margin-top:4px">Leave blank to use the default Applegate Monitor privacy page</div>
+              </div>
+              <div>
+                <label class="flabel">Terms of Service</label>
+                <textarea class="finput" id="gTermsText" rows="6" placeholder="Paste or write your Terms of Service here. Plain text or basic markdown (# headings, **bold**, - lists) is supported." style="resize:vertical;font-family:var(--mono);font-size:12px;line-height:1.6"></textarea>
+                <div style="font-size:11px;color:var(--text-2);margin-top:4px">Leave blank to use the default Applegate Monitor terms page</div>
+              </div>
+            </div>
+          </div>
         </div>
         <div class="form-footer">
           <span class="form-err" id="gErr"></span>
@@ -2239,6 +2255,8 @@ async function showGroupForm(g){
   document.getElementById("gLogoSizeVal").textContent = lsz + "px";
   document.getElementById("gTheme").value = g?.default_theme || "dark";
   document.getElementById("gCustomDomain").value = g?.custom_domain || "";
+  document.getElementById("gPrivacyText").value = g?.privacy_text || "";
+  document.getElementById("gTermsText").value   = g?.terms_text   || "";
   // Background color: if the group has one set, enable the toggle and pre-fill; else show default
   const hasBg = !!g?.bg_color;
   document.getElementById("gBgColorEnabled").checked = hasBg;
@@ -2332,6 +2350,8 @@ async function submitGroupForm(){
     bg_color:       bgEnabled ? document.getElementById("gBgColor").value : "",
     default_theme:  document.getElementById("gTheme").value,
     custom_domain:  document.getElementById("gCustomDomain").value.trim(),
+    privacy_text:   document.getElementById("gPrivacyText").value.trim() || null,
+    terms_text:     document.getElementById("gTermsText").value.trim()   || null,
     server_ids:     Array.from(pickedServers)
   };
   try {

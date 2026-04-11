@@ -957,9 +957,9 @@ loadServers();
 loadDashboardGroups();  // master view: paints sidebar groups; public dashboards: paints topbar quick-nav pills
 </script>
 <footer style="text-align:center;padding:28px 16px 20px;font-size:12px;color:var(--text-2)">
-  <a href="/privacy" style="color:var(--text-2);text-decoration:none;margin:0 10px" onmouseover="this.style.color='var(--text-hi)'" onmouseout="this.style.color='var(--text-2)'">Privacy Policy</a>
+  <a href="<%- privacyUrl || '/privacy' %>" style="color:var(--text-2);text-decoration:none;margin:0 10px" onmouseover="this.style.color='var(--text-hi)'" onmouseout="this.style.color='var(--text-2)'">Privacy Policy</a>
   <span style="opacity:.3">·</span>
-  <a href="/terms" style="color:var(--text-2);text-decoration:none;margin:0 10px" onmouseover="this.style.color='var(--text-hi)'" onmouseout="this.style.color='var(--text-2)'">Terms of Service</a>
+  <a href="<%- termsUrl || '/terms' %>" style="color:var(--text-2);text-decoration:none;margin:0 10px" onmouseover="this.style.color='var(--text-hi)'" onmouseout="this.style.color='var(--text-2)'">Terms of Service</a>
 </footer>
 </body>
 </html>

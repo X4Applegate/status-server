@@ -1,0 +1,76 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="<%= g.default_theme || 'dark' %>">
+<head>
+<meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title><%= type === 'privacy' ? 'Privacy Policy' : 'Terms of Service' %> — <%= g.name %></title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+<style>
+*,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+:root,[data-theme="dark"]{--bg:#0b0e14;--surface:#141920;--surface2:#1a2030;--border:rgba(255,255,255,0.08);--border-hi:rgba(255,255,255,0.14);--text:#94a3b8;--text-2:#64748b;--text-hi:#e2e8f0;--text-white:#f8fafc;--shadow:rgba(0,0,0,0.4);--ga:rgba(99,102,241,0.1)}
+[data-theme="light"]{--bg:#f4f6f9;--surface:#fff;--surface2:#f0f3f7;--border:rgba(0,0,0,0.08);--border-hi:rgba(0,0,0,0.14);--text:#5a6a7e;--text-2:#8fa0b5;--text-hi:#2d3a4a;--text-white:#1a2535;--shadow:rgba(0,0,0,0.1);--ga:rgba(99,102,241,0.06)}
+:root{--accent:<%- g.accent_color || '#6366f1' %>;--accent-soft:color-mix(in srgb,var(--accent) 12%,transparent);--sans:'Plus Jakarta Sans',sans-serif;--mono:'JetBrains Mono',monospace;--r:12px;--r-sm:8px}
+body{font-family:var(--sans);background:var(--bg);color:var(--text);min-height:100vh;-webkit-font-smoothing:antialiased}
+.bg-glow{position:fixed;inset:0;pointer-events:none;background:radial-gradient(ellipse 70% 60% at 50% 20%,var(--ga) 0%,transparent 70%)}
+.wrap{position:relative;z-index:1;max-width:760px;margin:0 auto;padding:60px 24px 80px}
+.back{display:inline-flex;align-items:center;gap:6px;font-size:13px;color:var(--text-2);text-decoration:none;margin-bottom:40px;transition:color .15s}
+.back:hover{color:var(--text-hi)}
+.brand{display:flex;align-items:center;gap:12px;margin-bottom:32px}
+<% if (g.logo_image) { %>
+.brand-logo{height:<%= Math.min(g.logo_size || 42, 56) %>px;width:auto;object-fit:contain}
+<% } else { %>
+.brand-icon{height:36px;min-width:36px;border-radius:9px;background:var(--accent-soft);border:1px solid color-mix(in srgb,var(--accent) 30%,transparent);display:flex;align-items:center;justify-content:center;font-size:15px;font-weight:700;color:var(--accent)}
+<% } %>
+.brand-name{font-size:18px;font-weight:700;color:var(--text-white);letter-spacing:-.02em}
+h1{font-size:28px;font-weight:700;color:var(--text-white);letter-spacing:-.02em;margin-bottom:8px}
+.meta{font-size:13px;color:var(--text-2);margin-bottom:40px}
+.content{font-size:14px;line-height:1.8;color:var(--text);white-space:pre-wrap;word-break:break-word}
+.content h1,.content h2,.content h3{color:var(--text-white);margin:28px 0 10px;font-weight:600}
+.content h1{font-size:20px}.content h2{font-size:17px;padding-bottom:6px;border-bottom:1px solid var(--border)}.content h3{font-size:15px}
+.content p{margin-bottom:12px}
+.content ul,.content ol{margin:8px 0 12px 20px}
+.content li{margin-bottom:4px}
+.content a{color:var(--accent)}
+.content strong{color:var(--text-hi);font-weight:600}
+.theme-toggle{position:fixed;top:16px;right:16px;width:34px;height:34px;border-radius:8px;border:1px solid var(--border-hi);background:var(--surface);color:var(--text-hi);cursor:pointer;display:flex;align-items:center;justify-content:center;font-size:15px;z-index:10}
+[data-theme="light"] .icon-moon{display:none}
+[data-theme="dark"] .icon-sun{display:none}
+</style>
+</head>
+<body>
+<div class="bg-glow"></div>
+<button class="theme-toggle" onclick="toggleTheme()">
+  <span class="icon-sun">☀️</span>
+  <span class="icon-moon">🌙</span>
+</button>
+<div class="wrap">
+  <a class="back" href="/dashboard/<%= g.slug %>">
+    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="15 18 9 12 15 6"/></svg>
+    Back to <%= g.name %>
+  </a>
+
+  <div class="brand">
+    <% if (g.logo_image) { %>
+      <img class="brand-logo" src="<%= g.logo_image %>" alt="<%= g.name %>">
+    <% } else { %>
+      <div class="brand-icon"><%= (g.logo_text || g.name.charAt(0)).substring(0,2) %></div>
+    <% } %>
+    <div class="brand-name"><%= g.name %></div>
+  </div>
+
+  <h1><%= type === 'privacy' ? 'Privacy Policy' : 'Terms of Service' %></h1>
+  <p class="meta"><%= g.name %></p>
+
+  <div class="content"><%- content.replace(/</g, '&lt;').replace(/>/g, '&gt;') %></div>
+</div>
+<script>
+function toggleTheme(){
+  const t = document.documentElement.getAttribute("data-theme")==="dark"?"light":"dark";
+  document.documentElement.setAttribute("data-theme",t);
+  localStorage.setItem("sm-theme",t);
+}
+const saved = localStorage.getItem("sm-theme");
+if(saved) document.documentElement.setAttribute("data-theme",saved);
+</script>
+</body>
+</html>
