@@ -400,9 +400,20 @@ function pingCheck(host) {
     exec(`ping -c 2 -W 2 ${host}`, (err, stdout) => {
       if (err) return resolve({ type:"ping", ok:false, detail:"No response" });
       const match = stdout.match(/rtt[^=]+=\s*([\d.]+)\/([\d.]+)/);
-      resolve({ type:"ping", ok:true, detail: match ? `${Math.round(parseFloat(match[2]))}ms` : "ok" });
+      const ms = match ? Math.round(parseFloat(match[2])) : null;
+      resolve({ type:"ping", ok:true, response_ms: ms, detail: ms !== null ? `${ms}ms` : "ok" });
     });
   });
+}
+
+function formatUptime(seconds) {
+  if (!seconds || seconds < 0) return null;
+  const d = Math.floor(seconds / 86400);
+  const h = Math.floor((seconds % 86400) / 3600);
+  const m = Math.floor((seconds % 3600) / 60);
+  if (d > 0) return `${d}d ${h}h`;
+  if (h > 0) return `${h}h ${m}m`;
+  return `${m}m`;
 }
 
 function tcpCheck(host, port, timeout=3000) {
@@ -749,7 +760,7 @@ const _omadaShapeLogged = new Set();
 
 // Look up a controller from DB and check its gateway in a given site.
 // Returns the same shape as other check functions: { type, ok, detail }
-async function omadaGatewayCheck(controllerId, siteId, customerId, siteName, customerName) {
+async function omadaGatewayCheck(controllerId, siteId, customerId, siteName, customerName, host) {
   try {
     const [rows] = await db.query("SELECT * FROM status_omada_controllers WHERE id=?", [controllerId]);
     if (!rows.length) return { type:"omada_gateway", ok:false, detail:"controller not found" };
@@ -801,11 +812,27 @@ async function omadaGatewayCheck(controllerId, siteId, customerId, siteName, cus
 
     // Omada device.status: 1 = Connected (Wired), 11 = Connected (Wireless), 0 = Disconnected
     const ok = gateway.status === 1 || gateway.status === 11;
-    const name = gateway.name || gateway.deviceName || gateway.model || gateway.modelName || gateway.mac || "gateway";
+    const name  = gateway.name || gateway.deviceName || "Gateway";
+    const model = gateway.model || gateway.modelName || gateway.product || null;
+    const uptimeSec = gateway.uptimeLong || gateway.uptime || null;
+    const uptimeStr = uptimeSec ? ` · up ${formatUptime(uptimeSec)}` : "";
+    const modelStr  = model ? `${model} ` : "";
+
     const detail = ok
-      ? `${name} connected`
+      ? `${modelStr}connected${uptimeStr}`
       : `${name} offline (status ${gateway.status})`;
-    return { type:"omada_gateway", ok, detail };
+
+    // Ping the server's host IP for response-time history on the chart.
+    // This runs after the API check so a ping failure doesn't affect WAN status.
+    let response_ms = null;
+    if (ok && host) {
+      try {
+        const p = await pingCheck(host);
+        if (p.ok && p.response_ms != null) response_ms = p.response_ms;
+      } catch(e) { /* ping failure is non-fatal */ }
+    }
+
+    return { type:"omada_gateway", ok, detail, response_ms };
   } catch(e) {
     return { type:"omada_gateway", ok:false, detail: e.message };
   }
@@ -821,7 +848,7 @@ async function runChecks(def) {
       if (c.type==="http")          return await httpCheck(c.url, c.expectedStatus, c.timeout, c.show_cert !== false);
       if (c.type==="udp")           return await udpCheck(def.host, c.port, c.timeout);
       if (c.type==="dns")           return await dnsCheck(c.hostname || def.host, c.record_type, c.expected, c.timeout);
-      if (c.type==="omada_gateway") return await omadaGatewayCheck(c.controller_id, c.site_id, c.customer_id, c.site_name, c.customer_name);
+      if (c.type==="omada_gateway") return await omadaGatewayCheck(c.controller_id, c.site_id, c.customer_id, c.site_name, c.customer_name, def.host);
       return { type:c.type, ok:false, detail:"unknown check type" };
     } catch(e) {
       return { type:c.type, ok:false, detail:`check error: ${e.message}` };
@@ -836,8 +863,10 @@ async function recordHistory(def, checks, overall) {
   try {
     // Store each check result
     for (const ch of checks) {
-      let ms = null;
-      if (ch.ok && ch.detail) {
+      // Prefer an explicit response_ms field; fall back to parsing the detail string
+      // for backwards compatibility with any check that still embeds ms in detail.
+      let ms = ch.response_ms != null ? ch.response_ms : null;
+      if (ms === null && ch.ok && ch.detail) {
         const match = ch.detail.match(/(\d+)\s*ms/);
         if (match) ms = parseInt(match[1]);
       }
