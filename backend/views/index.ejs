@@ -685,7 +685,7 @@ function renderDetail(s, uptime, heartbeat, incidents){
 
   // Current checks — cert info is inlined as a small badge on the HTTP chip itself
   const checkChips = (s.checks||[]).map(c => {
-    const lbl     = c.type==="ping"?"Ping":c.type==="tcp"?`TCP :${c.port}`:c.type==="udp"?`UDP :${c.port}`:c.type==="dns"?`DNS ${(c.record_type||"A").toUpperCase()}`:c.type==="omada_gateway"?"Omada WAN":"HTTP";
+    const lbl     = c.type==="ping"?"Ping":c.type==="tcp"?`TCP :${c.port}`:c.type==="udp"?`UDP :${c.port}`:c.type==="dns"?`DNS ${(c.record_type||"A").toUpperCase()}`:c.type==="omada_gateway"?"Omada WAN":c.type==="omada_lte"?"Omada LTE":"HTTP";
     const chipCls = c.ok ? "ok" : "fail";
     // Inline cert badge: only when this HTTP check fetched a cert (HTTPS + show_cert !== false)
     let certBadge = "";

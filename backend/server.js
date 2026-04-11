@@ -855,6 +855,88 @@ async function omadaGatewayCheck(controllerId, siteId, customerId, siteName, cus
   }
 }
 
+// Fetch the rich gateway object from /sites/{siteId}/gateways — includes WAN port statuses,
+// cellular info, signal strength, etc. Falls back across MSP / standard mode.
+const _lteShapeLogged = new Set();
+async function omadaFetchGatewayDetail(ctrl, siteId, customerId, siteName, customerName) {
+  const path = `/sites/${siteId}/gateways?pageSize=10&page=1`;
+  try {
+    if (ctrl.mode === "msp") {
+      const r = await omadaMspApiGet(ctrl, path);
+      return Array.isArray(r) ? r : (r.data || [r]);
+    }
+    const r = await omadaApiGet(ctrl, path);
+    return Array.isArray(r) ? r : (r.data || [r]);
+  } catch(e) {
+    // If the dedicated gateways endpoint doesn't exist, fall back to devices list
+    const devices = await omadaListDevices(ctrl, siteId, customerId, siteName, customerName);
+    return devices.filter(d => {
+      const t = (d.type || d.deviceType || "").toString().toLowerCase();
+      const m = (d.model || d.modelName || "").toString().toUpperCase();
+      return t==="gateway" || t.includes("gateway") || /^ER\d/.test(m) || d.type===0;
+    });
+  }
+}
+
+async function omadaLteCheck(controllerId, siteId, customerId, siteName, customerName) {
+  try {
+    const [rows] = await db.query("SELECT * FROM status_omada_controllers WHERE id=?", [controllerId]);
+    if (!rows.length) return { type:"omada_lte", ok:false, detail:"controller not found" };
+    const ctrl = rows[0];
+
+    const gateways = await omadaFetchGatewayDetail(ctrl, siteId, customerId, siteName, customerName);
+    const gw = gateways[0];
+    if (!gw) return { type:"omada_lte", ok:false, detail:"no gateway found" };
+
+    // Log full gateway shape once per controller+site to learn field names
+    const _key = `lte:${controllerId}:${siteId}`;
+    if (!_lteShapeLogged.has(_key)) {
+      _lteShapeLogged.add(_key);
+      addLog({ level:"info", server:"omada", message:`LTE gateway shape: ${JSON.stringify(gw)}` });
+    }
+
+    // Hunt for a cellular/4G WAN port across multiple possible field names
+    const wanPorts = gw.wanPortStatus || gw.wanStatus || gw.portStatus || gw.wanPorts || [];
+    const isCellular = p => {
+      const n = (p.portName || p.name || p.type || "").toString().toLowerCase();
+      const m = (p.medium || p.portType || p.linkType || "").toString().toLowerCase();
+      return n.includes("cell") || n.includes("lte") || n.includes("4g") || n.includes("3g")
+          || m.includes("cell") || m.includes("lte") || m.includes("4g") || m.includes("3g")
+          || n.includes("wan2") && (m.includes("modem") || m.includes("usb"));
+    };
+
+    const cell = Array.isArray(wanPorts) ? wanPorts.find(isCellular) : null;
+
+    // Also check top-level cellular fields (some firmware puts them directly on the gw object)
+    const topLteField = gw.cellularInfo || gw.lteInfo || gw.fourGInfo || null;
+
+    if (!cell && !topLteField) {
+      // No cellular data found — model might not have LTE or firmware doesn't expose it yet
+      return { type:"omada_lte", ok:false, detail:"no cellular WAN detected (check gateway model)" };
+    }
+
+    const src = cell || topLteField;
+    const connected = src.online ?? src.connected ?? src.internetState === 1 ?? false;
+    const netType   = src.networkType || src.connectType || src.signalType || "LTE";
+    const signal    = src.signalLevel ?? src.rssi ?? src.rsrp ?? null;
+    const signalStr = signal != null ? ` · ${signal}dBm` : "";
+    const carrier   = src.isp || src.carrier || src.operatorName || null;
+    const carrierStr= carrier ? ` · ${carrier}` : "";
+    const wanIp     = src.ip || src.wanIp || null;
+    const ipStr     = wanIp ? ` · ${wanIp}` : "";
+
+    // "Standby" means the link is up but not the active WAN — still healthy
+    const standby = !connected && (src.mode === "backup" || src.wanMode === "backup" || src.standby === true);
+    const ok = connected || standby;
+    const stateStr = connected ? "connected" : standby ? "standby" : "disconnected";
+
+    const detail = `${netType} ${stateStr}${signalStr}${carrierStr}${ipStr}`;
+    return { type:"omada_lte", ok, detail };
+  } catch(e) {
+    return { type:"omada_lte", ok:false, detail: e.message };
+  }
+}
+
 async function runChecks(def) {
   return Promise.all((def.checks||[{type:"ping"}]).map(async c => {
     // Wrap every check in a try/catch so one malformed check (bad URL, etc.)
@@ -866,6 +948,7 @@ async function runChecks(def) {
       if (c.type==="udp")           return await udpCheck(def.host, c.port, c.timeout);
       if (c.type==="dns")           return await dnsCheck(c.hostname || def.host, c.record_type, c.expected, c.timeout);
       if (c.type==="omada_gateway") return await omadaGatewayCheck(c.controller_id, c.site_id, c.customer_id, c.site_name, c.customer_name, def.host);
+      if (c.type==="omada_lte")     return await omadaLteCheck(c.controller_id, c.site_id, c.customer_id, c.site_name, c.customer_name);
       return { type:c.type, ok:false, detail:"unknown check type" };
     } catch(e) {
       return { type:c.type, ok:false, detail:`check error: ${e.message}` };
@@ -893,6 +976,7 @@ async function recordHistory(def, checks, overall) {
                   : ch.type === "http"          ? "http"
                   : ch.type === "dns"           ? `dns:${(ch.record_type||"A").toUpperCase()}`
                   : ch.type === "omada_gateway" ? "omada_gateway"
+                  : ch.type === "omada_lte"     ? "omada_lte"
                   : ch.type;
       await db.query(
         "INSERT INTO status_history (server_id, check_type, ok, response_ms, detail, checked_at) VALUES (?,?,?,?,?,?)",
