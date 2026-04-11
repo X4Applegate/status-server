@@ -499,12 +499,12 @@ function renderTopbarDashboards(){
     const isMaster = !GROUP_SLUG;
     pills.push(`<a class="dash-nav dash-nav-admin ${isMaster ? 'active' : ''}" href="/" title="Admin master view — all servers">
       <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2l3 7h7l-5.5 4 2 7-6.5-4.5L5.5 20l2-7L2 9h7z"/></svg>
-      Admin
+      Manage
     </a>`);
   } else if (sidebarSession.loggedIn) {
     pills.push(`<a class="dash-nav dash-nav-admin" href="/admin" title="Manage your servers, Omada controllers, and webhooks">
       <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2l3 7h7l-5.5 4 2 7-6.5-4.5L5.5 20l2-7L2 9h7z"/></svg>
-      Admin
+      Manage
     </a>`);
   }
   el.innerHTML = pills.join("");
