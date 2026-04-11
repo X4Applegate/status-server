@@ -542,7 +542,7 @@ function renderSidebar(){
       <div class="srv-dot ${s.overall||'pending'}"></div>
       <div class="srv-info">
         <div class="srv-name">${s.name}</div>
-        <div class="srv-host">${s.host}</div>
+        ${sidebarSession.loggedIn ? `<div class="srv-host">${s.host}</div>` : ""}
       </div>
       <div class="srv-badge ${s.overall||'pending'}">${(s.overall||"pending").toUpperCase()}</div>
     </div>`;
@@ -648,7 +648,7 @@ function renderDetailSkeleton(s){
     <div class="detail-header">
       <div>
         <div class="detail-name">${s.name}</div>
-        <div class="detail-host">${s.host}</div>
+        ${sidebarSession.loggedIn ? `<div class="detail-host">${s.host}</div>` : ""}
       </div>
     </div>
     <div class="uptime-row">
@@ -683,10 +683,22 @@ function renderDetail(s, uptime, heartbeat, incidents){
     ...heartbeat.map(h => `<div class="hb-dot ${h.ok?"up":"down"}" title="${fmtTime(h.checked_at)} · ${h.ok?"Up":"Down"}${h.response_ms?" ("+h.response_ms+"ms)":""}"></div>`)
   ].join("");
 
+  // Strip IPv4/IPv6 addresses from detail strings for public (non-logged-in) viewers
+  function redactIPs(str) {
+    if (!str) return str;
+    return str
+      .replace(/\b\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}\b/g, "")   // IPv4
+      .replace(/([0-9a-fA-F]{0,4}:){2,7}[0-9a-fA-F]{0,4}/g, "")  // IPv6
+      .replace(/·\s*·/g, "·")   // clean up double separators left behind
+      .replace(/·\s*$/g, "")    // clean trailing separator
+      .trim();
+  }
+
   // Current checks — cert info is inlined as a small badge on the HTTP chip itself
   const checkChips = (s.checks||[]).map(c => {
     const lbl     = c.type==="ping"?"Ping":c.type==="tcp"?`TCP :${c.port}`:c.type==="udp"?`UDP :${c.port}`:c.type==="dns"?`DNS ${(c.record_type||"A").toUpperCase()}`:c.type==="omada_gateway"?"Omada WAN":c.type==="omada_lte"?"Omada LTE":"HTTP";
     const chipCls = c.ok ? "ok" : "fail";
+    const detail  = sidebarSession.loggedIn ? (c.detail||"") : redactIPs(c.detail||"");
     // Inline cert badge: only when this HTTP check fetched a cert (HTTPS + show_cert !== false)
     let certBadge = "";
     if (c.cert && c.cert.expires_at) {
@@ -702,7 +714,7 @@ function renderDetail(s, uptime, heartbeat, incidents){
     return `<div class="check-chip ${chipCls}">
       <div class="chip-dot"></div>
       <span class="chip-label">${lbl}</span>
-      <span class="chip-detail">${c.detail||""}</span>
+      <span class="chip-detail">${detail}</span>
       ${certBadge}
     </div>`;
   }).join("");
@@ -726,7 +738,7 @@ function renderDetail(s, uptime, heartbeat, incidents){
     <div class="detail-header">
       <div>
         <div class="detail-name">${s.name}</div>
-        <div class="detail-host">${s.host}${s.description ? " · "+s.description : ""}</div>
+        ${sidebarSession.loggedIn ? `<div class="detail-host">${s.host}${s.description ? " · "+s.description : ""}</div>` : (s.description ? `<div class="detail-host">${s.description}</div>` : "")}
         <div class="detail-tags">${tags}</div>
       </div>
       <div style="display:flex;flex-direction:column;align-items:flex-end;gap:10px">
