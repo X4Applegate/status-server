@@ -87,6 +87,12 @@ body::before{content:'';position:fixed;inset:0;pointer-events:none;background:ra
 .topbar-clock{font-family:var(--mono);font-size:12px;color:var(--text-2)}
 .topbar-admin{padding:5px 12px;border:1px solid var(--border-hi);border-radius:6px;color:var(--text-hi);font-size:12px;font-weight:500;text-decoration:none;transition:all .15s}
 .topbar-admin:hover{background:var(--blue-soft);border-color:var(--blue);color:var(--blue)}
+.topbar-login{padding:5px 12px;border:1px solid var(--blue);border-radius:6px;color:var(--blue);background:var(--blue-soft);font-size:12px;font-weight:500;text-decoration:none;cursor:pointer;transition:all .15s;white-space:nowrap}
+.topbar-login:hover{background:var(--blue);color:#fff}
+.topbar-user{display:flex;align-items:center;gap:8px}
+.topbar-username{font-size:12px;color:var(--text-2);font-weight:500}
+.topbar-logout{padding:5px 10px;border:1px solid var(--border-hi);border-radius:6px;color:var(--text-2);background:transparent;font-size:12px;font-weight:500;cursor:pointer;transition:all .15s;white-space:nowrap}
+.topbar-logout:hover{border-color:var(--red);color:var(--red);background:var(--red-soft)}
 
 /* Dashboard quick-nav pills in the topbar — center-aligned, fills the gap between brand and topbar-right */
 .topbar-dashboards{display:flex;align-items:center;justify-content:center;gap:6px;flex:1 1 auto;flex-wrap:wrap;margin:0 16px;min-width:0}
@@ -415,12 +421,13 @@ const COLLAPSE_KEY  = "sm-sidebar-collapsed";
 let collapsedGroups = new Set(JSON.parse(localStorage.getItem(COLLAPSE_KEY) || "[]"));
 
 async function loadDashboardGroups(){
+  let me = null;
   try {
     // Session lookup runs on every page so the topbar quick-nav knows the role.
     const meRes = await fetch("/api/me");
     if (meRes.ok) {
-      const me = await meRes.json();
-      sidebarSession = { loggedIn: !!me.loggedIn, role: me.role || null };
+      me = await meRes.json();
+      sidebarSession = { loggedIn: !!me.loggedIn, role: me.role || null, username: me.username || null };
     }
     // Only logged-in users get dashboard pills, and the list is scoped to what
     // the server says they're allowed to see (admins: all; viewers: their grants;
@@ -432,10 +439,41 @@ async function loadDashboardGroups(){
       }
     }
   } catch(e) { /* silent — fall back to flat rendering */ }
+
+  // Render login/logout button in topbar
+  const authEl = document.getElementById("topbarAuthBtn");
+  if (authEl) {
+    if (!sidebarSession.loggedIn) {
+      authEl.innerHTML = `<a class="topbar-login" href="/login">Sign In</a>`;
+    } else {
+      // Show username + logout; admin button (if present) is already in the topbar
+      authEl.innerHTML = `<div class="topbar-user">
+        <span class="topbar-username">${sidebarSession.username || ""}</span>
+        <button class="topbar-logout" onclick="doLogout()">Sign Out</button>
+      </div>`;
+    }
+  }
+
+  // Re-render open detail panel to show/hide protected info now that auth is known
+  if (selectedId) {
+    const s = servers.find(x => x.id === selectedId);
+    if (s) {
+      const cached = cacheGet("detail-" + selectedId);
+      if (cached) renderDetail(s, cached.uptime, cached.heartbeat, cached.incidents);
+    }
+  }
+  // Re-render server list to show/hide host under each card
+  if (servers.length) renderSidebar();
+
   // Paint the topbar pills (empty for public visitors, scoped for viewers, full for admins)
   renderTopbarDashboards();
   // Sidebar grouping only applies on the master view
   if (!GROUP_SLUG && servers.length) renderSidebar();
+}
+
+async function doLogout(){
+  try { await fetch("/api/logout", { method:"POST" }); } catch(e) {}
+  window.location.reload();
 }
 
 // Paint the topbar dashboard quick-nav. One pill per accessible dashboard, plus
