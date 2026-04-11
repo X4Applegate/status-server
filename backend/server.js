@@ -2477,14 +2477,18 @@ app.use(async (req, res, next) => {
     const [rows] = await db.query("SELECT * FROM status_groups WHERE LOWER(custom_domain)=?", [host]);
     if (rows.length) {
       const g = rows[0];
-      // Serve group-specific privacy/terms pages on the custom domain
+      // Serve group-specific privacy/terms pages on the custom domain.
+      // Must render directly (not redirect) — redirecting to /privacy on the same custom
+      // domain would re-enter this middleware and loop infinitely.
       if (req.path === "/privacy") {
-        if (!g.privacy_text) return res.redirect("/privacy"); // fall back to global (won't loop since no custom domain match)
-        return res.render("group-legal", { g, type: "privacy", content: g.privacy_text });
+        return g.privacy_text
+          ? res.render("group-legal", { g, type: "privacy", content: g.privacy_text })
+          : res.render("privacy");
       }
       if (req.path === "/terms") {
-        if (!g.terms_text) return res.redirect("/terms");
-        return res.render("group-legal", { g, type: "terms", content: g.terms_text });
+        return g.terms_text
+          ? res.render("group-legal", { g, type: "terms", content: g.terms_text })
+          : res.render("terms");
       }
       return res.render("index", {
         adminHref:    null,
@@ -2546,8 +2550,9 @@ app.get("/dashboard/:slug/privacy", async (req, res) => {
     const [rows] = await db.query("SELECT * FROM status_groups WHERE slug=?", [req.params.slug]);
     if (!rows.length) return res.status(404).render("404", { slug: req.params.slug });
     const g = rows[0];
-    if (!g.privacy_text) return res.redirect("/privacy");
-    res.render("group-legal", { g, type: "privacy", content: g.privacy_text });
+    return g.privacy_text
+      ? res.render("group-legal", { g, type: "privacy", content: g.privacy_text })
+      : res.render("privacy");
   } catch(e) { res.status(500).send("Server error"); }
 });
 
@@ -2556,8 +2561,9 @@ app.get("/dashboard/:slug/terms", async (req, res) => {
     const [rows] = await db.query("SELECT * FROM status_groups WHERE slug=?", [req.params.slug]);
     if (!rows.length) return res.status(404).render("404", { slug: req.params.slug });
     const g = rows[0];
-    if (!g.terms_text) return res.redirect("/terms");
-    res.render("group-legal", { g, type: "terms", content: g.terms_text });
+    return g.terms_text
+      ? res.render("group-legal", { g, type: "terms", content: g.terms_text })
+      : res.render("terms");
   } catch(e) { res.status(500).send("Server error"); }
 });
 
