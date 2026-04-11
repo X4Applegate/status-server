@@ -1,0 +1,291 @@
+# Status Monitor
+
+A self-hosted, multi-tenant server status monitoring platform built with Node.js, Express, and MariaDB. Designed for operators who need separate branded dashboards for different teams or clients — each with their own login, branding, and server visibility — from a single deployment.
+
+---
+
+## Features
+
+### Multi-Tenant Dashboards
+- Each user or team gets their own **branded status page** at `/dashboard/<slug>`
+- Per-dashboard **logo, accent color, background color, logo size**, and subtitle
+- Viewers can only see servers assigned to their dashboard — other dashboards and their servers are completely invisible
+- Admins see a master view of all servers across all groups
+
+### Health Checks
+Every server can run one or more checks simultaneously:
+
+| Check Type | Description |
+|---|---|
+| **Ping (ICMP)** | ICMP echo with round-trip latency |
+| **TCP Port** | Raw TCP connection to any port |
+| **UDP Port** | UDP probe (e.g. WireGuard on 51820) |
+| **HTTP / HTTPS** | Full HTTP request with expected status code validation and optional SSL certificate tracking |
+| **DNS Record** | Resolves A, AAAA, CNAME, MX, TXT, or NS records with optional expected-value assertion |
+| **Omada Gateway** | Live WAN status, link speed, and uptime from TP-Link Omada SDN controllers via Open API v6 |
+
+### SSL Certificate Tracking
+- Automatic TLS certificate expiry detection on any HTTPS check
+- Expiry shown on server detail view with days remaining
+- Cert data available in the badge API
+- Forces a fresh TLS handshake every poll (no session caching) to guarantee cert data is always current
+
+### Status Badge API
+Embeddable SVG badges for README files, documentation, or internal dashboards — no third-party service required.
+
+```
+/api/badge/:serverId/status              Up / Down / Degraded
+/api/badge/:serverId/uptime?duration=24h Uptime % (24h, 7d, 30d)
+/api/badge/:serverId/ping               Latest response time
+/api/badge/:serverId/cert-exp           SSL certificate expiry
+```
+
+Badge URLs are shown directly in the server edit form for easy copying.
+
+**Example:**
+
+```markdown
+![Status](https://status.example.com/api/badge/my-server-123/status)
+![Uptime](https://status.example.com/api/badge/my-server-123/uptime?duration=30d)
+```
+
+### Role-Based Access Control
+
+| Capability | Admin | Viewer |
+|---|---|---|
+| View all servers (master dashboard) | Yes | No — own groups only |
+| Add / edit servers | Yes | Yes — own groups only |
+| Delete servers | Yes | No |
+| Manage dashboards (groups) | Yes | No |
+| Manage users | Yes | No |
+| Configure Omada controllers | Yes | No |
+| Configure webhooks | Yes | Yes — own groups only |
+| View system logs | Yes | No |
+
+### Webhook Alerts
+- Fire on status change: **down**, **recovery**, or both
+- Configurable per-group or per-server scope
+- Payload includes server name, status, host, timestamp, and check details
+- Built-in **test webhook** button in the admin panel
+
+### Omada SDN Integration
+- Connect one or more **TP-Link Omada Software Controllers** (Open API v6)
+- Monitor gateway WAN status, link speed, and uptime per site
+- Supports both on-premise controllers and Omada Cloud (MSP accounts)
+- Automatic OAuth token refresh
+
+### Real-Time Updates
+- Server-Sent Events (SSE) push live status changes to all connected clients
+- No polling from the browser — dashboard updates the moment a check changes
+- Heartbeat history bar shows the last 90 check results visually
+
+### Uptime History
+- 24-hour, 7-day, and 30-day uptime percentages per server
+- Response time chart (last 24h bucketed by hour)
+- Incident log with timestamp and duration
+
+### Admin Panel
+- Slide-in drawer with tabbed management: Servers, Groups, Omada, Users, Webhooks
+- Live system log stream with error/info filtering and badge counter
+- Per-server edit form accessible directly from the status dashboard via the **Edit Server** button
+- Deep-link edit: navigate to `/admin?edit=<serverId>` to open a server's edit form directly
+
+### Appearance
+- Dark and light theme toggle (persisted per browser)
+- Fully responsive — tested on mobile (iOS / Android) and desktop
+- Full-width heartbeat bars that stretch to fill the container
+- Clean sidebar with active-row accent, no visual clutter
+
+---
+
+## Stack
+
+- **Runtime:** Node.js 18+
+- **Framework:** Express 4
+- **Templates:** EJS
+- **Database:** MariaDB (or MySQL)
+- **Deployment:** Docker + Docker Compose
+- **Reverse proxy:** Caddy (recommended) or any HTTPS proxy
+- **No build step** — plain HTML/CSS/JS embedded in EJS templates
+
+---
+
+## Quick Start
+
+### 1. Clone
+
+```bash
+git clone https://github.com/X4Applegate/status-server.git
+cd status-server
+```
+
+### 2. Configure
+
+```bash
+cp docker-compose.example.yml docker-compose.yml
+```
+
+Edit `docker-compose.yml` and set:
+
+| Variable | Description |
+|---|---|
+| `DB_HOST` | MariaDB hostname or container name |
+| `DB_USER` | Database username |
+| `DB_PASSWORD` | Database password |
+| `DB_NAME` | Database name (created automatically on first run) |
+| `SESSION_SECRET` | Random string for session signing — change this |
+| `ADMIN_USERNAME` | Username for the initial admin account |
+| `ADMIN_PASSWORD` | Password for the initial admin account |
+
+### 3. Deploy
+
+```bash
+docker compose up -d --build
+```
+
+The server starts on port `3000`. On first boot it creates all database tables and the initial admin user automatically.
+
+### 4. Log in
+
+Navigate to `http://localhost:3000/login` (or your domain) and sign in with the credentials you set above.
+
+---
+
+## Directory Structure
+
+```
+status-server/
+├── backend/
+│   ├── server.js           Main application — routes, polling, SSE, DB logic
+│   ├── package.json
+│   ├── Dockerfile
+│   └── views/
+│       ├── index.ejs       Status dashboard (master view + per-group dashboards)
+│       ├── admin.ejs       Admin management panel
+│       ├── login.ejs       Login page
+│       ├── 404.ejs         Not found page
+│       └── partials/
+│           ├── head.ejs
+│           └── topbar-public.ejs
+├── docker-compose.example.yml
+├── docker-compose.yml      (not committed — contains your secrets)
+└── .gitignore
+```
+
+---
+
+## Multi-Tenant Setup
+
+### 1. Create a Dashboard (Group)
+
+In the Admin panel → **Groups** tab → **Add Group**:
+- Set a **slug** (URL-safe name, e.g. `acme-corp`)
+- Set accent color, background color, logo, and branding
+- This creates the public dashboard at `/dashboard/acme-corp`
+
+### 2. Assign Servers
+
+When adding or editing a server, pick one or more dashboards from the **Dashboards** picker. A server can appear on multiple dashboards.
+
+### 3. Create a Viewer User
+
+Admin panel → **Users** tab → **Add User**:
+- Role: **Viewer**
+- Assign them to one or more dashboard groups
+- When they log in, they land directly on their dashboard
+
+Viewers only see their assigned servers. They can add and edit servers within their groups but cannot delete servers, manage users, or view other groups.
+
+---
+
+## Badge API Reference
+
+All badge endpoints return `image/svg+xml`. Servers must be assigned to a dashboard to be publicly accessible (ungrouped servers require authentication).
+
+### Status Badge
+
+```
+GET /api/badge/:id/status
+```
+
+| Parameter | Default | Description |
+|---|---|---|
+| `upLabel` | `status` | Label text when up |
+| `downLabel` | `status` | Label text when down |
+| `upValue` | `up` | Value text when up |
+| `downValue` | server status | Value text when down |
+
+### Uptime Badge
+
+```
+GET /api/badge/:id/uptime?duration=24h
+```
+
+| Parameter | Default | Description |
+|---|---|---|
+| `duration` | `24h` | Time window: `24h`, `7d`, `30d` |
+| `label` | `uptime 24h` | Left-side label text |
+
+Color thresholds: green ≥ 99%, yellow ≥ 95%, red < 95%.
+
+### Response Time Badge
+
+```
+GET /api/badge/:id/ping
+```
+
+Color thresholds: green < 150ms, yellow < 400ms, red ≥ 400ms.
+
+### SSL Certificate Expiry Badge
+
+```
+GET /api/badge/:id/cert-exp
+```
+
+| Parameter | Default | Description |
+|---|---|---|
+| `warnDays` | `14` | Days remaining before yellow warning |
+| `downDays` | `7` | Days remaining before red alert |
+
+---
+
+## Environment Variables
+
+| Variable | Required | Default | Description |
+|---|---|---|---|
+| `PORT` | No | `3000` | HTTP port to listen on |
+| `DB_HOST` | Yes | — | MariaDB host |
+| `DB_PORT` | No | `3306` | MariaDB port |
+| `DB_USER` | Yes | — | Database username |
+| `DB_PASSWORD` | Yes | — | Database password |
+| `DB_NAME` | Yes | — | Database name |
+| `SESSION_SECRET` | Yes | — | Secret for session signing |
+| `ADMIN_USERNAME` | No | `admin` | Initial admin username (first run only) |
+| `ADMIN_PASSWORD` | No | — | Initial admin password (first run only) |
+| `CHECK_INTERVAL` | No | `30000` | Global poll interval in ms |
+
+---
+
+## Reverse Proxy (Caddy)
+
+```caddy
+status.example.com {
+    reverse_proxy status-server:3000
+}
+```
+
+For custom domains per dashboard, set the **Custom Domain** field on a group and add a corresponding Caddyfile block:
+
+```caddy
+status.acmecorp.com {
+    reverse_proxy status-server:3000
+}
+```
+
+The server detects the `Host` header and serves the correct branded dashboard automatically.
+
+---
+
+## License
+
+MIT — see [LICENSE](LICENSE).

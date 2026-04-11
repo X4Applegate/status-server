@@ -1,0 +1,40 @@
+services:
+  status-server:
+    build: ./backend
+    container_name: status-server
+    restart: unless-stopped
+    networks:
+      - mariadb_mariadb   # your existing MariaDB network
+      - caddy             # your reverse-proxy network
+    ports:
+      - "3000:3000"
+    environment:
+      - PORT=3000
+      - CHECK_INTERVAL=30000
+
+      # MariaDB connection — point at your existing MariaDB container or host
+      - DB_HOST=mariadb
+      - DB_PORT=3306
+      - DB_USER=statusadmin
+      - DB_PASSWORD=CHANGE_ME
+      - DB_NAME=status_monitor
+
+      # Session signing secret — generate a long random string
+      - SESSION_SECRET=CHANGE_ME_TO_A_RANDOM_STRING
+
+      # Initial admin account — only used on the very first boot
+      - ADMIN_USERNAME=admin
+      - ADMIN_PASSWORD=CHANGE_ME
+
+    # NET_RAW is required for ICMP ping checks
+    cap_add:
+      - NET_RAW
+
+    labels:
+      - "com.status-server.description=Self-hosted status monitor"
+
+networks:
+  mariadb_mariadb:
+    external: true
+  caddy:
+    external: true
