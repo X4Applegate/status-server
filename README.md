@@ -292,4 +292,4 @@ The server detects the `Host` header and serves the correct branded dashboard au
 
 ## License
 
-MIT — see [LICENSE](LICENSE).
+Proprietary — see [LICENSE](LICENSE). Source is available for personal and non-commercial reference use only. Modification, commercial use, distribution, and resale are prohibited without prior written permission from the author.
