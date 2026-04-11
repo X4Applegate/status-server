@@ -1,6 +1,6 @@
-# Status Monitor
+# Applegate Monitor
 
-A self-hosted, multi-tenant server status monitoring platform built with Node.js, Express, and MariaDB. Designed for operators who need separate branded dashboards for different teams or clients — each with their own login, branding, and server visibility — from a single deployment.
+A self-hosted, multi-tenant server and network status monitoring platform built with Node.js, Express, and MariaDB. Designed for operators who need separate branded dashboards for different teams or clients — each with their own login, branding, and server visibility — from a single deployment.
 
 ---
 
