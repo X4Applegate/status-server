@@ -1,0 +1,126 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="dark">
+<head>
+<meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Terms of Service — Status Monitor</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+<style>
+*,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+:root,[data-theme="dark"]{--bg:#0b0e14;--surface:#141920;--surface2:#1a2030;--border:rgba(255,255,255,0.08);--border-hi:rgba(255,255,255,0.14);--text:#94a3b8;--text-2:#64748b;--text-hi:#e2e8f0;--text-white:#f8fafc;--shadow:rgba(0,0,0,0.4);--ga:rgba(99,102,241,0.1)}
+[data-theme="light"]{--bg:#f4f6f9;--surface:#fff;--surface2:#f0f3f7;--border:rgba(0,0,0,0.08);--border-hi:rgba(0,0,0,0.14);--text:#5a6a7e;--text-2:#8fa0b5;--text-hi:#2d3a4a;--text-white:#1a2535;--shadow:rgba(0,0,0,0.1);--ga:rgba(99,102,241,0.06)}
+:root{--accent:#6366f1;--accent-soft:rgba(99,102,241,0.12);--sans:'Plus Jakarta Sans',sans-serif;--mono:'JetBrains Mono',monospace;--r:12px;--r-sm:8px}
+body{font-family:var(--sans);background:var(--bg);color:var(--text);min-height:100vh;-webkit-font-smoothing:antialiased}
+.bg-glow{position:fixed;inset:0;pointer-events:none;background:radial-gradient(ellipse 70% 60% at 50% 20%,var(--ga) 0%,transparent 70%)}
+.wrap{position:relative;z-index:1;max-width:760px;margin:0 auto;padding:60px 24px 80px}
+.back{display:inline-flex;align-items:center;gap:6px;font-size:13px;color:var(--text-2);text-decoration:none;margin-bottom:40px;transition:color .15s}
+.back:hover{color:var(--text-hi)}
+.back svg{flex-shrink:0}
+.brand{display:flex;align-items:center;gap:10px;margin-bottom:32px}
+.brand-icon{width:36px;height:36px;border-radius:9px;background:var(--accent-soft);border:1px solid rgba(99,102,241,.25);display:flex;align-items:center;justify-content:center;font-size:16px}
+.brand-name{font-size:18px;font-weight:700;color:var(--text-white);letter-spacing:-.02em}
+.brand-name span{color:var(--accent)}
+h1{font-size:28px;font-weight:700;color:var(--text-white);letter-spacing:-.02em;margin-bottom:8px}
+.meta{font-size:13px;color:var(--text-2);margin-bottom:48px}
+h2{font-size:16px;font-weight:600;color:var(--text-hi);margin:36px 0 12px;padding-bottom:8px;border-bottom:1px solid var(--border)}
+p{font-size:14px;line-height:1.75;color:var(--text);margin-bottom:12px}
+ul{font-size:14px;line-height:1.75;color:var(--text);margin:8px 0 12px 20px}
+ul li{margin-bottom:4px}
+a{color:var(--accent);text-decoration:none}
+a:hover{text-decoration:underline}
+.highlight{background:var(--surface);border:1px solid var(--border-hi);border-radius:var(--r);padding:16px 20px;margin:16px 0}
+.highlight p{margin:0;font-size:13px;color:var(--text-2)}
+.contact-box{background:var(--surface);border:1px solid var(--border-hi);border-radius:var(--r);padding:20px 24px;margin-top:40px}
+.contact-box p{margin:0;font-size:14px}
+.theme-toggle{position:fixed;top:16px;right:16px;width:34px;height:34px;border-radius:8px;border:1px solid var(--border-hi);background:var(--surface);color:var(--text-hi);cursor:pointer;display:flex;align-items:center;justify-content:center;font-size:15px;z-index:10}
+[data-theme="light"] .icon-moon{display:none}
+[data-theme="dark"] .icon-sun{display:none}
+</style>
+</head>
+<body>
+<div class="bg-glow"></div>
+<button class="theme-toggle" onclick="toggleTheme()">
+  <span class="icon-sun">☀️</span>
+  <span class="icon-moon">🌙</span>
+</button>
+
+<div class="wrap">
+  <a class="back" href="/">
+    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="15 18 9 12 15 6"/></svg>
+    Back to dashboard
+  </a>
+
+  <div class="brand">
+    <div class="brand-icon">📡</div>
+    <div class="brand-name">Status<span>Monitor</span></div>
+  </div>
+
+  <h1>Terms of Service</h1>
+  <p class="meta">Effective date: April 11, 2026 &nbsp;·&nbsp; Operated by Richard Applegate</p>
+
+  <p>These Terms of Service ("Terms") govern your access to and use of Status Monitor ("the Service"), operated by Richard Applegate ("we," "us," or "our"). By accessing or using the Service, you agree to be bound by these Terms. If you do not agree, do not use the Service.</p>
+
+  <h2>1. Use of the Service</h2>
+  <p>The Service provides server and infrastructure status monitoring, including real-time dashboards, uptime tracking, and alerting. Access to the Service is granted at our sole discretion and may be revoked at any time.</p>
+  <p>You agree to use the Service only for lawful purposes and in accordance with these Terms. You must not:</p>
+  <ul>
+    <li>Attempt to gain unauthorized access to any part of the Service or its underlying infrastructure</li>
+    <li>Use the Service to monitor systems you do not own or have explicit permission to monitor</li>
+    <li>Interfere with, disrupt, or degrade the performance or availability of the Service</li>
+    <li>Use automated tools to scrape, crawl, or extract data from the Service without written permission</li>
+    <li>Impersonate another user or misrepresent your identity or affiliation</li>
+  </ul>
+
+  <h2>2. Accounts and Access</h2>
+  <p>Registered accounts are issued by the administrator. You are responsible for maintaining the confidentiality of your login credentials and for all activity that occurs under your account. Notify us immediately at <a href="mailto:admin@richardapplegate.io">admin@richardapplegate.io</a> if you suspect unauthorized access to your account.</p>
+  <p>We reserve the right to suspend or terminate any account that violates these Terms or that we reasonably believe poses a risk to the security or integrity of the Service.</p>
+
+  <h2>3. Intellectual Property</h2>
+  <p>The Service, including all source code, design, and documentation, is the exclusive property of Richard Applegate and is protected under the applicable proprietary license. You may not copy, modify, distribute, sell, or create derivative works from the Service or any part of it without prior written permission.</p>
+  <p>Status data, server names, and configuration you add to the Service remain your property. By adding data to the Service, you grant us a limited license to store and display that data solely for the purpose of operating the Service for you.</p>
+
+  <h2>4. Availability and Uptime</h2>
+  <p>We make reasonable efforts to keep the Service available, but we do not guarantee any specific uptime or availability. The Service may be interrupted for maintenance, updates, or reasons outside our control. We are not liable for any loss or damage resulting from downtime or unavailability.</p>
+
+  <h2>5. Disclaimer of Warranties</h2>
+  <div class="highlight">
+    <p>THE SERVICE IS PROVIDED "AS IS" AND "AS AVAILABLE" WITHOUT WARRANTIES OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE, ACCURACY, OR NON-INFRINGEMENT. WE DO NOT WARRANT THAT THE SERVICE WILL BE ERROR-FREE, UNINTERRUPTED, OR FREE OF HARMFUL COMPONENTS.</p>
+  </div>
+  <p>Status check results are provided for informational purposes only. You should not rely solely on this Service for critical infrastructure decisions or incident response.</p>
+
+  <h2>6. Limitation of Liability</h2>
+  <div class="highlight">
+    <p>TO THE MAXIMUM EXTENT PERMITTED BY APPLICABLE LAW, RICHARD APPLEGATE SHALL NOT BE LIABLE FOR ANY INDIRECT, INCIDENTAL, SPECIAL, CONSEQUENTIAL, OR PUNITIVE DAMAGES — INCLUDING LOSS OF DATA, REVENUE, PROFITS, OR BUSINESS INTERRUPTION — ARISING OUT OF OR IN CONNECTION WITH YOUR USE OF OR INABILITY TO USE THE SERVICE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGES.</p>
+  </div>
+
+  <h2>7. Indemnification</h2>
+  <p>You agree to indemnify and hold harmless Richard Applegate from and against any claims, damages, losses, liabilities, costs, and expenses (including reasonable legal fees) arising out of your use of the Service, your violation of these Terms, or your violation of any rights of a third party.</p>
+
+  <h2>8. Privacy</h2>
+  <p>Your use of the Service is also governed by our <a href="/privacy">Privacy Policy</a>, which is incorporated into these Terms by reference.</p>
+
+  <h2>9. Modifications to the Terms</h2>
+  <p>We may update these Terms at any time. The effective date at the top of this page reflects the most recent revision. Your continued use of the Service after any changes constitutes your acceptance of the updated Terms.</p>
+
+  <h2>10. Governing Law</h2>
+  <p>These Terms are governed by and construed in accordance with the laws of the State of Washington, United States, without regard to its conflict of law provisions. Any disputes arising under these Terms shall be subject to the exclusive jurisdiction of the courts located in Washington State.</p>
+
+  <h2>11. Contact</h2>
+  <div class="contact-box">
+    <p>For questions about these Terms, contact:<br><br>
+    <strong>Richard Applegate</strong><br>
+    <a href="mailto:admin@richardapplegate.io">admin@richardapplegate.io</a></p>
+  </div>
+</div>
+
+<script>
+function toggleTheme(){
+  const t = document.documentElement.getAttribute("data-theme")==="dark"?"light":"dark";
+  document.documentElement.setAttribute("data-theme",t);
+  localStorage.setItem("sm-theme",t);
+}
+const saved = localStorage.getItem("sm-theme");
+if(saved) document.documentElement.setAttribute("data-theme",saved);
+</script>
+</body>
+</html>

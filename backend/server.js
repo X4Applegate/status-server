@@ -2413,7 +2413,9 @@ app.use(async (req, res, next) => {
 app.get("/",       requireAuthPage, (req, res) => res.render("index", { adminHref: "/admin", ...DEFAULT_BRANDING }));
 app.get("/status", requireAuthPage, (req, res) => res.render("index", { adminHref: "/", ...DEFAULT_BRANDING }));
 app.get("/admin",  requireAuthPage, (req, res) => res.render("admin"));
-app.get("/login",  (req, res) => res.render("login"));
+app.get("/login",   (req, res) => res.render("login"));
+app.get("/privacy", (req, res) => res.render("privacy"));
+app.get("/terms",   (req, res) => res.render("terms"));
 
 // Per-group dashboard
 app.get("/dashboard/:slug", async (req, res) => {
