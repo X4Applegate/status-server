@@ -18,11 +18,14 @@ Every server can run one or more checks simultaneously:
 | Check Type | Description |
 |---|---|
 | **Ping (ICMP)** | ICMP echo with round-trip latency |
-| **TCP Port** | Raw TCP connection to any port |
+| **TCP Port** | Raw TCP connection to any port with connection-time measurement |
 | **UDP Port** | UDP probe (e.g. WireGuard on 51820) |
-| **HTTP / HTTPS** | Full HTTP request with expected status code validation and optional SSL certificate tracking |
-| **DNS Record** | Resolves A, AAAA, CNAME, MX, TXT, or NS records with optional expected-value assertion |
-| **Omada Gateway** | Live WAN status, link speed, and uptime from TP-Link Omada SDN controllers via Open API v6 |
+| **HTTP / HTTPS** | Full HTTP request with status code validation, SSL certificate tracking, and response time |
+| **DNS Record** | Resolves A, AAAA, CNAME, MX, TXT, or NS records with optional expected-value assertion and query time |
+| **Omada Gateway** | Live WAN status, link speed, uptime, and WAN IP from TP-Link Omada SDN controllers via Open API v6 |
+| **Omada LTE** | Cellular/LTE backup WAN monitoring on Omada-managed gateways; optional direct probe IP ping |
+
+All check types record **response time** per poll. The server detail view shows a 24-hour response time chart (avg / min / max per hour).
 
 ### SSL Certificate Tracking
 - Automatic TLS certificate expiry detection on any HTTPS check
@@ -70,7 +73,8 @@ Badge URLs are shown directly in the server edit form for easy copying.
 
 ### Omada SDN Integration
 - Connect one or more **TP-Link Omada Software Controllers** (Open API v6)
-- Monitor gateway WAN status, link speed, and uptime per site
+- **Omada Gateway** check: live WAN status, link speed, uptime, and WAN IP per site
+- **Omada LTE** check: cellular/LTE backup WAN monitoring with graceful fallback when the controller API does not expose cellular details; optional direct probe IP for ICMP pinging the cellular WAN address
 - Supports both on-premise controllers and Omada Cloud (MSP accounts)
 - Automatic OAuth token refresh
 

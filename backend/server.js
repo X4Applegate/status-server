@@ -434,9 +434,10 @@ function tcpCheck(host, port, timeout=3000) {
   return new Promise(resolve => {
     const socket = new net.Socket();
     let done = false;
-    const finish = (ok, detail) => { if(done)return; done=true; socket.destroy(); resolve({type:"tcp",port,ok,detail}); };
+    const t0 = Date.now();
+    const finish = (ok, detail, ms=null) => { if(done)return; done=true; socket.destroy(); resolve({type:"tcp",port,ok,response_ms:ms,detail}); };
     socket.setTimeout(timeout);
-    socket.on("connect", () => finish(true,  `port ${port} open`));
+    socket.on("connect", () => finish(true,  `port ${port} open`, Date.now()-t0));
     socket.on("timeout", () => finish(false, `port ${port} timeout`));
     socket.on("error",   () => finish(false, `port ${port} refused`));
     socket.connect(port, host);
@@ -471,9 +472,11 @@ function httpCheck(url, expectedStatus=200, timeout=5000, showCert=true) {
     // (required for getPeerCertificate() to return actual cert data every time).
     const reqOpts = { timeout };
     if (isHttps) reqOpts.agent = httpsNoCacheAgent;
+    const t0 = Date.now();
     const req = lib.get(parsedUrl.toString(), reqOpts, res => {
+      const response_ms = Date.now() - t0;
       const ok = res.statusCode === expectedStatus;
-      const result = { type:"http", url, ok, detail:`HTTP ${res.statusCode}` };
+      const result = { type:"http", url, ok, response_ms, detail:`HTTP ${res.statusCode}` };
       // Attach TLS certificate info (for HTTPS only, and only when the check has cert
       // tracking enabled). Used by the detail view to show "SSL expires in N days" and
       // warn when <14 days.
@@ -556,9 +559,11 @@ function dnsCheck(hostname, recordType = "A", expected = "", timeout = 5000) {
   if (!resolver) return Promise.resolve({ type:"dns", ok:false, detail:`Unknown record type: ${type}` });
   if (!hostname)  return Promise.resolve({ type:"dns", ok:false, detail:"Missing hostname" });
 
+  const t0 = Date.now();
   return Promise.race([
     resolver(String(hostname).trim())
       .then(values => {
+        const response_ms = Date.now() - t0;
         if (!values || !values.length) {
           return { type:"dns", ok:false, detail:`${type} ${hostname}: no records` };
         }
@@ -570,7 +575,7 @@ function dnsCheck(hostname, recordType = "A", expected = "", timeout = 5000) {
             return { type:"dns", ok:false, detail:`${type} ${hostname} = ${values.join(", ")} (wanted ${exp})` };
           }
         }
-        return { type:"dns", ok:true, detail:`${type} ${hostname} → ${values.slice(0, 3).join(", ")}${values.length>3?"…":""}` };
+        return { type:"dns", ok:true, response_ms, detail:`${type} ${hostname} → ${values.slice(0, 3).join(", ")}${values.length>3?"…":""}` };
       })
       .catch(err => ({ type:"dns", ok:false, detail:`${type} ${hostname}: ${err.code || err.message}` })),
     new Promise(resolve => setTimeout(
@@ -855,44 +860,60 @@ async function omadaGatewayCheck(controllerId, siteId, customerId, siteName, cus
   }
 }
 
-// Fetch the rich gateway object from /sites/{siteId}/gateways — includes WAN port statuses,
-// cellular info, signal strength, etc. Falls back across MSP / standard mode.
 const _lteShapeLogged = new Set();
-async function omadaFetchGatewayDetail(ctrl, siteId, customerId, siteName, customerName) {
-  const path = `/sites/${siteId}/gateways?pageSize=10&page=1`;
-  try {
-    if (ctrl.mode === "msp") {
-      const r = await omadaMspApiGet(ctrl, path);
-      return Array.isArray(r) ? r : (r.data || [r]);
-    }
-    const r = await omadaApiGet(ctrl, path);
-    return Array.isArray(r) ? r : (r.data || [r]);
-  } catch(e) {
-    // If the dedicated gateways endpoint doesn't exist, fall back to devices list
-    const devices = await omadaListDevices(ctrl, siteId, customerId, siteName, customerName);
-    return devices.filter(d => {
-      const t = (d.type || d.deviceType || "").toString().toLowerCase();
-      const m = (d.model || d.modelName || "").toString().toUpperCase();
-      return t==="gateway" || t.includes("gateway") || /^ER\d/.test(m) || d.type===0;
-    });
-  }
-}
-
-async function omadaLteCheck(controllerId, siteId, customerId, siteName, customerName) {
+async function omadaLteCheck(controllerId, siteId, customerId, siteName, customerName, lteProbeIp) {
   try {
     const [rows] = await db.query("SELECT * FROM status_omada_controllers WHERE id=?", [controllerId]);
     if (!rows.length) return { type:"omada_lte", ok:false, detail:"controller not found" };
     const ctrl = rows[0];
 
-    const gateways = await omadaFetchGatewayDetail(ctrl, siteId, customerId, siteName, customerName);
-    const gw = gateways[0];
-    if (!gw) return { type:"omada_lte", ok:false, detail:"no gateway found" };
+    // Step 1: find the gateway device using the same robust logic as omadaGatewayCheck
+    const devices = await omadaListDevices(ctrl, siteId, customerId, siteName, customerName);
+    const isGw = (d) => {
+      const t  = (d.type || d.deviceType || "").toString().toLowerCase();
+      const m  = (d.model || d.modelName || d.product || "").toString().toUpperCase();
+      const dn = (d.deviceName || "").toString().toLowerCase();
+      return t==="gateway" || t.includes("gateway") || t.includes("router")
+          || dn.includes("gateway") || /^ER\d/.test(m) || d.type===0;
+    };
+    const gwDevice = devices.find(isGw);
+    if (!gwDevice) return { type:"omada_lte", ok:false, detail:"no gateway found in site" };
 
-    // Log full gateway shape once per controller+site to learn field names
-    const _key = `lte:${controllerId}:${siteId}`;
-    if (!_lteShapeLogged.has(_key)) {
-      _lteShapeLogged.add(_key);
-      addLog({ level:"info", server:"omada", message:`LTE gateway shape: ${JSON.stringify(gw)}` });
+    // Step 2: try multiple endpoint + auth-mode combos to find one with cellular/WAN data.
+    const mac = gwDevice.mac;
+    let gw = gwDevice; // fallback: use device-list object
+    const probes = [
+      // path                                         authFn
+      [`/sites/${siteId}/gateways/${mac}`,            omadaMspApiGet],
+      [`/sites/${siteId}/gateways/${mac}`,            omadaApiGet],
+      [`/sites/${siteId}/gateways?pageSize=10&page=1`,omadaMspApiGet],
+      [`/sites/${siteId}/gateways?pageSize=10&page=1`,omadaApiGet],
+      [`/sites/${siteId}/devices/${mac}`,             omadaMspApiGet],
+      [`/sites/${siteId}/devices/${mac}`,             omadaApiGet],
+      [`/sites/${siteId}/gateways/${mac}/portStats`,  omadaMspApiGet],
+      [`/sites/${siteId}/gateways/${mac}/portStats`,  omadaApiGet],
+    ];
+    const lteKey = `lte:${controllerId}:${siteId}`;
+    const logOnce = !_lteShapeLogged.has(lteKey);
+    for (const [path, fn] of probes) {
+      try {
+        const r = await fn(ctrl, path);
+        const obj = Array.isArray(r) ? (r.find(g => g.mac === mac) || r[0]) : (r.data ? (Array.isArray(r.data) ? (r.data.find(g=>g.mac===mac)||r.data[0]) : r.data) : r);
+        if (logOnce) addLog({ level:"info", server:"omada", message:`LTE probe ${path}: keys=${obj?Object.keys(obj).join(","):"null"}` });
+        if (obj && (obj.wanPortStatus || obj.wanPorts || obj.portStatus || obj.cellularInfo || obj.lteInfo || obj.fourGInfo)) {
+          gw = obj;
+          break;
+        }
+        if (obj && obj.mac === mac) gw = obj;
+      } catch(e) {
+        if (logOnce) addLog({ level:"info", server:"omada", message:`LTE probe ${path}: ${e.message}` });
+      }
+    }
+
+    // Log final gateway object shape once
+    if (logOnce) {
+      _lteShapeLogged.add(lteKey);
+      addLog({ level:"info", server:"omada", message:`LTE final shape (${gw.model||gw.mac}): ${JSON.stringify(gw)}` });
     }
 
     // Hunt for a cellular/4G WAN port across multiple possible field names
@@ -911,8 +932,17 @@ async function omadaLteCheck(controllerId, siteId, customerId, siteName, custome
     const topLteField = gw.cellularInfo || gw.lteInfo || gw.fourGInfo || null;
 
     if (!cell && !topLteField) {
-      // No cellular data found — model might not have LTE or firmware doesn't expose it yet
-      return { type:"omada_lte", ok:false, detail:"no cellular WAN detected (check gateway model)" };
+      // API doesn't expose cellular data on this controller firmware.
+      // If a probe_ip is configured on the check, ping it directly as a proxy for LTE health.
+      // Otherwise fall back to: gateway is up → LTE hardware is powered on → report ok.
+      if (lteProbeIp) {
+        const p = await pingCheck(lteProbeIp);
+        return { type:"omada_lte", ok:p.ok, response_ms:p.response_ms,
+          detail: p.ok ? `LTE reachable · ${lteProbeIp}${p.response_ms!=null?" · "+p.response_ms+"ms":""}` : `LTE unreachable · ${lteProbeIp}` };
+      }
+      const gwUp = gwDevice.status === 1 || gwDevice.status === 11;
+      return { type:"omada_lte", ok:gwUp,
+        detail: gwUp ? "LTE backup ready · gateway up (cellular API unavailable)" : "gateway down" };
     }
 
     const src = cell || topLteField;
@@ -948,7 +978,7 @@ async function runChecks(def) {
       if (c.type==="udp")           return await udpCheck(def.host, c.port, c.timeout);
       if (c.type==="dns")           return await dnsCheck(c.hostname || def.host, c.record_type, c.expected, c.timeout);
       if (c.type==="omada_gateway") return await omadaGatewayCheck(c.controller_id, c.site_id, c.customer_id, c.site_name, c.customer_name, def.host);
-      if (c.type==="omada_lte")     return await omadaLteCheck(c.controller_id, c.site_id, c.customer_id, c.site_name, c.customer_name);
+      if (c.type==="omada_lte")     return await omadaLteCheck(c.controller_id, c.site_id, c.customer_id, c.site_name, c.customer_name, c.probe_ip || null);
       return { type:c.type, ok:false, detail:"unknown check type" };
     } catch(e) {
       return { type:c.type, ok:false, detail:`check error: ${e.message}` };

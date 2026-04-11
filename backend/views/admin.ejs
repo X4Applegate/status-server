@@ -1640,7 +1640,11 @@ function renderCrows(){
       const siteSelect = ck.controller_id
         ? `<select class="fselect" id="siteSel${i}"><option value="">${ck.site_id ? "Loading…" : "— Pick site —"}</option></select>`
         : "";
-      detail = ctrlSelect + siteSelect;
+      // LTE-only: optional probe IP for controllers whose API doesn't expose cellular status
+      const probeIpField = ck.type === "omada_lte"
+        ? `<input class="finput" placeholder="LTE probe IP (optional)" title="If your controller doesn't expose cellular status via API, enter the LTE WAN IP to ping directly" value="${ck.probe_ip||""}" oninput="upCk(${i},'probe_ip',this.value)" style="max-width:160px">`
+        : "";
+      detail = ctrlSelect + siteSelect + probeIpField;
     }
     return "<div class=\"crow\">"
       + "<select class=\"fselect\" onchange=\"changeCT(" + i + ",this.value)\">"
@@ -1733,7 +1737,19 @@ async function populateOmadaSitePicker(i){
 
 function addCrow()    { currentChecks.push({type:"ping"}); renderCrows(); }
 function rmCk(i)      { currentChecks.splice(i,1); renderCrows(); }
-function changeCT(i,t){ currentChecks[i] = {type:t}; renderCrows(); }
+function changeCT(i,t){
+  // When switching to omada_lte, seed controller+site from an existing omada_gateway check
+  // on the same server so the user doesn't have to re-pick from scratch.
+  if (t === "omada_lte" || t === "omada_gateway") {
+    const donor = currentChecks.find((c,j) => j !== i && (c.type === "omada_gateway" || c.type === "omada_lte") && c.controller_id);
+    if (donor) {
+      currentChecks[i] = { type:t, controller_id:donor.controller_id, site_id:donor.site_id, site_name:donor.site_name, customer_id:donor.customer_id, customer_name:donor.customer_name };
+      renderCrows();
+      return;
+    }
+  }
+  currentChecks[i] = {type:t}; renderCrows();
+}
 function upCk(i,k,v)  { currentChecks[i][k] = v; }
 
 async function submitForm(){
