@@ -10,6 +10,8 @@ const bcrypt       = require("bcryptjs");
 const session      = require("express-session");
 
 const app  = express();
+const { version: APP_VERSION } = require("./package.json");
+const GITHUB_REPO   = "X4Applegate/status-server";
 const PORT          = process.env.PORT           || 3000;
 const CONFIG_PATH   = process.env.CONFIG_PATH    || "/config/servers.json";
 const CHECK_INTERVAL= parseInt(process.env.CHECK_INTERVAL || "30000");
@@ -1307,6 +1309,38 @@ app.post("/api/logout", (req, res) => {
   req.session.destroy(() => {
     addLog({ level:"info", server:"auth", message:`Logout: ${user}` });
     res.json({ ok:true });
+  });
+});
+
+// -- Version check -------------------------------------------------------------
+let _versionCache = { latest: null, checkedAt: 0 };
+
+async function fetchLatestVersion() {
+  const ONE_HOUR = 3600000;
+  if (Date.now() - _versionCache.checkedAt < ONE_HOUR && _versionCache.latest) {
+    return _versionCache.latest;
+  }
+  try {
+    const fetch = require("node-fetch");
+    const res = await fetch(`https://api.github.com/repos/${GITHUB_REPO}/releases/latest`, {
+      headers: { "User-Agent": "applegate-monitor-version-check" },
+      timeout: 8000
+    });
+    if (!res.ok) return _versionCache.latest;
+    const data = await res.json();
+    const tag = (data.tag_name || "").replace(/^v/, "");
+    if (tag) { _versionCache.latest = tag; _versionCache.checkedAt = Date.now(); }
+  } catch(e) { /* network unavailable — keep cached value */ }
+  return _versionCache.latest;
+}
+
+app.get("/api/version", requireAdmin, async (req, res) => {
+  const latest = await fetchLatestVersion();
+  res.json({
+    current: APP_VERSION,
+    latest:  latest || APP_VERSION,
+    update_available: latest ? latest !== APP_VERSION : false,
+    release_url: `https://github.com/${GITHUB_REPO}/releases/latest`
   });
 });
 

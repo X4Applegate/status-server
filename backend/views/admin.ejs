@@ -718,7 +718,7 @@ body{font-family:var(--sans);background:var(--bg);color:var(--text);min-height:1
   <div class="topbar">
     <div class="brand">
       <div class="brand-icon"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="color:var(--blue)"><polygon points="12 2 22 8.5 22 15.5 12 22 2 15.5 2 8.5"/></svg></div>
-      <div class="brand-name">Status<span>.</span>Monitor</div>
+      <div class="brand-name">Applegate<span>Monitor</span></div>
       <span style="font-family:var(--mono);font-size:11px;color:var(--text-2);margin-left:12px" id="clock">00:00:00</span>
     </div>
     <!-- Dashboard quick-nav: one button per dashboard the logged-in user has access to -->
@@ -735,6 +735,18 @@ body{font-family:var(--sans);background:var(--bg);color:var(--text);min-height:1
       <button class="btn btn-logs" id="logMenuBtn" onclick="openLogs()" style="display:none"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/></svg>Logs<span class="log-badge" id="logBadge">0</span></button>
       <button class="btn btn-icon" id="rfBtn" onclick="triggerRefresh()" style="display:none" title="Refresh"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 12a9 9 0 0 1 9-9 9.75 9.75 0 0 1 6.74 2.74L21 8"/><path d="M21 3v5h-5"/><path d="M21 12a9 9 0 0 1-9 9 9.75 9.75 0 0 1-6.74-2.74L3 16"/><path d="M8 16H3v5"/></svg></button>
       <button class="btn btn-danger" id="logoutBtn" onclick="doLogout()" style="display:none"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/></svg>Logout</button>
+    </div>
+  </div>
+
+  <!-- Update banner — hidden until version check confirms update available -->
+  <div id="updateBanner" style="display:none;align-items:center;justify-content:space-between;gap:12px;padding:10px 24px;background:linear-gradient(90deg,rgba(99,102,241,0.12),rgba(99,102,241,0.06));border-bottom:1px solid rgba(99,102,241,0.25);font-size:13px;color:var(--text-hi)">
+    <div style="display:flex;align-items:center;gap:10px">
+      <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="#6366f1" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>
+      <span id="updateBannerText">A new version of Applegate Monitor is available.</span>
+    </div>
+    <div style="display:flex;align-items:center;gap:8px;flex-shrink:0">
+      <a id="updateBannerLink" href="https://github.com/X4Applegate/status-server/releases/latest" target="_blank" style="padding:5px 12px;background:var(--accent);color:#fff;border-radius:6px;font-size:12px;font-weight:600;text-decoration:none;transition:opacity .15s" onmouseover="this.style.opacity='.85'" onmouseout="this.style.opacity='1'">Download Update</a>
+      <button onclick="document.getElementById('updateBanner').style.display='none'" style="background:none;border:none;color:var(--text-2);cursor:pointer;font-size:16px;padding:2px 4px;line-height:1" title="Dismiss">✕</button>
     </div>
   </div>
 
@@ -850,6 +862,21 @@ function isViewer(){ return sessionRole === "viewer"; }
       const newGroup = new URLSearchParams(window.location.search).get("newGroup");
       if (newGroup) {
         setTimeout(() => autoOpenNewGroup(), 0);
+      }
+      // Version update check (admin only — non-blocking)
+      if (isAdmin()) {
+        fetch("/api/version").then(r => r.json()).then(v => {
+          if (v.update_available) {
+            const banner = document.getElementById("updateBanner");
+            const text   = document.getElementById("updateBannerText");
+            const link   = document.getElementById("updateBannerLink");
+            if (banner) {
+              text.textContent = `Applegate Monitor v${v.latest} is available — you're running v${v.current}.`;
+              link.href = v.release_url;
+              banner.style.display = "flex";
+            }
+          }
+        }).catch(() => {});
       }
     } else {
       document.getElementById("loginBtn").style.display = "";
