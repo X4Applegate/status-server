@@ -416,6 +416,20 @@ function formatUptime(seconds) {
   return `${m}m`;
 }
 
+// Parse Omada uptime — can be a number (seconds or ms) or a string like "11day(s) 21h 57m 13s"
+function parseOmadaUptime(val) {
+  if (val == null) return null;
+  if (typeof val === "number") return val > 1e9 ? Math.round(val / 1000) : val;
+  if (typeof val === "string") {
+    const d = parseInt(val.match(/(\d+)\s*day/i)?.[1] || 0);
+    const h = parseInt(val.match(/(\d+)h/i)?.[1] || 0);
+    const m = parseInt(val.match(/(\d+)m/i)?.[1] || 0);
+    const total = d * 86400 + h * 3600 + m * 60;
+    return total > 0 ? total : null;
+  }
+  return null;
+}
+
 function tcpCheck(host, port, timeout=3000) {
   return new Promise(resolve => {
     const socket = new net.Socket();
@@ -814,20 +828,23 @@ async function omadaGatewayCheck(controllerId, siteId, customerId, siteName, cus
     const ok = gateway.status === 1 || gateway.status === 11;
     const name  = gateway.name || gateway.deviceName || "Gateway";
     const model = gateway.model || gateway.modelName || gateway.product || null;
-    const uptimeSec = gateway.uptimeLong || gateway.uptime || null;
+    const uptimeSec = parseOmadaUptime(gateway.uptimeLong ?? gateway.uptime ?? null);
     const uptimeStr = uptimeSec ? ` · up ${formatUptime(uptimeSec)}` : "";
     const modelStr  = model ? `${model} ` : "";
+    const wanIp     = gateway.publicIp || null;
+    const wanStr    = wanIp ? ` · WAN ${wanIp}` : "";
 
     const detail = ok
-      ? `${modelStr}connected${uptimeStr}`
+      ? `${modelStr}connected${uptimeStr}${wanStr}`
       : `${name} offline (status ${gateway.status})`;
 
-    // Ping the server's host IP for response-time history on the chart.
-    // This runs after the API check so a ping failure doesn't affect WAN status.
+    // Ping the gateway's LAN IP (from the Omada API device object) for response-time history.
+    // Falls back to def.host if the API didn't return an IP. Failure is non-fatal.
+    const pingTarget = gateway.ip || host;
     let response_ms = null;
-    if (ok && host) {
+    if (ok && pingTarget && pingTarget !== "omada-managed") {
       try {
-        const p = await pingCheck(host);
+        const p = await pingCheck(pingTarget);
         if (p.ok && p.response_ms != null) response_ms = p.response_ms;
       } catch(e) { /* ping failure is non-fatal */ }
     }
