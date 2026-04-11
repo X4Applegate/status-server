@@ -1,0 +1,17 @@
+{
+  "name": "status-server-backend",
+  "version": "2.0.0",
+  "description": "Self-hosted server status monitor",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js"
+  },
+  "dependencies": {
+    "express": "^4.18.2",
+    "ejs": "^3.1.10",
+    "mysql2": "^3.6.0",
+    "bcryptjs": "^2.4.3",
+    "express-session": "^1.17.3",
+    "node-fetch": "^2.7.0"
+  }
+}

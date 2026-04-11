@@ -1,0 +1,38 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<%- include('partials/head', { title: 'Dashboard not found — Status' }) %>
+<style>
+*,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+:root{
+  --bg:#060c18;--surface:#0d1829;--surface2:#111f35;
+  --border:rgba(30,100,200,0.15);--border-hi:rgba(30,100,200,0.28);
+  --text:#7a9cc0;--text-2:#3d6080;--text-hi:#c8dff0;--text-white:#e8f4ff;
+  --blue:#2a7fff;--blue-soft:rgba(42,127,255,0.12);
+  --sans:'Inter',sans-serif;--mono:'JetBrains Mono',monospace;
+}
+body{font-family:var(--sans);background:var(--bg);color:var(--text);min-height:100vh;display:flex;align-items:center;justify-content:center;padding:24px;-webkit-font-smoothing:antialiased}
+body::before{content:'';position:fixed;inset:0;pointer-events:none;background:radial-gradient(ellipse 60% 50% at 50% 30%,rgba(42,127,255,0.06) 0%,transparent 70%);z-index:0}
+.card{position:relative;z-index:1;max-width:460px;width:100%;background:var(--surface);border:1px solid var(--border-hi);border-radius:14px;padding:40px 32px;text-align:center;box-shadow:0 20px 60px rgba(0,0,0,0.5)}
+.icon{width:60px;height:60px;border-radius:14px;background:var(--blue-soft);border:1px solid rgba(42,127,255,0.3);display:flex;align-items:center;justify-content:center;margin:0 auto 20px;color:var(--blue)}
+.code{font-family:var(--mono);font-size:11px;font-weight:500;letter-spacing:.1em;text-transform:uppercase;color:var(--text-2);margin-bottom:6px}
+.title{font-size:22px;font-weight:700;color:var(--text-white);letter-spacing:-.02em;margin-bottom:10px}
+.msg{font-size:13px;color:var(--text);line-height:1.6;margin-bottom:6px}
+.slug{font-family:var(--mono);font-size:12px;color:var(--blue);background:var(--surface2);border:1px solid var(--border);padding:3px 9px;border-radius:6px;display:inline-block;margin:8px 0 24px;word-break:break-all}
+.btn{display:inline-block;padding:10px 22px;background:var(--blue);color:#fff;text-decoration:none;border-radius:8px;font-size:13px;font-weight:600;transition:background .15s}
+.btn:hover{background:#1a6fef}
+</style>
+</head>
+<body>
+  <div class="card">
+    <div class="icon">
+      <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>
+    </div>
+    <div class="code">Error 404</div>
+    <div class="title">Dashboard not found</div>
+    <div class="msg">No dashboard exists with the slug</div>
+    <div class="slug">/dashboard/<%= slug %></div>
+    <a class="btn" href="/">← Back to status page</a>
+  </div>
+</body>
+</html>

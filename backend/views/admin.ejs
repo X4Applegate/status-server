@@ -1,0 +1,2592 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="dark">
+<head>
+<%- include('partials/head', { title: 'Status Monitor — Admin' }) %>
+<style>
+*,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+
+:root,[data-theme="dark"]{
+  --bg:#060c18;--bg2:#0a1220;--surface:#0d1829;--surface2:#111f35;--surface3:#182440;
+  --border:rgba(30,100,200,0.15);--border-hi:rgba(30,100,200,0.28);
+  --text:#7a9cc0;--text-2:#3d6080;--text-hi:#c8dff0;--text-white:#e8f4ff;
+  --shadow:rgba(0,0,20,0.5);--input-bg:#060c18;
+  --glow-a:rgba(42,127,255,0.07);--glow-o:rgba(255,140,42,0.04);
+}
+[data-theme="light"]{
+  --bg:#f0f5ff;--bg2:#e8f0fa;--surface:#fff;--surface2:#eef3fb;--surface3:#dde8f5;
+  --border:rgba(42,100,200,0.12);--border-hi:rgba(42,100,200,0.22);
+  --text:#4a6a90;--text-2:#8aaac8;--text-hi:#1a3a5c;--text-white:#0a1e3a;
+  --shadow:rgba(0,20,80,0.08);--input-bg:#f8faff;
+  --glow-a:rgba(42,127,255,0.05);--glow-o:rgba(255,140,42,0.03);
+}
+:root{
+  --blue:#2a7fff;--blue-soft:rgba(42,127,255,0.12);--blue-glow:rgba(42,127,255,0.25);
+  --orange:#ff8c2a;--orange-soft:rgba(255,140,42,0.12);--orange-glow:rgba(255,140,42,0.3);
+  --green:#10e88a;--green-soft:rgba(16,232,138,0.10);
+  --red:#ff3d5a;--red-soft:rgba(255,61,90,0.10);
+  --warn:#ffb830;--warn-soft:rgba(255,184,48,0.10);
+  --sans:'Inter',sans-serif;--mono:'JetBrains Mono',monospace;--r:10px;--r-sm:7px;
+}
+
+/* smooth theme transition */
+*,*::before,*::after{transition:background-color .22s,border-color .22s,color .18s,box-shadow .22s}
+.orb,.live-dot,.spark,svg *,.srv-dot{transition:none!important}
+
+body{font-family:var(--sans);background:var(--bg);color:var(--text);min-height:100vh;font-size:14px;line-height:1.5;-webkit-font-smoothing:antialiased;overflow-x:hidden}
+
+/* bg glow */
+.bg-glow{position:fixed;inset:0;pointer-events:none;z-index:0;
+  background:radial-gradient(ellipse 70% 50% at 15% 50%,var(--glow-a) 0%,transparent 70%),
+             radial-gradient(ellipse 40% 40% at 85% 20%,var(--glow-o) 0%,transparent 60%)}
+
+#app{position:relative;z-index:1;display:flex;flex-direction:column;min-height:100vh}
+
+/* ── TOP BAR ── */
+.topbar{
+  display:flex;align-items:center;justify-content:space-between;
+  padding:0 24px;height:54px;
+  background:var(--bg2);border-bottom:1px solid var(--border);
+  flex-shrink:0;position:sticky;top:0;z-index:100;
+}
+.brand{display:flex;align-items:center;gap:10px}
+.brand-icon{width:28px;height:28px;border-radius:7px;background:var(--blue-soft);border:1px solid rgba(42,127,255,0.25);display:flex;align-items:center;justify-content:center;font-size:13px}
+.brand-name{font-size:15px;font-weight:700;color:var(--text-white);letter-spacing:-.02em}
+.brand-name span{color:var(--blue)}
+.topbar-right{display:flex;align-items:center;gap:8px}
+.topbar-dashboards{display:flex;align-items:center;gap:6px;flex:1;flex-wrap:wrap;margin:0 16px;min-width:0;overflow:hidden}
+.dash-nav{display:inline-flex;align-items:center;gap:6px;padding:5px 11px;border-radius:var(--r-sm);border:1px solid var(--border-hi);background:var(--surface);color:var(--text-hi);cursor:pointer;font-family:var(--sans);font-size:11px;font-weight:500;text-decoration:none;white-space:nowrap;transition:background .15s,border-color .15s,color .15s}
+.dash-nav:hover{background:var(--blue-soft);border-color:var(--blue);color:var(--blue)}
+.dash-nav-dot{width:7px;height:7px;border-radius:50%;flex-shrink:0}
+/* Admin master-view pill — orange accent so it's visually distinct from the dashboard pills */
+.dash-nav-admin{border-color:var(--border-hi);color:var(--text-hi);background:transparent}
+.dash-nav-admin:hover{border-color:var(--orange);background:var(--orange-soft);color:var(--orange)}
+
+/* ── BUTTONS ── */
+.btn{display:inline-flex;align-items:center;gap:6px;padding:6px 13px;font-family:var(--sans);font-size:12px;font-weight:500;border-radius:var(--r-sm);border:1px solid var(--border-hi);background:var(--surface);color:var(--text-hi);cursor:pointer;white-space:nowrap}
+.btn:hover{background:var(--surface2);border-color:var(--blue);color:var(--text-white)}
+.btn svg{width:13px;height:13px;flex-shrink:0;transition:none!important}
+.btn.spinning svg{animation:spin .8s linear infinite}
+@keyframes spin{to{transform:rotate(360deg)}}
+.btn-primary{background:var(--blue)!important;border-color:rgba(42,127,255,.5)!important;color:#fff!important}
+.btn-primary:hover{background:#1a6fef!important}
+.btn-danger{color:var(--red)!important;background:var(--red-soft)!important;border-color:rgba(255,61,90,.3)!important}
+.btn-danger:hover{background:rgba(255,61,90,.2)!important}
+.btn-icon{width:32px;height:32px;padding:0;justify-content:center;border-radius:var(--r-sm)}
+.btn-logs{position:relative}
+.log-badge{position:absolute;top:-5px;right:-5px;background:var(--red);color:#fff;font-size:9px;font-weight:700;min-width:15px;height:15px;border-radius:8px;display:flex;align-items:center;justify-content:center;padding:0 3px;border:2px solid var(--bg);opacity:0}
+.log-badge.show{opacity:1}
+.user-badge{font-family:var(--mono);font-size:11px;color:var(--text-2);background:var(--surface);border:1px solid var(--border);border-radius:var(--r-sm);padding:4px 10px}
+[data-theme="light"] .icon-moon{display:none}
+[data-theme="dark"]  .icon-sun{display:none}
+
+/* ── MAIN LAYOUT ── */
+.main-layout{display:flex;flex:1;overflow:hidden;height:calc(100vh - 54px)}
+
+/* ── SIDEBAR ── */
+.sidebar{width:260px;flex-shrink:0;background:var(--bg2);border-right:1px solid var(--border);display:flex;flex-direction:column;overflow:hidden}
+.sidebar-header{padding:14px 18px 10px;border-bottom:1px solid var(--border);flex-shrink:0}
+.sidebar-section-title{font-size:10px;font-weight:600;letter-spacing:.08em;text-transform:uppercase;color:var(--text-2)}
+.sidebar-body{flex:1;overflow-y:auto;padding:6px 0}
+.sidebar-body::-webkit-scrollbar{width:3px}
+.sidebar-body::-webkit-scrollbar-thumb{background:var(--surface3);border-radius:2px}
+
+/* Server rows in sidebar */
+.srv-row{display:flex;align-items:center;gap:10px;padding:9px 18px;cursor:pointer;border-left:3px solid transparent;transition:background .12s,border-color .12s}
+.srv-row:hover{background:var(--surface);border-left-color:var(--border-hi)}
+.srv-row.active{background:var(--surface);border-left-color:var(--blue)}
+.srv-dot{width:7px;height:7px;border-radius:50%;flex-shrink:0}
+.srv-dot.up      {background:var(--green);box-shadow:0 0 5px rgba(16,232,138,.5)}
+.srv-dot.down    {background:var(--red);animation:blink 1.2s ease-in-out infinite}
+.srv-dot.degraded{background:var(--orange)}
+.srv-dot.pending {background:var(--text-2)}
+@keyframes blink{0%,100%{opacity:1}50%{opacity:.3}}
+.srv-row-info{flex:1;min-width:0}
+.srv-row-name{font-size:13px;font-weight:500;color:var(--text-hi);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.srv-row.active .srv-row-name{color:var(--text-white)}
+.srv-row-host{font-family:var(--mono);font-size:10px;color:var(--text-2);margin-top:1px}
+.srv-badge{font-size:10px;font-weight:600;padding:1px 7px;border-radius:8px;flex-shrink:0}
+.srv-badge.up      {color:var(--green);background:var(--green-soft)}
+.srv-badge.down    {color:var(--red);background:var(--red-soft)}
+.srv-badge.degraded{color:var(--orange);background:var(--orange-soft)}
+.srv-badge.pending {color:var(--text-2);background:var(--surface2)}
+
+/* Stats row in sidebar */
+.sidebar-stats{padding:12px 18px;border-bottom:1px solid var(--border);display:grid;grid-template-columns:1fr 1fr 1fr 1fr;gap:8px;flex-shrink:0}
+.ss-card{text-align:center}
+.ss-val{font-size:18px;font-weight:700;letter-spacing:-.02em;color:var(--text-white)}
+.ss-lbl{font-size:9px;font-weight:600;letter-spacing:.06em;text-transform:uppercase;color:var(--text-2);margin-top:1px}
+.ss-card.up   .ss-val{color:var(--green)}
+.ss-card.down .ss-val{color:var(--red)}
+.ss-card.warn .ss-val{color:var(--orange)}
+
+/* Live pill */
+.live-pill{display:inline-flex;align-items:center;gap:5px;font-size:10px;font-weight:500;color:var(--green);background:var(--green-soft);border:1px solid rgba(16,232,138,.2);border-radius:20px;padding:2px 8px}
+.live-dot{width:5px;height:5px;border-radius:50%;background:var(--green);animation:lpulse 2s ease-in-out infinite}
+@keyframes lpulse{0%,100%{opacity:1}50%{opacity:.4}}
+
+/* ── MAIN CONTENT AREA ── */
+.content{flex:1;overflow-y:auto;background:var(--bg);padding:24px 28px}
+.content::-webkit-scrollbar{width:4px}
+.content::-webkit-scrollbar-thumb{background:var(--surface3);border-radius:2px}
+
+/* ── SERVER CARDS ── */
+.server-list{display:flex;flex-direction:column;gap:6px}
+.server-card{background:var(--surface);border:1px solid var(--border);border-left:3px solid var(--text-2);border-radius:var(--r);overflow:hidden;animation:cardIn .3s ease both}
+@keyframes cardIn{from{opacity:0;transform:translateY(6px)}to{opacity:1;transform:translateY(0)}}
+.server-card:hover{border-color:var(--border-hi);box-shadow:0 4px 20px var(--shadow)}
+.server-card.up      {border-left-color:var(--green)}
+.server-card.down    {border-left-color:var(--red)}
+.server-card.degraded{border-left-color:var(--orange)}
+.card-body{display:grid;grid-template-columns:auto 1fr auto auto auto;align-items:center;gap:14px;padding:13px 18px;cursor:pointer;user-select:none}
+.card-orb{width:34px;height:34px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:13px;flex-shrink:0}
+.server-card.up       .card-orb{background:var(--green-soft);box-shadow:0 0 0 1px rgba(16,232,138,.22),0 0 12px rgba(16,232,138,.2)}
+.server-card.down     .card-orb{background:var(--red-soft);box-shadow:0 0 0 1px rgba(255,61,90,.22);animation:blink 1.6s ease-in-out infinite}
+.server-card.degraded .card-orb{background:var(--orange-soft);box-shadow:0 0 0 1px rgba(255,140,42,.22)}
+.server-card.pending  .card-orb{background:var(--surface2)}
+.card-info{min-width:0}
+.card-name{font-size:14px;font-weight:600;color:var(--text-white);letter-spacing:-.01em;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.card-meta{display:flex;align-items:center;gap:8px;margin-top:3px;flex-wrap:wrap}
+.card-ip{font-family:var(--mono);font-size:11px;color:var(--text-2)}
+.card-desc{font-size:11px;color:var(--text-2)}
+.tags{display:flex;gap:4px;flex-wrap:wrap}
+.tag{font-size:9px;font-weight:600;letter-spacing:.05em;padding:1px 6px;border-radius:3px;background:var(--surface2);color:var(--text-2);border:1px solid var(--border);text-transform:uppercase}
+.sparkline{display:flex;gap:2px;align-items:flex-end;height:24px;flex-shrink:0}
+.spark{width:4px;border-radius:2px;background:var(--surface2);height:50%}
+.spark.ok{background:rgba(16,232,138,.4);height:100%}
+.spark.ok:last-child{background:var(--green)}
+.spark.bad{background:rgba(255,61,90,.5);height:55%}
+.card-badge{flex-shrink:0;font-size:10px;font-weight:600;letter-spacing:.05em;padding:3px 10px;border-radius:20px;white-space:nowrap}
+.card-badge.up      {color:var(--green);background:var(--green-soft);border:1px solid rgba(16,232,138,.2)}
+.card-badge.down    {color:var(--red);background:var(--red-soft);border:1px solid rgba(255,61,90,.2)}
+.card-badge.degraded{color:var(--orange);background:var(--orange-soft);border:1px solid rgba(255,140,42,.2)}
+.card-badge.pending {color:var(--text-2);background:var(--surface2);border:1px solid var(--border)}
+.card-chevron{width:14px;height:14px;color:var(--text-2);flex-shrink:0;transition:transform .2s!important}
+.server-card.expanded .card-chevron{transform:rotate(180deg)}
+
+/* check panel */
+.check-panel{display:none;border-top:1px solid var(--border);padding:12px 18px 14px;background:var(--bg2);gap:8px;flex-wrap:wrap}
+.check-panel.open{display:flex}
+.check-chip{display:inline-flex;align-items:center;gap:7px;padding:6px 12px;border-radius:var(--r-sm);border:1px solid var(--border);background:var(--surface);font-size:12px}
+.check-chip.ok  {border-color:rgba(16,232,138,.18)}
+.check-chip.fail{border-color:rgba(255,61,90,.22)}
+.chip-dot{width:6px;height:6px;border-radius:50%;flex-shrink:0}
+.check-chip.ok   .chip-dot{background:var(--green)}
+.check-chip.fail .chip-dot{background:var(--red)}
+.chip-label {font-weight:500;color:var(--text-hi)}
+.chip-detail{font-family:var(--mono);font-size:11px;color:var(--text-2);padding-left:6px;border-left:1px solid var(--border)}
+.check-ts{width:100%;font-size:10px;color:var(--text-2);margin-top:2px}
+
+/* section headers */
+.section-header{display:flex;align-items:center;justify-content:space-between;margin-bottom:14px}
+.section-title{font-size:11px;font-weight:600;letter-spacing:.07em;text-transform:uppercase;color:var(--text-2)}
+
+/* footer */
+.page-footer{padding:12px 28px;border-top:1px solid var(--border);font-size:11px;color:var(--text-2);display:flex;justify-content:space-between;flex-shrink:0;background:var(--bg2)}
+
+/* ══ DRAWER BASE ══ */
+.drawer-overlay{position:fixed;inset:0;background:rgba(0,5,20,.5);backdrop-filter:blur(4px);z-index:200;opacity:0;pointer-events:none;transition:opacity .25s!important}
+.drawer-overlay.open{opacity:1;pointer-events:all}
+.drawer{position:fixed;top:0;right:0;bottom:0;background:var(--bg2);border-left:1px solid var(--border-hi);z-index:201;display:flex;flex-direction:column;transform:translateX(100%);transition:transform .28s cubic-bezier(.4,0,.2,1)!important;box-shadow:-8px 0 40px var(--shadow);padding-top:env(safe-area-inset-top, 0px)}
+/* On mobile, lift the drawer's bottom edge 28px above the gesture bar so the Save button
+   can't be intercepted by Android gesture nav or iOS home indicator. env() adds extra if the
+   browser reports a larger safe area — hence max() — otherwise we always get at least 28px. */
+@media(max-width:760px){
+  .drawer{bottom:max(28px, env(safe-area-inset-bottom, 28px))}
+}
+.drawer.open{transform:translateX(0)}
+.drawer-header{padding:16px 18px 12px;border-bottom:1px solid var(--border);display:flex;align-items:center;justify-content:space-between;flex-shrink:0}
+.drawer-title{font-size:14px;font-weight:600;color:var(--text-white);display:flex;align-items:center;gap:8px}
+.drawer-title svg{width:15px;height:15px;color:var(--blue);transition:none!important}
+.drawer-close{width:28px;height:28px;border-radius:6px;border:1px solid var(--border);background:var(--surface);color:var(--text);cursor:pointer;display:flex;align-items:center;justify-content:center;font-size:14px}
+.drawer-close:hover{background:var(--surface2);color:var(--text-white)}
+.drawer-toolbar{padding:10px 18px;border-bottom:1px solid var(--border);display:flex;align-items:center;gap:8px;flex-shrink:0;flex-wrap:wrap}
+.drawer-spacer{flex:1}
+.drawer-body{flex:1;min-height:0;overflow-y:auto;overflow-x:hidden}
+.drawer-body::-webkit-scrollbar{width:3px}
+.drawer-body::-webkit-scrollbar-thumb{background:var(--surface3);border-radius:2px}
+.drawer-footer{padding:10px 18px;border-top:1px solid var(--border);font-size:11px;color:var(--text-2);display:flex;align-items:center;justify-content:space-between;flex-shrink:0}
+
+/* LOG DRAWER */
+#logDrawer{width:min(540px,100vw)}
+.filter-tabs{display:flex;gap:3px}
+.filter-tab{padding:4px 11px;font-size:11px;font-weight:500;border-radius:5px;border:1px solid transparent;background:none;color:var(--text-2);cursor:pointer;font-family:var(--sans)}
+.filter-tab:hover{color:var(--text-hi);background:var(--surface)}
+.filter-tab.active{color:var(--text-white);background:var(--surface2);border-color:var(--border-hi)}
+.auto-scroll-toggle{display:flex;align-items:center;gap:5px;font-size:11px;color:var(--text-2);cursor:pointer;user-select:none}
+.toggle-track{width:26px;height:14px;border-radius:7px;background:var(--surface2);border:1px solid var(--border);position:relative;transition:background .2s!important}
+.toggle-track.on{background:var(--blue);border-color:transparent}
+.toggle-thumb{position:absolute;top:2px;left:2px;width:8px;height:8px;border-radius:50%;background:var(--text-2);transition:left .2s!important}
+.toggle-track.on .toggle-thumb{left:14px;background:#fff}
+.clear-btn{padding:4px 9px;font-size:11px;border-radius:5px;border:1px solid var(--border);background:none;color:var(--text-2);cursor:pointer;font-family:var(--sans)}
+.clear-btn:hover{color:var(--red);border-color:rgba(255,61,90,.3)}
+.log-empty{display:flex;flex-direction:column;align-items:center;justify-content:center;height:100%;gap:10px;color:var(--text-2);font-size:12px;padding:40px}
+.log-empty svg{width:28px;height:28px;opacity:.3;transition:none!important}
+.log-entry{display:grid;grid-template-columns:72px 12px 95px 1fr;align-items:baseline;gap:0 8px;padding:5px 18px;border-bottom:1px solid var(--border);font-family:var(--mono);font-size:11px;animation:logIn .2s ease both}
+@keyframes logIn{from{opacity:0;transform:translateX(4px)}to{opacity:1;transform:translateX(0)}}
+.log-entry:hover{background:var(--surface2)}
+.log-ts{color:var(--text-2);font-size:10px}
+.log-icon{font-size:10px}
+.log-entry.ok .log-icon{color:var(--green)}.log-entry.fail .log-icon{color:var(--red)}.log-entry.sys .log-icon{color:var(--blue)}.log-entry.change .log-icon{color:var(--orange)}
+.log-server{color:var(--text);font-size:10px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.log-msg{color:var(--text-2);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.log-entry.fail .log-msg{color:rgba(255,61,90,.85)}.log-entry.change .log-msg{color:var(--orange);font-weight:500}.log-entry.sys .log-msg{color:rgba(42,127,255,.9)}
+.log-entry.change{background:rgba(255,140,42,.05);border-left:2px solid rgba(255,140,42,.4);padding-left:16px}
+.log-entry.sys{background:rgba(42,127,255,.05)}
+
+/* ADMIN DRAWER */
+#adminDrawer{width:min(660px,100vw)}
+/* flex:1 + min-height:0 is the classic flex scroll-container pattern.
+   Using height:100% here overflowed the drawer by the drawer-header's height,
+   pushing the sticky Save button below the visible viewport. */
+.admin-section{display:flex;flex-direction:column;flex:1;min-height:0}
+.admin-tabs{display:flex;gap:3px}
+.admin-tab{padding:4px 13px;font-size:11px;font-weight:500;border-radius:5px;border:1px solid transparent;background:none;color:var(--text-2);cursor:pointer;font-family:var(--sans)}
+.admin-tab:hover{color:var(--text-hi);background:var(--surface)}
+.admin-tab.active{color:var(--text-white);background:var(--surface2);border-color:var(--border-hi)}
+.admin-server-item{display:flex;align-items:center;gap:10px;padding:11px 18px;border-bottom:1px solid var(--border);cursor:pointer}
+.admin-server-item:hover{background:var(--surface)}
+.admin-dot{width:7px;height:7px;border-radius:50%;flex-shrink:0;transition:none!important}
+.admin-dot.up{background:var(--green)}.admin-dot.down{background:var(--red)}.admin-dot.degraded{background:var(--orange)}.admin-dot.pending{background:var(--text-2)}
+.admin-info{flex:1;min-width:0}
+.admin-name{font-size:12px;font-weight:600;color:var(--text-white)}
+.admin-host{font-family:var(--mono);font-size:10px;color:var(--text-2);margin-top:1px}
+.admin-checks-label{font-size:10px;color:var(--text-2);margin-top:2px;display:flex;align-items:center;flex-wrap:wrap;gap:4px}
+.chip-cert{display:inline-flex;align-items:center;gap:4px;font-size:9px;font-weight:600;padding:1px 6px;border-radius:8px;letter-spacing:.02em;white-space:nowrap}
+.chip-cert.cert-ok     {color:var(--green);background:var(--green-soft);border:1px solid rgba(16,232,138,.25)}
+.chip-cert.cert-warn   {color:var(--orange);background:var(--orange-soft);border:1px solid rgba(255,140,42,.3)}
+.chip-cert.cert-expired{color:var(--red);background:var(--red-soft);border:1px solid rgba(255,61,90,.3)}
+.admin-row-actions{display:flex;gap:5px;flex-shrink:0}
+.empty-state{padding:32px;text-align:center;color:var(--text-2);font-size:12px;line-height:1.7}
+.user-item{display:flex;align-items:center;gap:10px;padding:11px 18px;border-bottom:1px solid var(--border);cursor:pointer}
+.user-item:hover{background:var(--surface)}
+.user-avatar{width:30px;height:30px;border-radius:50%;background:var(--blue-soft);border:1px solid rgba(42,127,255,.22);display:flex;align-items:center;justify-content:center;font-size:12px;font-weight:700;color:var(--blue);flex-shrink:0}
+.user-info{flex:1;min-width:0}
+.user-name{font-size:12px;font-weight:600;color:var(--text-white)}
+.user-meta{font-size:10px;color:var(--text-2);margin-top:1px}
+.user-dash-pills{display:flex;flex-wrap:wrap;gap:4px;margin-top:5px}
+.user-dash-pill{display:inline-flex;align-items:center;padding:2px 8px;border-radius:10px;font-size:9px;font-weight:600;letter-spacing:.04em;background:transparent;border:1px solid var(--blue);color:var(--blue);text-transform:uppercase;white-space:nowrap}
+.user-dash-pill.user-dash-all{background:var(--blue-soft);border-color:rgba(42,127,255,.35);color:var(--blue)}
+.user-dash-pill.user-dash-none{background:var(--surface2);border-color:var(--border);color:var(--text-2);text-transform:none}
+.role-badge{font-size:9px;font-weight:700;letter-spacing:.05em;padding:2px 7px;border-radius:8px;text-transform:uppercase}
+.role-badge.admin {color:var(--blue);background:var(--blue-soft);border:1px solid rgba(42,127,255,.25)}
+.role-badge.viewer{color:var(--text-2);background:var(--surface2);border:1px solid var(--border)}
+
+/* FORM */
+.form-wrap{padding:18px}
+.form-heading{font-size:14px;font-weight:700;color:var(--text-white);margin-bottom:16px}
+.form-grid{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:12px}
+.fg{display:flex;flex-direction:column;gap:4px}
+.fg.full{grid-column:1/-1}
+.flabel{font-size:10px;font-weight:600;letter-spacing:.05em;text-transform:uppercase;color:var(--text-2)}
+.finput,.fselect{width:100%;padding:8px 11px;background:var(--input-bg);border:1px solid var(--border-hi);border-radius:var(--r-sm);color:var(--text-white);font-family:var(--sans);font-size:12px;outline:none}
+.finput:focus,.fselect:focus{border-color:var(--blue);box-shadow:0 0 0 3px rgba(42,127,255,.12)}
+.finput::placeholder{color:var(--text-2)}
+.fselect option{background:var(--surface2)}
+.checks-wrap{grid-column:1/-1}
+.checks-head{display:flex;align-items:center;justify-content:space-between;margin-bottom:8px}
+.check-rows{display:flex;flex-direction:column;gap:7px}
+.crow{display:flex;align-items:center;gap:7px;background:var(--surface);border:1px solid var(--border);border-radius:var(--r-sm);padding:8px 10px}
+.crow .fselect{width:115px;flex-shrink:0;padding:5px 7px;font-size:11px}
+.crow .finput{padding:5px 9px;font-size:11px}
+.crow-detail{flex:1;display:flex;gap:7px}
+.crow-hint{font-size:10px;color:var(--text-2);align-self:center}
+.rm-check{width:24px;height:24px;border-radius:4px;border:1px solid var(--border);background:none;color:var(--text-2);cursor:pointer;display:flex;align-items:center;justify-content:center;font-size:12px;flex-shrink:0}
+.rm-check:hover{border-color:rgba(255,61,90,.4);color:var(--red);background:var(--red-soft)}
+.no-checks{font-size:11px;color:var(--text-2);padding:10px;text-align:center;border:1px dashed var(--border-hi);border-radius:var(--r-sm)}
+.form-footer{display:flex;align-items:center;justify-content:flex-end;gap:8px;padding:16px 18px;border-top:1px solid var(--border);background:var(--bg2);position:sticky;bottom:0;margin:16px -18px 0;z-index:3}
+@media(max-width:760px){.form-footer{padding:18px 16px 22px 16px}}
+.form-err{flex:1;font-size:11px;color:var(--red)}
+
+/* CONFIRM */
+.confirm-overlay{position:fixed;inset:0;background:rgba(0,5,20,.6);backdrop-filter:blur(6px);z-index:400;display:flex;align-items:center;justify-content:center;opacity:0;pointer-events:none;transition:opacity .2s!important}
+.confirm-overlay.open{opacity:1;pointer-events:all}
+.confirm-box{background:var(--surface);border:1px solid var(--border-hi);border-radius:var(--r);padding:22px;max-width:340px;width:90%;box-shadow:0 20px 60px rgba(0,0,0,.6)}
+.confirm-title{font-size:15px;font-weight:700;color:var(--text-white);margin-bottom:8px}
+.confirm-msg{font-size:12px;color:var(--text);margin-bottom:18px;line-height:1.6}
+.confirm-btns{display:flex;justify-content:flex-end;gap:8px}
+
+/* CHANGE PWD MODAL */
+.modal-overlay{position:fixed;inset:0;background:rgba(0,5,20,.55);backdrop-filter:blur(6px);z-index:400;display:flex;align-items:center;justify-content:center;opacity:0;pointer-events:none;transition:opacity .2s!important}
+.modal-overlay.open{opacity:1;pointer-events:all}
+.modal-box{background:var(--surface);border:1px solid var(--border-hi);border-radius:var(--r);padding:24px;max-width:360px;width:90%;box-shadow:0 20px 60px rgba(0,0,0,.6)}
+.modal-title{font-size:14px;font-weight:700;color:var(--text-white);margin-bottom:16px}
+.modal-group{display:flex;flex-direction:column;gap:4px;margin-bottom:12px}
+.modal-label{font-size:10px;font-weight:600;letter-spacing:.05em;text-transform:uppercase;color:var(--text-2)}
+.modal-input{width:100%;padding:8px 11px;background:var(--input-bg);border:1px solid var(--border-hi);border-radius:var(--r-sm);color:var(--text-white);font-family:var(--sans);font-size:12px;outline:none}
+.modal-input:focus{border-color:var(--blue);box-shadow:0 0 0 3px rgba(42,127,255,.12)}
+.modal-footer{display:flex;align-items:center;justify-content:flex-end;gap:8px;margin-top:16px;padding-top:14px;border-top:1px solid var(--border)}
+.modal-err{flex:1;font-size:11px;color:var(--red)}
+
+/* USER FORM */
+#aUserFormView{display:none;flex-direction:column;height:100%}
+
+/* TOAST */
+.toast-stack{position:fixed;bottom:20px;left:50%;transform:translateX(-50%);display:flex;flex-direction:column-reverse;gap:6px;z-index:500;align-items:center;pointer-events:none}
+.toast{padding:9px 16px;border-radius:var(--r-sm);font-size:12px;font-weight:500;white-space:nowrap;animation:toastIn .25s ease both;display:flex;align-items:center;gap:7px;box-shadow:0 4px 20px rgba(0,0,0,.5)}
+@keyframes toastIn{from{opacity:0;transform:translateY(6px)}to{opacity:1;transform:translateY(0)}}
+.toast.success{background:#032818;color:#4ade80;border:1px solid rgba(16,232,138,.3)}
+.toast.error  {background:#1a0508;color:#fca5a5;border:1px solid rgba(255,61,90,.3)}
+.toast.info   {background:var(--surface2);color:var(--text-hi);border:1px solid var(--border-hi)}
+
+@media(max-width:760px){
+  .topbar{padding:8px 10px;height:auto;min-height:48px;flex-wrap:wrap;gap:6px;row-gap:6px;position:sticky}
+  .brand{flex-shrink:0;gap:8px}
+  .brand-name{font-size:13px}
+  .brand-icon{width:26px;height:26px}
+  #clock{display:none}
+  .topbar-dashboards{width:100%;order:3;margin:0;flex-basis:100%;overflow-x:auto;flex-wrap:nowrap;padding-bottom:2px}
+  .dash-nav{padding:4px 9px;font-size:10px}
+  .topbar-right{gap:6px;flex-wrap:wrap;justify-content:flex-end;flex:1;min-width:0}
+  .btn{padding:5px 9px;font-size:11px;gap:5px}
+  .btn svg{width:12px;height:12px}
+  .btn-icon{width:30px;height:30px;padding:0}
+  .user-badge{font-size:10px;padding:3px 8px}
+  .main-layout{flex-direction:column;height:auto;overflow:visible}
+  .sidebar{width:100%;height:auto;border-right:none;border-bottom:1px solid var(--border)}
+  .sidebar-body{max-height:240px}
+  .sidebar-stats{grid-template-columns:repeat(4,1fr);padding:10px 14px;gap:6px}
+  .ss-val{font-size:15px}
+  .ss-lbl{font-size:8px}
+  .sparkline,.card-badge{display:none}
+  .card-body{grid-template-columns:auto 1fr auto;padding:11px 14px}
+  #logDrawer,#adminDrawer{width:100vw}
+  .form-grid{grid-template-columns:minmax(0,1fr)}
+  .content{padding:14px 12px}
+  .page-footer{padding:10px 12px;font-size:10px;flex-wrap:wrap;gap:6px}
+  /* Detail view shrinks */
+  #mainArea .detail-header{flex-direction:column;gap:10px;margin-bottom:18px}
+  #mainArea .detail-name{font-size:18px}
+  #mainArea .uptime-row{grid-template-columns:repeat(3,1fr);gap:8px;margin-bottom:18px}
+  #mainArea .uptime-card{padding:12px 6px}
+  #mainArea .uptime-pct{font-size:20px}
+  #mainArea .uptime-label{font-size:9px}
+  #mainArea .uptime-sub{font-size:9px}
+  #mainArea .dv-section{margin-bottom:14px}
+  #mainArea .dv-section-head{padding:11px 14px}
+  #mainArea .dv-section-body{padding:14px}
+  #mainArea .heartbeat{gap:2px}
+  #mainArea .hb-dot{width:7px;height:24px}
+  #mainArea .checks-row{gap:6px}
+  #mainArea .dv-chip{padding:6px 10px;font-size:11px}
+  #mainArea .dv-chip-detail{font-size:10px}
+  /* Health check rows: stack properly on narrow screens */
+  .form-wrap{overflow-x:hidden;max-width:100%}
+  .crow{flex-wrap:wrap;gap:6px}
+  .crow .fselect{order:1;flex:1 1 auto;width:auto;min-width:0}
+  .rm-check{order:2;flex-shrink:0}
+  .crow-detail{order:3;flex:1 1 100%;display:flex;flex-wrap:wrap;gap:6px;min-width:0}
+  .crow-detail .finput{flex:1 1 90px;min-width:0}
+  .crow-detail .fselect{flex:0 0 auto;min-width:0}
+}
+
+/* ── DETAIL VIEW (scoped to #mainArea to avoid conflicts) ────────────────── */
+#mainArea{display:flex;flex-direction:column;gap:0}
+#mainArea .empty-main{display:flex;align-items:center;justify-content:center;height:60vh;color:var(--text-2);font-size:14px}
+
+#mainArea .detail-header{display:flex;align-items:flex-start;justify-content:space-between;margin-bottom:24px;gap:16px;flex-wrap:wrap}
+#mainArea .detail-name{font-size:22px;font-weight:700;color:var(--text-white);letter-spacing:-.02em}
+#mainArea .detail-host{font-family:var(--mono);font-size:12px;color:var(--text-2);margin-top:4px}
+#mainArea .detail-tags{display:flex;gap:5px;margin-top:6px;flex-wrap:wrap}
+#mainArea .detail-tag{font-size:10px;font-weight:600;letter-spacing:.05em;padding:2px 8px;border-radius:4px;background:var(--surface2);color:var(--text-2);border:1px solid var(--border);text-transform:uppercase}
+
+#mainArea .status-big{display:flex;align-items:center;gap:10px;padding:10px 18px;border-radius:10px;border:1px solid;flex-shrink:0}
+#mainArea .detail-actions{display:flex;align-items:center;gap:10px;flex-shrink:0;flex-wrap:wrap}
+#mainArea .detail-edit-btn{display:inline-flex;align-items:center;gap:6px;padding:10px 16px;background:var(--blue);color:#fff;border:none;border-radius:10px;font-size:13px;font-weight:600;cursor:pointer;font-family:var(--sans);transition:background .15s,transform .1s;text-decoration:none}
+#mainArea .detail-edit-btn:hover{background:#1a6fef}
+#mainArea .detail-edit-btn:active{transform:scale(.98)}
+#mainArea .detail-edit-btn svg{width:14px;height:14px}
+#mainArea .status-big.up      {color:var(--green);border-color:rgba(16,232,138,.2);background:var(--green-soft)}
+#mainArea .status-big.down    {color:var(--red);border-color:rgba(255,61,90,.2);background:var(--red-soft)}
+#mainArea .status-big.degraded{color:var(--orange);border-color:rgba(255,140,42,.2);background:var(--orange-soft)}
+#mainArea .status-big.pending {color:var(--text-2);border-color:var(--border);background:var(--surface)}
+#mainArea .status-big-dot{width:10px;height:10px;border-radius:50%;background:currentColor}
+#mainArea .status-big.up .status-big-dot{animation:pulseDV 2s ease-in-out infinite}
+@keyframes pulseDV{0%,100%{box-shadow:0 0 0 0 rgba(16,232,138,.4)}50%{box-shadow:0 0 0 5px transparent}}
+#mainArea .status-big-label{font-size:13px;font-weight:700;letter-spacing:.05em}
+#mainArea .status-big-time{font-size:11px;opacity:.7;margin-top:2px}
+
+#mainArea .uptime-row{display:grid;grid-template-columns:repeat(3,1fr);gap:12px;margin-bottom:24px}
+#mainArea .uptime-card{background:var(--surface);border:1px solid var(--border);border-radius:10px;padding:16px 20px;text-align:center}
+#mainArea .uptime-label{font-size:11px;font-weight:600;letter-spacing:.06em;text-transform:uppercase;color:var(--text-2);margin-bottom:8px}
+#mainArea .uptime-pct{font-size:28px;font-weight:700;letter-spacing:-.03em;line-height:1}
+#mainArea .uptime-pct.great{color:var(--green)}
+#mainArea .uptime-pct.good {color:var(--blue)}
+#mainArea .uptime-pct.warn {color:var(--orange)}
+#mainArea .uptime-pct.bad  {color:var(--red)}
+#mainArea .uptime-sub{font-size:11px;color:var(--text-2);margin-top:4px}
+
+#mainArea .dv-section{background:var(--surface);border:1px solid var(--border);border-radius:10px;margin-bottom:20px;overflow:hidden}
+#mainArea .dv-section-head{display:flex;align-items:center;justify-content:space-between;padding:14px 20px;border-bottom:1px solid var(--border)}
+#mainArea .dv-section-title{font-size:12px;font-weight:600;letter-spacing:.06em;text-transform:uppercase;color:var(--text-2)}
+#mainArea .dv-section-body{padding:20px}
+
+#mainArea .heartbeat{display:flex;gap:3px;align-items:flex-end;flex-wrap:wrap}
+#mainArea .hb-dot{width:10px;height:28px;border-radius:3px;flex-shrink:0;transition:opacity .2s;cursor:pointer}
+#mainArea .hb-dot.up     {background:var(--green);opacity:.7}
+#mainArea .hb-dot.up:last-child{opacity:1}
+#mainArea .hb-dot.down   {background:var(--red);opacity:.9}
+#mainArea .hb-dot.pending{background:var(--surface2)}
+#mainArea .hb-dot:hover  {opacity:1!important}
+#mainArea .hb-legend{display:flex;align-items:center;justify-content:space-between;font-size:11px;color:var(--text-2);margin-top:8px}
+
+#mainArea .chart-wrap{position:relative;height:120px;width:100%}
+#mainArea canvas#responseChart{width:100%!important}
+#mainArea .chart-empty{display:flex;align-items:center;justify-content:center;height:120px;font-size:13px;color:var(--text-2)}
+
+#mainArea .checks-row{display:flex;gap:10px;flex-wrap:wrap}
+#mainArea .dv-chip{display:inline-flex;align-items:center;gap:8px;padding:8px 14px;border-radius:8px;font-size:12px;border:1px solid;background:var(--surface)}
+#mainArea .dv-chip.ok  {border-color:rgba(16,232,138,.2);background:var(--green-soft)}
+#mainArea .dv-chip.fail{border-color:rgba(255,61,90,.2);background:var(--red-soft)}
+#mainArea .dv-chip-dot{width:7px;height:7px;border-radius:50%;flex-shrink:0}
+#mainArea .dv-chip.ok   .dv-chip-dot{background:var(--green)}
+#mainArea .dv-chip.fail .dv-chip-dot{background:var(--red)}
+#mainArea .dv-chip-label {font-weight:500;color:var(--text-hi)}
+#mainArea .dv-chip-detail{font-family:var(--mono);font-size:11px;color:var(--text-2);padding-left:6px;border-left:1px solid var(--border)}
+
+#mainArea .incident-list{display:flex;flex-direction:column;gap:0}
+#mainArea .incident-row{display:grid;grid-template-columns:auto 1fr auto;align-items:center;gap:16px;padding:12px 0;border-bottom:1px solid var(--border)}
+#mainArea .incident-row:last-child{border-bottom:none}
+#mainArea .incident-dot{width:8px;height:8px;border-radius:50%;background:var(--red);flex-shrink:0}
+#mainArea .incident-dot.resolved{background:var(--green)}
+#mainArea .incident-cause{font-size:13px;color:var(--text-hi);font-weight:500}
+#mainArea .incident-time{font-size:11px;color:var(--text-2);margin-top:2px;font-family:var(--mono)}
+#mainArea .incident-dur{font-size:12px;font-weight:600;text-align:right}
+#mainArea .incident-dur.resolved{color:var(--text-2)}
+#mainArea .incident-dur.open{color:var(--red)}
+#mainArea .no-incidents{text-align:center;padding:20px;color:var(--text-2);font-size:13px}
+
+#mainArea .dv-skeleton{background:linear-gradient(90deg,var(--surface) 25%,var(--surface2) 50%,var(--surface) 75%);background-size:200% 100%;animation:dvShimmer 1.5s infinite;border-radius:6px}
+@keyframes dvShimmer{0%{background-position:200% 0}100%{background-position:-200% 0}}
+</style>
+</head>
+<body>
+<div class="bg-glow"></div>
+<div class="drawer-overlay" id="sharedOverlay" onclick="closeAll()"></div>
+
+<!-- Confirm dialog -->
+<div class="confirm-overlay" id="confirmDlg">
+  <div class="confirm-box">
+    <div class="confirm-title">Are you sure?</div>
+    <div class="confirm-msg" id="confirmMsg"></div>
+    <div class="confirm-btns"><button class="btn" onclick="closeConfirm()">Cancel</button><button class="btn btn-danger" onclick="void(0)">Remove</button></div>
+  </div>
+</div>
+
+<!-- Change Password Modal -->
+<div class="modal-overlay" id="changePwdModal">
+  <div class="modal-box">
+    <div class="modal-title">Change Password</div>
+    <div class="modal-group"><label class="modal-label">Current Password</label><input class="modal-input" id="pwdCurrent" type="password" placeholder="Current password"></div>
+    <div class="modal-group"><label class="modal-label">New Password</label><input class="modal-input" id="pwdNew" type="password" placeholder="Min 8 characters"></div>
+    <div class="modal-group"><label class="modal-label">Confirm New Password</label><input class="modal-input" id="pwdConfirm" type="password" placeholder="Repeat new password"></div>
+    <div class="modal-footer"><span class="modal-err" id="pwdErr"></span><button class="btn" onclick="closeChangePassword()">Cancel</button><button class="btn btn-primary" onclick="submitChangePassword()">Update</button></div>
+  </div>
+</div>
+
+<div class="toast-stack" id="toasts"></div>
+
+<!-- LOG DRAWER -->
+<div class="drawer" id="logDrawer">
+  <div class="drawer-header">
+    <div class="drawer-title"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/></svg>Check Logs</div>
+    <button class="drawer-close" onclick="closeLogs()">✕</button>
+  </div>
+  <div class="drawer-toolbar">
+    <div class="filter-tabs"><button class="filter-tab active" onclick="setLF('all',this)">All</button><button class="filter-tab" onclick="setLF('error',this)">Errors</button><button class="filter-tab" onclick="setLF('changes',this)">Changes</button></div>
+    <div class="drawer-spacer"></div>
+    <div class="auto-scroll-toggle" onclick="toggleAS()"><div class="toggle-track on" id="asTrk"><div class="toggle-thumb"></div></div><span>Auto-scroll</span></div>
+    <button class="clear-btn" onclick="clearLogs()">Clear</button>
+  </div>
+  <div class="drawer-body" style="padding:6px 0" id="logBody"><div class="log-empty"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>Connecting to log stream...</div></div>
+  <div class="drawer-footer"><span id="logCount">0 entries</span><div class="live-pill"><div class="live-dot"></div> Live</div></div>
+</div>
+
+<!-- ADMIN DRAWER -->
+<div class="drawer" id="adminDrawer">
+  <div class="drawer-header">
+    <div class="drawer-title"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.07 4.93a10 10 0 0 1 0 14.14M4.93 4.93a10 10 0 0 0 0 14.14"/></svg>Manage</div>
+    <button class="drawer-close" onclick="closeAdmin()">✕</button>
+  </div>
+  <div id="aListView" class="admin-section">
+    <div class="drawer-toolbar">
+      <div class="admin-tabs"><button class="admin-tab active" id="tabServers" onclick="switchTab('servers')">Servers</button><button class="admin-tab" id="tabGroups" onclick="switchTab('groups')">Groups</button><button class="admin-tab" id="tabOmada" onclick="switchTab('omada')">Omada</button><button class="admin-tab" id="tabUsers" onclick="switchTab('users')">Users</button><button class="admin-tab" id="tabWebhooks" onclick="switchTab('webhooks')">Webhooks</button></div>
+      <span style="font-size:11px;color:var(--text-2)" id="aCount"></span>
+      <div class="drawer-spacer"></div>
+      <button class="btn btn-primary" id="addBtn" onclick="showServerForm(null)" style="font-size:11px;padding:5px 11px"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" style="width:12px;height:12px"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg><span id="addBtnLabel">Add Server</span></button>
+    </div>
+    <div class="drawer-body" id="adminPanelBody"></div>
+    <div class="drawer-footer"><span>Saves to MariaDB instantly</span><span style="color:var(--blue);font-size:10px">Click to edit</span></div>
+  </div>
+  <div id="aFormView" class="admin-section" style="display:none">
+    <div class="drawer-body">
+      <div class="form-wrap">
+        <div class="form-heading" id="fHeading">Add Server</div>
+        <input type="hidden" id="fId">
+        <div class="form-grid">
+          <div class="fg"><label class="flabel">Server Name *</label><input class="finput" id="fName" placeholder="e.g. Web Server"></div>
+          <div class="fg"><label class="flabel">Host / IP *</label><input class="finput" id="fHost" placeholder="e.g. 10.0.0.2"></div>
+          <div class="fg full"><label class="flabel">Description</label><input class="finput" id="fDesc" placeholder="Short description"></div>
+          <div class="fg full"><label class="flabel">Tags <span style="font-weight:400;text-transform:none;letter-spacing:0">(comma-separated)</span></label><input class="finput" id="fTags" placeholder="production, web, db"></div>
+          <div class="fg"><label class="flabel">Poll Interval <span style="font-weight:400;text-transform:none;letter-spacing:0;color:var(--text-2)">(seconds, min 10)</span></label>
+            <select class="fselect" id="fInterval">
+              <option value="20">20s (fast)</option>
+              <option value="30" selected>30s (default)</option>
+              <option value="60">1m</option>
+              <option value="300">5m</option>
+              <option value="600">10m</option>
+            </select>
+          </div>
+          <div class="fg"></div>
+          <div class="fg full"><label class="flabel">Dashboards <span style="font-weight:400;text-transform:none;letter-spacing:0;color:var(--text-2)" id="fGroupsHint">(pick one or more — this server appears in each)</span></label>
+            <div id="fGroupsPicker" style="background:var(--input-bg);border:1px solid var(--border-hi);border-radius:var(--r-sm);max-height:220px;overflow-y:auto;padding:8px"></div>
+          </div>
+          <div class="fg full checks-wrap"><div class="checks-head"><label class="flabel" style="margin:0">Health Checks</label><button class="btn" onclick="addCrow()" style="font-size:11px;padding:4px 10px">+ Add Check</button></div><div class="check-rows" id="crowContainer"></div></div>
+          <div class="fg full" id="fBadgeSection" style="display:none">
+            <label class="flabel">Badge URLs <span style="font-weight:400;text-transform:none;letter-spacing:0;color:var(--text-2)">embed in READMEs or docs</span></label>
+            <div style="background:var(--input-bg);border:1px solid var(--border-hi);border-radius:var(--r-sm);padding:12px;display:flex;flex-direction:column;gap:8px" id="fBadgeList"></div>
+          </div>
+        </div>
+        <div class="form-footer"><span class="form-err" id="fErr"></span><button class="btn" onclick="showList()">Cancel</button><button class="btn btn-primary" onclick="submitForm()">Save Server</button></div>
+      </div>
+    </div>
+  </div>
+  <div id="aUserFormView" class="admin-section" style="display:none">
+    <div class="drawer-body">
+      <div class="form-wrap">
+        <div class="form-heading" id="uFormHeading">Add User</div>
+        <input type="hidden" id="uId">
+        <div class="form-grid">
+          <div class="fg full"><label class="flabel">Username *</label><input class="finput" id="uName" placeholder="e.g. richard"></div>
+          <div class="fg full"><label class="flabel">Role *</label><select class="fselect" id="uRole" onchange="onUserRoleChange()"><option value="viewer">Viewer — restricted to allowed dashboards</option><option value="admin">Admin — full access to everything</option></select></div>
+          <div class="fg full"><label class="flabel">Password <span id="uPwdHint" style="font-weight:400;text-transform:none;letter-spacing:0">(required)</span></label><input class="finput" id="uPassword" type="password" placeholder="Min 8 characters"></div>
+          <div class="fg full" id="uGroupsRow"><label class="flabel">Allowed Dashboards <span style="font-weight:400;text-transform:none;letter-spacing:0;color:var(--text-2)" id="uGroupsHint">(viewer can only see servers in these groups)</span></label>
+            <div id="uGroupsPicker" style="background:var(--input-bg);border:1px solid var(--border-hi);border-radius:var(--r-sm);max-height:200px;overflow-y:auto;padding:8px"></div>
+          </div>
+        </div>
+        <div class="form-footer"><span class="form-err" id="uErr"></span><button class="btn" onclick="showUserList()">Cancel</button><button class="btn btn-primary" onclick="submitUserForm()">Save User</button></div>
+      </div>
+    </div>
+  </div>
+  <div id="aOmadaFormView" class="admin-section" style="display:none">
+    <div class="drawer-body">
+      <div class="form-wrap">
+        <div class="form-heading" id="oFormHeading">Add Omada Controller</div>
+        <input type="hidden" id="oId">
+        <div class="form-grid">
+          <div class="fg full"><label class="flabel">Name *</label><input class="finput" id="oName" placeholder="e.g. Omada 162 (Tacoma)"></div>
+          <div class="fg full"><label class="flabel">Base URL *</label><input class="finput" id="oUrl" placeholder="https://omada162.example.io"></div>
+          <div class="fg"><label class="flabel">Client ID *</label><input class="finput" id="oClientId" autocomplete="off"></div>
+          <div class="fg"><label class="flabel">Client Secret <span id="oSecretHint" style="font-weight:400;text-transform:none;letter-spacing:0">*</span></label><input class="finput" id="oClientSecret" type="password" autocomplete="new-password"></div>
+          <div class="fg full"><label class="flabel">Owner Group <span style="font-weight:400;text-transform:none;letter-spacing:0;color:var(--text-2)" id="oGroupHint">(scopes the controller to a dashboard's admins)</span></label><select class="fselect" id="oGroup"></select></div>
+          <div class="fg full"><label class="flabel"><input type="checkbox" id="oVerifyTls" checked style="vertical-align:middle;margin-right:6px">Verify TLS certificate <span style="font-weight:400;text-transform:none;letter-spacing:0;color:var(--text-2)">(uncheck for self-signed)</span></label></div>
+        </div>
+        <div class="form-footer">
+          <span class="form-err" id="oErr"></span>
+          <button class="btn" onclick="showList()">Cancel</button>
+          <button class="btn btn-primary" onclick="submitOmadaForm()">Save Controller</button>
+        </div>
+      </div>
+    </div>
+  </div>
+  <div id="aOmadaSitesView" class="admin-section" style="display:none">
+    <div class="drawer-body">
+      <div class="form-wrap">
+        <div class="form-heading"><span id="oSitesHeading">Sites</span></div>
+        <div style="font-size:12px;color:var(--text-2);margin-bottom:14px" id="oSitesSubhead"></div>
+        <div id="oSitesList" style="display:flex;flex-direction:column;gap:6px"></div>
+        <div class="form-footer">
+          <button class="btn" onclick="switchTab('omada')">← Back to controllers</button>
+        </div>
+      </div>
+    </div>
+  </div>
+  <div id="aGroupFormView" class="admin-section" style="display:none">
+    <div class="drawer-body">
+      <div class="form-wrap">
+        <div class="form-heading" id="gFormHeading">Add Group</div>
+        <input type="hidden" id="gId">
+        <input type="hidden" id="gLogoImageData">
+        <div class="form-grid">
+          <div class="fg full"><label class="flabel">Brand Name * <span style="font-weight:400;text-transform:none;letter-spacing:0;color:var(--text-2)">(shown in topbar — replaces "Status.Monitor")</span></label><input class="finput" id="gName" placeholder="e.g. Anthem Status" oninput="autoSlug(this.value)"></div>
+          <div class="fg full"><label class="flabel">URL Slug * <span style="font-weight:400;text-transform:none;letter-spacing:0;color:var(--text-2)">(in /dashboard/&lt;slug&gt;)</span></label><input class="finput" id="gSlug" placeholder="anthem-status"></div>
+          <div class="fg full"><label class="flabel">Subtitle <span style="font-weight:400;text-transform:none;letter-spacing:0;color:var(--text-2)">(optional, shown under brand name)</span></label><input class="finput" id="gDesc" placeholder="e.g. Cafe network status across all stores"></div>
+
+          <div class="fg full"><label class="flabel">Logo Image <span style="font-weight:400;text-transform:none;letter-spacing:0;color:var(--text-2)">(optional, max 256 KB — PNG/JPG/SVG/WebP)</span></label>
+            <div style="display:flex;align-items:center;gap:12px">
+              <div id="gLogoPreview" style="width:48px;height:48px;border-radius:8px;background:var(--input-bg);border:1px dashed var(--border-hi);display:flex;align-items:center;justify-content:center;color:var(--text-2);font-size:10px;flex-shrink:0">none</div>
+              <input type="file" id="gLogoFile" accept="image/png,image/jpeg,image/svg+xml,image/webp,image/gif" onchange="onGroupLogoFile(event)" style="flex:1;color:var(--text-hi);font-size:12px">
+              <button type="button" class="btn btn-sm" onclick="clearGroupLogo()" id="gLogoClearBtn" style="display:none">Clear</button>
+            </div>
+          </div>
+          <div class="fg full"><label class="flabel">Logo Size <span style="font-weight:400;text-transform:none;letter-spacing:0;color:var(--text-2)">(px in topbar — 20 to 120, default 42)</span></label>
+            <div style="display:flex;align-items:center;gap:12px">
+              <input type="range" id="gLogoSize" min="20" max="120" step="1" value="42" oninput="document.getElementById('gLogoSizeVal').textContent = this.value + 'px'" style="flex:1;cursor:pointer">
+              <span id="gLogoSizeVal" style="font-family:var(--mono);font-size:12px;color:var(--text-hi);min-width:46px;text-align:right">42px</span>
+            </div>
+          </div>
+
+          <div class="fg"><label class="flabel">Logo Text <span style="font-weight:400;text-transform:none;letter-spacing:0;color:var(--text-2)">(fallback if no image — 1–3 chars or emoji)</span></label><input class="finput" id="gLogo" maxlength="8" placeholder="A"></div>
+          <div class="fg"><label class="flabel">Accent Color</label><input class="finput" id="gColor" type="color" value="#2a7fff" style="height:38px;padding:4px;cursor:pointer"></div>
+          <div class="fg full"><label class="flabel">Background Color <span style="font-weight:400;text-transform:none;letter-spacing:0;color:var(--text-2)">(optional — overrides theme; text color auto-picked for contrast)</span></label>
+            <div style="display:flex;align-items:center;gap:10px">
+              <input class="finput" id="gBgColor" type="color" value="#060c18" style="height:38px;padding:4px;cursor:pointer;width:80px;flex-shrink:0">
+              <label style="display:flex;align-items:center;gap:6px;font-size:12px;color:var(--text-hi);cursor:pointer"><input type="checkbox" id="gBgColorEnabled" onchange="onBgColorToggle()">Use custom background</label>
+              <span style="font-size:11px;color:var(--text-2)" id="gBgColorHint">Uncheck to use the default theme background</span>
+            </div>
+          </div>
+          <div class="fg full"><label class="flabel">Default Theme <span style="font-weight:400;text-transform:none;letter-spacing:0;color:var(--text-2)">(only used when no custom background — visitors can still toggle)</span></label>
+            <select class="fselect" id="gTheme">
+              <option value="dark">Dark (default)</option>
+              <option value="light">Light</option>
+            </select>
+          </div>
+          <div class="fg full"><label class="flabel">Custom Domain <span style="font-weight:400;text-transform:none;letter-spacing:0;color:var(--text-2)">(optional — e.g. status.example.com — lets this dashboard live at a domain instead of /dashboard/&lt;slug&gt;)</span></label><input class="finput" id="gCustomDomain" placeholder="status.example.com"></div>
+          <div class="fg full" style="background:var(--surface2);border:1px solid var(--border);border-radius:var(--r-sm);padding:10px 12px;font-size:11px;color:var(--text-2);line-height:1.5">
+            <strong style="color:var(--text-hi)">Caddy setup required:</strong> after saving, add a block to your Caddyfile that proxies your custom domain to <span style="font-family:var(--mono);color:var(--blue)">status-server:3000</span>, then recreate Caddy. Example:
+            <pre style="margin:6px 0 0;font-family:var(--mono);font-size:10px;color:var(--text-hi);background:var(--bg);padding:8px;border-radius:4px;white-space:pre-wrap">status.example.com {
+    tls /richardapplegate/fullchain.pem /richardapplegate/privkey.pem
+    reverse_proxy http://status-server:3000
+}</pre>
+          </div>
+
+          <div class="fg full"><label class="flabel">Servers in this Group <span style="font-weight:400;text-transform:none;letter-spacing:0" id="gPickCount">(0 selected)</span></label>
+            <div id="gServerPicker" style="background:var(--input-bg);border:1px solid var(--border-hi);border-radius:var(--r-sm);max-height:220px;overflow-y:auto;padding:8px"></div>
+          </div>
+        </div>
+        <div class="form-footer">
+          <span class="form-err" id="gErr"></span>
+          <a id="gViewLink" href="#" target="_blank" style="font-size:11px;color:var(--blue);text-decoration:none;display:none;margin-right:auto">View public →</a>
+          <button class="btn" onclick="showList()">Cancel</button>
+          <button class="btn btn-primary" onclick="submitGroupForm()">Save Group</button>
+        </div>
+      </div>
+    </div>
+  </div>
+  <div id="aWebhookFormView" class="admin-section" style="display:none">
+    <div class="drawer-body">
+      <div class="form-wrap">
+        <div class="form-heading" id="wFormHeading">Add Webhook</div>
+        <input type="hidden" id="wId">
+        <div class="form-grid">
+          <div class="fg full"><label class="flabel">Name *</label><input class="finput" id="wName" placeholder="e.g. Discord Alerts"></div>
+          <div class="fg full"><label class="flabel">URL *</label><input class="finput" id="wUrl" placeholder="https://discord.com/api/webhooks/..."></div>
+          <div class="fg full"><label class="flabel">Format</label><select class="fselect" id="wFormat">
+            <option value="auto">Auto-detect (Discord / Slack / Generic)</option>
+            <option value="discord">Discord</option>
+            <option value="slack">Slack</option>
+            <option value="generic">Generic JSON</option>
+          </select></div>
+          <div class="fg full"><label class="flabel">Owner Group <span style="font-weight:400;text-transform:none;letter-spacing:0;color:var(--text-2)" id="wGroupHint">(only fires for servers in this dashboard)</span></label><select class="fselect" id="wGroup"></select></div>
+          <div class="fg"><label class="flabel"><input type="checkbox" id="wEnabled" checked style="vertical-align:middle;margin-right:6px">Enabled</label></div>
+          <div class="fg"><label class="flabel"><input type="checkbox" id="wOnDown" checked style="vertical-align:middle;margin-right:6px">Fire on DOWN</label></div>
+          <div class="fg full"><label class="flabel"><input type="checkbox" id="wOnRecovery" checked style="vertical-align:middle;margin-right:6px">Fire on RECOVERY</label></div>
+        </div>
+        <div class="form-footer">
+          <span class="form-err" id="wErr"></span>
+          <button class="btn" id="wTestBtn" onclick="testWebhookFromForm()" style="display:none">Send Test</button>
+          <button class="btn" onclick="showList()">Cancel</button>
+          <button class="btn btn-primary" onclick="submitWebhookForm()">Save Webhook</button>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- MAIN APP -->
+<div id="app">
+  <!-- Top bar -->
+  <div class="topbar">
+    <div class="brand">
+      <div class="brand-icon"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="color:var(--blue)"><polygon points="12 2 22 8.5 22 15.5 12 22 2 15.5 2 8.5"/></svg></div>
+      <div class="brand-name">Status<span>.</span>Monitor</div>
+      <span style="font-family:var(--mono);font-size:11px;color:var(--text-2);margin-left:12px" id="clock">00:00:00</span>
+    </div>
+    <!-- Dashboard quick-nav: one button per dashboard the logged-in user has access to -->
+    <div class="topbar-dashboards" id="topbarDashboards"></div>
+    <div class="topbar-right">
+      <span class="user-badge" id="userBadge" style="display:none;font-size:12px"></span>
+      <button class="btn btn-icon" id="loginBtn" onclick="window.location.href='/login'" style="display:none" title="Login"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M15 3h4a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2h-4"/><polyline points="10 17 15 12 10 7"/><line x1="15" y1="12" x2="3" y2="12"/></svg></button>
+      <button class="btn btn-icon theme-btn" onclick="toggleTheme()" title="Toggle theme">
+        <span class="icon-sun"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="5"/><line x1="12" y1="1" x2="12" y2="3"/><line x1="12" y1="21" x2="12" y2="23"/><line x1="4.22" y1="4.22" x2="5.64" y2="5.64"/><line x1="18.36" y1="18.36" x2="19.78" y2="19.78"/><line x1="1" y1="12" x2="3" y2="12"/><line x1="21" y1="12" x2="23" y2="12"/><line x1="4.22" y1="19.78" x2="5.64" y2="18.36"/><line x1="18.36" y1="5.64" x2="19.78" y2="4.22"/></svg></span>
+        <span class="icon-moon"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/></svg></span>
+      </button>
+      <button class="btn" id="adminMenuBtn" onclick="openAdmin()" style="display:none"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.07 4.93a10 10 0 0 1 0 14.14M4.93 4.93a10 10 0 0 0 0 14.14"/></svg>Admin</button>
+      <button class="btn btn-icon" id="pwdBtn" onclick="openChangePassword()" style="display:none" title="Change password"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="11" width="18" height="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg></button>
+      <button class="btn btn-logs" id="logMenuBtn" onclick="openLogs()" style="display:none"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/></svg>Logs<span class="log-badge" id="logBadge">0</span></button>
+      <button class="btn btn-icon" id="rfBtn" onclick="triggerRefresh()" style="display:none" title="Refresh"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 12a9 9 0 0 1 9-9 9.75 9.75 0 0 1 6.74 2.74L21 8"/><path d="M21 3v5h-5"/><path d="M21 12a9 9 0 0 1-9 9 9.75 9.75 0 0 1-6.74-2.74L3 16"/><path d="M8 16H3v5"/></svg></button>
+      <button class="btn btn-danger" id="logoutBtn" onclick="doLogout()" style="display:none"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/></svg>Logout</button>
+    </div>
+  </div>
+
+  <!-- Split layout -->
+  <div class="main-layout">
+    <!-- Sidebar -->
+    <div class="sidebar">
+      <div class="sidebar-stats">
+        <div class="ss-card"><div class="ss-val" id="sT">—</div><div class="ss-lbl">Total</div></div>
+        <div class="ss-card up"><div class="ss-val" id="sU">—</div><div class="ss-lbl">Up</div></div>
+        <div class="ss-card down"><div class="ss-val" id="sD">—</div><div class="ss-lbl">Down</div></div>
+        <div class="ss-card warn"><div class="ss-val" id="sW">—</div><div class="ss-lbl">Deg</div></div>
+      </div>
+      <div class="sidebar-header">
+        <div style="display:flex;align-items:center;justify-content:space-between">
+          <div class="sidebar-section-title">Servers</div>
+          <div class="live-pill"><div class="live-dot"></div> Live</div>
+        </div>
+      </div>
+      <div class="sidebar-body" id="sidebarList"></div>
+    </div>
+
+    <!-- Content -->
+    <div class="content" id="contentArea">
+      <div id="mainArea">
+        <div class="empty-main">Select a server to view details</div>
+      </div>
+    </div>
+  </div>
+
+  <div class="page-footer">
+    <span>Status.Monitor — self-hosted · Docker + WireGuard</span>
+    <span id="footTs"></span>
+  </div>
+</div>
+
+<script>
+
+// ── Server detail view state ─────────────────────────────────────────────────
+let selectedServerId = null;
+let liveServers      = []; // latest snapshot from SSE / cache
+
+// -- Helpers
+function fmtDur(secs){
+  if (!secs) return "ongoing";
+  if (secs < 60)   return `${secs}s`;
+  if (secs < 3600) return `${Math.floor(secs/60)}m ${secs%60}s`;
+  return `${Math.floor(secs/3600)}h ${Math.floor((secs%3600)/60)}m`;
+}
+function fmtTime(ts){
+  return new Date(ts).toLocaleString("en-US",{month:"short",day:"numeric",hour:"2-digit",minute:"2-digit",hour12:false});
+}
+function uptimeCls(pct){
+  if (pct === null || pct === undefined) return "";
+  if (pct >= 99) return "great";
+  if (pct >= 95) return "good";
+  if (pct >= 80) return "warn";
+  return "bad";
+}
+
+// ── Theme ─────────────────────────────────────────────────────────────────────
+const html = document.documentElement;
+html.setAttribute("data-theme", localStorage.getItem("sm-theme") || "dark");
+function toggleTheme(){
+  const n = html.getAttribute("data-theme") === "dark" ? "light" : "dark";
+  html.setAttribute("data-theme", n);
+  localStorage.setItem("sm-theme", n);
+}
+
+// ── Clock ─────────────────────────────────────────────────────────────────────
+setInterval(() => {
+  document.getElementById("clock").textContent = new Date().toLocaleTimeString("en-US", {hour12:false});
+}, 1000);
+
+// ── Session / Auth ────────────────────────────────────────────────────────────
+let sessionRole = "";
+let sessionAllowedGroupIds = null;   // null = unrestricted (admin), array = viewer's allowed groups
+function isAdmin(){ return sessionRole === "admin"; }
+function isViewer(){ return sessionRole === "viewer"; }
+
+(async function initSession(){
+  try {
+    const r = await fetch("/api/me");
+    // Guard: if response is not JSON, treat as logged out (not an error)
+    const ct = r.headers.get("content-type") || "";
+    if (!ct.includes("application/json")) {
+      document.getElementById("loginBtn").style.display = "";
+      return;
+    }
+    const d = await r.json();
+    if (d.loggedIn) {
+      sessionRole = d.role || "viewer";
+      sessionAllowedGroupIds = d.allowed_group_ids || null;
+      const show = ids => ids.forEach(id => { const el=document.getElementById(id); if(el) el.style.display=""; });
+      // Both roles get badge, logout, change-password, refresh, AND the Admin button
+      // (viewers need it to manage servers in their assigned groups)
+      show(["userBadge","logoutBtn","pwdBtn","rfBtn","adminMenuBtn"]);
+      // Logs are system-info — admin only
+      if (isAdmin()) show(["logMenuBtn"]);
+      const badge = document.getElementById("userBadge");
+      if (badge) badge.textContent = d.username;
+      applyRoleVisibility();
+      // Populate the topbar dashboard quick-nav with the user's accessible dashboards
+      renderTopbarDashboards();
+      // If the page was opened with ?edit=<server_id>, auto-open the admin drawer + server form.
+      // This powers the inline Edit buttons on the status page sidebar.
+      const editId = new URLSearchParams(window.location.search).get("edit");
+      if (editId) {
+        setTimeout(() => autoOpenServerEdit(editId), 0);
+      }
+      // If opened with ?newGroup=1 (from the sidebar "+ New Dashboard" shortcut on /),
+      // auto-open the Groups tab with a blank Add Group form.
+      const newGroup = new URLSearchParams(window.location.search).get("newGroup");
+      if (newGroup) {
+        setTimeout(() => autoOpenNewGroup(), 0);
+      }
+    } else {
+      document.getElementById("loginBtn").style.display = "";
+    }
+  } catch(e) {
+    console.warn("Session check failed:", e.message);
+    const loginBtn = document.getElementById("loginBtn");
+    if (loginBtn) loginBtn.style.display = "";
+  }
+})();
+
+// Hide admin-only tabs from viewers. Called once when session is established.
+// Viewers can use Servers, Omada, and Webhooks (scoped to their groups).
+// Groups + Users tabs stay admin-only.
+function applyRoleVisibility(){
+  if (isAdmin()) return;  // admins see everything; nothing to hide
+  ["tabGroups","tabUsers"].forEach(id => {
+    const el = document.getElementById(id);
+    if (el) el.style.display = "none";
+  });
+}
+
+// Fetch the user's accessible dashboards and render them as clickable buttons in the topbar.
+// /api/admin/groups is already filtered by role — admin sees all, viewer sees only their own.
+// Admins also get a trailing "Admin" pill that links to the master view at `/`; viewers
+// see the same pill but clicking it pops a permission-denied toast (matches public page behavior).
+async function renderTopbarDashboards(){
+  const el = document.getElementById("topbarDashboards");
+  if (!el) return;
+  try {
+    const r = await fetch("/api/admin/groups");
+    if (!r.ok) return;
+    const groups = await r.json();
+    const pills = groups.map(g => {
+      const dot = g.accent_color || "var(--blue)";
+      return `<a class="dash-nav" href="/dashboard/${g.slug}" title="Open ${g.name}">
+        <span class="dash-nav-dot" style="background:${dot}"></span>
+        ${g.name}
+      </a>`;
+    });
+    // Admin pill — only shown to admins (links to the master dashboard "/" which viewers can't access).
+    // Viewers don't get a pill here because they're already on /admin; adding one would be redundant.
+    if (isAdmin()) {
+      pills.push(`<a class="dash-nav dash-nav-admin" href="/" title="Admin master view — all servers">
+        <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2l3 7h7l-5.5 4 2 7-6.5-4.5L5.5 20l2-7L2 9h7z"/></svg>
+        Admin
+      </a>`);
+    }
+    el.innerHTML = pills.join("");
+  } catch(e) { /* silent */ }
+}
+
+// Auto-open the admin drawer with a specific server pre-filled for editing.
+// Used when /admin is opened with ?edit=<server_id> (from the sidebar edit button).
+async function autoOpenServerEdit(serverId){
+  try {
+    openDrawer("adminDrawer");
+    await switchTab("servers");
+    // loadServerList populates adminServers — find the matching one and open the form
+    const match = adminServers.find(s => s.id === serverId);
+    if (match) {
+      showServerForm(match);
+    } else {
+      toast("Server not found or you don't have access", "error");
+    }
+  } catch(e) {
+    toast("Failed to open edit form: " + e.message, "error");
+  }
+}
+
+// Called by the Edit button in the admin page's server detail view.
+// Opens the admin drawer + Servers tab + edit form for this server.
+function editFromDetail(serverId){
+  autoOpenServerEdit(serverId);
+}
+
+// Called by the "+ New Dashboard" sidebar shortcut on the master / view.
+// Opens the admin drawer → Groups tab → blank Add Group form.
+async function autoOpenNewGroup(){
+  try {
+    if (!isAdmin()) {
+      toast("Only admins can create dashboards", "error");
+      return;
+    }
+    openDrawer("adminDrawer");
+    await switchTab("groups");
+    showGroupForm(null);
+  } catch(e) {
+    toast("Failed to open dashboard form: " + e.message, "error");
+  }
+}
+
+// ── localStorage cache helpers (stale-while-revalidate) ──────────────────────
+const CACHE_PREFIX = "sm-cache-";
+function cacheGet(key){
+  try { const v = localStorage.getItem(CACHE_PREFIX + key); return v ? JSON.parse(v) : null; }
+  catch(e){ return null; }
+}
+function cacheSet(key, val){
+  try { localStorage.setItem(CACHE_PREFIX + key, JSON.stringify(val)); } catch(e){}
+}
+function cacheDel(key){
+  try { localStorage.removeItem(CACHE_PREFIX + key); } catch(e){}
+}
+function cacheClearAdmin(){
+  try {
+    Object.keys(localStorage)
+      .filter(k => k.startsWith(CACHE_PREFIX + "admin-"))
+      .forEach(k => localStorage.removeItem(k));
+  } catch(e){}
+}
+
+async function doLogout(){
+  await fetch("/api/logout", {method:"POST"});
+  // Clear admin caches so the next user doesn't see the previous admin's data
+  cacheClearAdmin();
+  window.location.href = "/";
+}
+
+// ── Change Password ───────────────────────────────────────────────────────────
+function openChangePassword(){
+  document.getElementById("changePwdModal").classList.add("open");
+  ["pwdCurrent","pwdNew","pwdConfirm"].forEach(id => document.getElementById(id).value = "");
+  document.getElementById("pwdErr").textContent = "";
+}
+function closeChangePassword(){
+  document.getElementById("changePwdModal").classList.remove("open");
+}
+async function submitChangePassword(){
+  const cur = document.getElementById("pwdCurrent").value;
+  const nw  = document.getElementById("pwdNew").value;
+  const cf  = document.getElementById("pwdConfirm").value;
+  const err = document.getElementById("pwdErr");
+  if (!cur || !nw || !cf)  { err.textContent = "All fields required"; return; }
+  if (nw !== cf)            { err.textContent = "Passwords do not match"; return; }
+  if (nw.length < 8)        { err.textContent = "Min 8 characters"; return; }
+  try {
+    const r = await fetch("/api/change-password", {
+      method:"POST", headers:{"Content-Type":"application/json"},
+      body: JSON.stringify({currentPassword:cur, newPassword:nw})
+    });
+    const d = await r.json();
+    if (!r.ok) { err.textContent = d.error || "Failed"; return; }
+    closeChangePassword();
+    toast("Password updated", "success");
+  } catch(e) { err.textContent = "Error: " + e.message; }
+}
+
+// ── Drawer management ─────────────────────────────────────────────────────────
+let activeDrawer = null;
+function openDrawer(id){
+  if (activeDrawer && activeDrawer !== id) document.getElementById(activeDrawer).classList.remove("open");
+  activeDrawer = id;
+  document.getElementById(id).classList.add("open");
+  document.getElementById("sharedOverlay").classList.add("open");
+  document.body.style.overflow = "hidden";
+}
+function closeDrawer(id){
+  document.getElementById(id)?.classList.remove("open");
+  document.getElementById("sharedOverlay").classList.remove("open");
+  document.body.style.overflow = "";
+  activeDrawer = null;
+}
+function closeAll(){ if (activeDrawer) closeDrawer(activeDrawer); }
+
+// ── Log Drawer ────────────────────────────────────────────────────────────────
+let logEntries = [], logFilter = "all", autoScroll = true, unread = 0;
+
+function openLogs(){
+  unread = 0;
+  document.getElementById("logBadge").classList.remove("show");
+  openDrawer("logDrawer");
+  renderLogs();
+}
+function closeLogs(){ closeDrawer("logDrawer"); }
+function setLF(f, el){
+  logFilter = f;
+  document.querySelectorAll(".filter-tab").forEach(t => t.classList.remove("active"));
+  el.classList.add("active");
+  renderLogs();
+}
+function toggleAS(){
+  autoScroll = !autoScroll;
+  document.getElementById("asTrk").classList.toggle("on", autoScroll);
+}
+function clearLogs(){ logEntries = []; renderLogs(); }
+
+function addLog(e){
+  logEntries.unshift(e);
+  if (logEntries.length > 300) logEntries.pop();
+  if (activeDrawer !== "logDrawer"){
+    unread++;
+    const b = document.getElementById("logBadge");
+    b.textContent = unread > 99 ? "99+" : unread;
+    b.classList.add("show");
+  }
+  if (activeDrawer === "logDrawer") renderLogs();
+}
+
+function renderLogs(){
+  const body = document.getElementById("logBody");
+  let list = [...logEntries];
+  if (logFilter === "error")   list = list.filter(l => l.level === "error");
+  if (logFilter === "changes") list = list.filter(l => l.isStatusChange);
+  document.getElementById("logCount").textContent = `${list.length} entr${list.length === 1 ? "y" : "ies"}`;
+  if (!list.length){
+    body.innerHTML = `<div class="log-empty"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>${logFilter === "all" ? "Waiting for results..." : "No matching entries"}</div>`;
+    return;
+  }
+  const fmt = ts => new Date(ts).toLocaleTimeString("en-US", {hour12:false, hour:"2-digit", minute:"2-digit", second:"2-digit"});
+  body.innerHTML = list.map((e, i) => {
+    let cls = "log-entry", ic = "o";
+    if (e.isStatusChange)      { cls += " change"; ic = ">"; }
+    else if (e.level === "error") { cls += " fail";   ic = "x"; }
+    else if (e.server === "system") { cls += " sys";  ic = "*"; }
+    else                          { cls += " ok";     ic = "+"; }
+    if (i === 0) cls += " new-entry";
+    return `<div class="${cls}"><span class="log-ts">${fmt(e.ts)}</span><span class="log-icon">${ic}</span><span class="log-server">${e.server||"system"}</span><span class="log-msg">${e.message||e.msg||""}</span></div>`;
+  }).join("");
+  if (autoScroll) body.scrollTop = 0;
+}
+
+// ── Status stream + sidebar/stats ────────────────────────────────────────────
+function renderServers(servers){
+  liveServers = servers;
+  cacheSet("servers", servers);
+
+  // Sidebar list
+  const sidebar = document.getElementById("sidebarList");
+  if (sidebar) {
+    sidebar.innerHTML = servers.map(s => {
+      const lbl    = s.overall==="up"?"UP":s.overall==="down"?"DOWN":s.overall==="degraded"?"DEG":"PEND";
+      const active = s.id === selectedServerId ? " active" : "";
+      return `<div class="srv-row${active}" onclick="selectServer('${s.id}')">
+        <div class="srv-dot ${s.overall||'pending'}"></div>
+        <div class="srv-row-info">
+          <div class="srv-row-name">${s.name}</div>
+          <div class="srv-row-host">${s.host}</div>
+        </div>
+        <div class="srv-badge ${s.overall||'pending'}">${lbl}</div>
+      </div>`;
+    }).join("");
+  }
+
+  // Stats
+  document.getElementById("sT").textContent = servers.length;
+  document.getElementById("sU").textContent = servers.filter(s => s.overall === "up").length;
+  document.getElementById("sD").textContent = servers.filter(s => s.overall === "down").length;
+  document.getElementById("sW").textContent = servers.filter(s => s.overall === "degraded").length;
+  document.getElementById("footTs").textContent = `Last check: ${new Date().toLocaleTimeString()}`;
+
+  // Auto-select first server on first paint
+  if (!selectedServerId && servers.length > 0) {
+    const cachedSelected = cacheGet("selected-id");
+    const initialId = cachedSelected && servers.find(s => s.id === cachedSelected) ? cachedSelected : servers[0].id;
+    selectServer(initialId);
+    return;
+  }
+
+  // If currently-selected server's status changed, refresh the small status badge in detail view
+  if (selectedServerId) {
+    const s = servers.find(x => x.id === selectedServerId);
+    if (s) {
+      const big = document.querySelector("#mainArea .status-big");
+      if (big) {
+        big.className = `status-big ${s.overall||"pending"}`;
+        const lbl = big.querySelector(".status-big-label");
+        if (lbl) lbl.textContent = s.overall==="up"?"Online":s.overall==="down"?"Offline":s.overall==="degraded"?"Degraded":"Pending";
+        const tm = big.querySelector(".status-big-time");
+        if (tm) tm.textContent = s.lastChecked ? `Last checked ${new Date(s.lastChecked).toLocaleTimeString()}` : "Not yet checked";
+      }
+    }
+  }
+}
+
+// ── Server detail (cached, stale-while-revalidate) ───────────────────────────
+async function selectServer(id){
+  selectedServerId = id;
+  cacheSet("selected-id", id);
+
+  // Mark active row in sidebar
+  document.querySelectorAll(".srv-row").forEach(r => r.classList.remove("active"));
+  const rows = document.querySelectorAll(".srv-row");
+  rows.forEach(r => {
+    if (r.getAttribute("onclick") && r.getAttribute("onclick").includes("'" + id + "'")) r.classList.add("active");
+  });
+
+  const server = liveServers.find(s => s.id === id);
+  if (!server) return;
+
+  // 1) Render from cache instantly
+  const cached = cacheGet("detail-" + id);
+  if (cached) renderDetail(server, cached.uptime, cached.heartbeat, cached.incidents);
+  else        renderDetailSkeleton(server);
+
+  // 2) Fetch fresh in parallel
+  const [uptime, heartbeat, incidents] = await Promise.all([
+    fetch(`/api/public/uptime/${id}`).then(r=>r.json()).catch(()=>({})),
+    fetch(`/api/public/heartbeat/${id}`).then(r=>r.json()).catch(()=>[]),
+    fetch(`/api/public/incidents/${id}`).then(r=>r.json()).catch(()=>[]),
+  ]);
+  if (selectedServerId !== id) return; // user moved on
+  renderDetail(server, uptime, heartbeat, incidents);
+  cacheSet("detail-" + id, { uptime, heartbeat, incidents });
+}
+
+function renderDetailSkeleton(s){
+  document.getElementById("mainArea").innerHTML = `
+    <div class="detail-header">
+      <div>
+        <div class="detail-name">${s.name}</div>
+        <div class="detail-host">${s.host}</div>
+      </div>
+    </div>
+    <div class="uptime-row">
+      ${["24h","7d","30d"].map(l=>`<div class="uptime-card"><div class="uptime-label">${l}</div><div class="dv-skeleton" style="height:32px;width:80px;margin:0 auto"></div></div>`).join("")}
+    </div>
+    <div class="dv-section"><div class="dv-section-head"><div class="dv-section-title">Heartbeat</div></div><div class="dv-section-body"><div class="dv-skeleton" style="height:28px"></div></div></div>
+    <div class="dv-section"><div class="dv-section-head"><div class="dv-section-title">Response Time</div></div><div class="dv-section-body"><div class="dv-skeleton" style="height:120px"></div></div></div>
+  `;
+}
+
+function renderDetail(s, uptime, heartbeat, incidents){
+  uptime    = uptime    || {};
+  heartbeat = heartbeat || [];
+  incidents = incidents || [];
+  const statusLabel = s.overall==="up"?"Online":s.overall==="down"?"Offline":s.overall==="degraded"?"Degraded":"Pending";
+  const tags = (s.tags||[]).map(t=>`<span class="detail-tag">${t}</span>`).join("");
+
+  const uptimeCards = [
+    {label:"Last 24h", val:uptime.h24},
+    {label:"Last 7 days", val:uptime.d7},
+    {label:"Last 30 days", val:uptime.d30}
+  ].map(u => `
+    <div class="uptime-card">
+      <div class="uptime-label">${u.label}</div>
+      <div class="uptime-pct ${uptimeCls(u.val)}">${u.val !== null && u.val !== undefined ? u.val+"%" : "—"}</div>
+      <div class="uptime-sub">${u.val >= 99 ? "Excellent" : u.val >= 95 ? "Good" : (u.val !== null && u.val !== undefined) ? "Needs attention" : "No data yet"}</div>
+    </div>`).join("");
+
+  const hbPad  = Math.max(0, 90 - heartbeat.length);
+  const hbDots = [
+    ...Array(hbPad).fill(null).map(() => `<div class="hb-dot pending" title="No data"></div>`),
+    ...heartbeat.map(h => `<div class="hb-dot ${h.ok?"up":"down"}" title="${fmtTime(h.checked_at)} — ${h.ok?"Up":"Down"}${h.response_ms?" ("+h.response_ms+"ms)":""}"></div>`)
+  ].join("");
+
+  const checkChips = (s.checks||[]).map(c => {
+    const lbl     = c.type==="ping"?"Ping":c.type==="tcp"?`TCP :${c.port}`:c.type==="udp"?`UDP :${c.port}`:"HTTP";
+    const chipCls = c.ok ? "ok" : "fail";
+    return `<div class="dv-chip ${chipCls}">
+      <div class="dv-chip-dot"></div>
+      <span class="dv-chip-label">${lbl}</span>
+      <span class="dv-chip-detail">${c.detail||""}</span>
+    </div>`;
+  }).join("");
+
+  const incidentRows = incidents.length === 0
+    ? `<div class="no-incidents">No incidents recorded</div>`
+    : incidents.map(i => `
+      <div class="incident-row">
+        <div class="incident-dot ${i.ended_at?"resolved":""}"></div>
+        <div>
+          <div class="incident-cause">${i.cause||"Service unavailable"}</div>
+          <div class="incident-time">${fmtTime(i.started_at)}${i.ended_at?" → "+fmtTime(i.ended_at):""}</div>
+        </div>
+        <div class="incident-dur ${i.ended_at?"resolved":"open"}">${i.ended_at?fmtDur(i.duration_s):"ONGOING"}</div>
+      </div>`).join("");
+
+  const lastChecked = s.lastChecked ? `Last checked ${new Date(s.lastChecked).toLocaleTimeString()}` : "Not yet checked";
+
+  // Edit button — always visible on the admin page's detail view (user is already authed).
+  // Clicking opens the same form used by the Servers tab, pre-filled for this server.
+  const editButton = `<button type="button" class="detail-edit-btn" onclick="editFromDetail('${s.id}')" title="Edit server">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 20h9"/><path d="M16.5 3.5a2.121 2.121 0 1 1 3 3L7 19l-4 1 1-4L16.5 3.5z"/></svg>
+      Edit server
+    </button>`;
+
+  document.getElementById("mainArea").innerHTML = `
+    <div class="detail-header">
+      <div>
+        <div class="detail-name">${s.name}</div>
+        <div class="detail-host">${s.host}${s.description ? " — "+s.description : ""}</div>
+        <div class="detail-tags">${tags}</div>
+      </div>
+      <div class="detail-actions">
+        ${editButton}
+        <div class="status-big ${s.overall||'pending'}">
+          <div class="status-big-dot"></div>
+          <div>
+            <div class="status-big-label">${statusLabel}</div>
+            <div class="status-big-time">${lastChecked}</div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="uptime-row">${uptimeCards}</div>
+
+    <div class="dv-section">
+      <div class="dv-section-head"><div class="dv-section-title">Current Checks</div></div>
+      <div class="dv-section-body">
+        <div class="checks-row">${checkChips || "<span style='color:var(--text-2);font-size:12px'>No checks configured</span>"}</div>
+      </div>
+    </div>
+
+    <div class="dv-section">
+      <div class="dv-section-head">
+        <div class="dv-section-title">Heartbeat</div>
+        <span style="font-size:11px;color:var(--text-2)">Last 90 checks</span>
+      </div>
+      <div class="dv-section-body">
+        <div class="heartbeat">${hbDots}</div>
+        <div class="hb-legend">
+          <span>${heartbeat.length > 0 ? fmtTime(heartbeat[0].checked_at) : ""}</span>
+          <span style="display:flex;align-items:center;gap:10px">
+            <span style="display:flex;align-items:center;gap:4px"><span style="width:8px;height:8px;border-radius:2px;background:var(--green);display:inline-block"></span> Up</span>
+            <span style="display:flex;align-items:center;gap:4px"><span style="width:8px;height:8px;border-radius:2px;background:var(--red);display:inline-block"></span> Down</span>
+          </span>
+          <span>Now</span>
+        </div>
+      </div>
+    </div>
+
+    <div class="dv-section">
+      <div class="dv-section-head">
+        <div class="dv-section-title">Response Time</div>
+        <span style="font-size:11px;color:var(--text-2)">Last 24h (avg ms)</span>
+      </div>
+      <div class="dv-section-body" style="padding:16px 20px">
+        ${heartbeat.filter(h=>h.response_ms).length > 0
+          ? `<div class="chart-wrap"><canvas id="responseChart"></canvas></div>`
+          : `<div class="chart-empty">No response time data yet — check back after a few cycles</div>`
+        }
+      </div>
+    </div>
+
+    <div class="dv-section">
+      <div class="dv-section-head">
+        <div class="dv-section-title">Incident History</div>
+        <span style="font-size:11px;color:var(--text-2)">${incidents.length} incident${incidents.length===1?"":"s"}</span>
+      </div>
+      <div class="dv-section-body" style="padding:0 20px">
+        <div class="incident-list">${incidentRows}</div>
+      </div>
+    </div>
+  `;
+
+  const chartData = heartbeat.filter(h => h.response_ms !== null && h.response_ms !== undefined);
+  if (chartData.length > 0) drawChart(chartData);
+}
+
+function drawChart(data){
+  const canvas = document.getElementById("responseChart");
+  if (!canvas) return;
+  const dpr  = window.devicePixelRatio || 1;
+  const rect = canvas.parentElement.getBoundingClientRect();
+  canvas.width  = rect.width  * dpr;
+  canvas.height = 120 * dpr;
+  canvas.style.width  = rect.width  + "px";
+  canvas.style.height = "120px";
+  const ctx = canvas.getContext("2d");
+  ctx.scale(dpr, dpr);
+  const W = rect.width, H = 120, PAD = {top:10, right:10, bottom:24, left:40};
+  const cW = W - PAD.left - PAD.right;
+  const cH = H - PAD.top  - PAD.bottom;
+  const vals = data.map(d => d.response_ms);
+  const maxV = Math.max(...vals, 10);
+  const minV = 0;
+  ctx.clearRect(0, 0, W, H);
+
+  ctx.strokeStyle = "rgba(30,100,200,0.1)";
+  ctx.lineWidth   = 1;
+  [0, 0.25, 0.5, 0.75, 1].forEach(f => {
+    const y = PAD.top + cH * (1 - f);
+    ctx.beginPath(); ctx.moveTo(PAD.left, y); ctx.lineTo(W - PAD.right, y); ctx.stroke();
+    ctx.fillStyle = "rgba(61,96,128,0.8)";
+    ctx.font      = "10px JetBrains Mono, monospace";
+    ctx.textAlign = "right";
+    ctx.fillText(Math.round(maxV * f) + "ms", PAD.left - 4, y + 3);
+  });
+
+  const grad = ctx.createLinearGradient(0, PAD.top, 0, PAD.top + cH);
+  grad.addColorStop(0, "rgba(42,127,255,0.3)");
+  grad.addColorStop(1, "rgba(42,127,255,0.0)");
+  ctx.fillStyle = grad;
+  ctx.beginPath();
+  data.forEach((d, i) => {
+    const x = PAD.left + (i / (data.length - 1 || 1)) * cW;
+    const y = PAD.top  + cH * (1 - (d.response_ms - minV) / (maxV - minV));
+    i === 0 ? ctx.moveTo(x, y) : ctx.lineTo(x, y);
+  });
+  ctx.lineTo(PAD.left + cW, PAD.top + cH);
+  ctx.lineTo(PAD.left, PAD.top + cH);
+  ctx.closePath(); ctx.fill();
+
+  ctx.strokeStyle = "rgba(42,127,255,0.9)";
+  ctx.lineWidth   = 2;
+  ctx.lineJoin    = "round";
+  ctx.beginPath();
+  data.forEach((d, i) => {
+    const x = PAD.left + (i / (data.length - 1 || 1)) * cW;
+    const y = PAD.top  + cH * (1 - (d.response_ms - minV) / (maxV - minV));
+    i === 0 ? ctx.moveTo(x, y) : ctx.lineTo(x, y);
+  });
+  ctx.stroke();
+
+  ctx.fillStyle = "rgba(42,127,255,1)";
+  if (data.length <= 30) {
+    data.forEach((d, i) => {
+      const x = PAD.left + (i / (data.length - 1 || 1)) * cW;
+      const y = PAD.top  + cH * (1 - (d.response_ms - minV) / (maxV - minV));
+      ctx.beginPath(); ctx.arc(x, y, 3, 0, Math.PI * 2); ctx.fill();
+    });
+  }
+}
+
+// Refresh selected server detail every 30s
+setInterval(() => { if (selectedServerId) selectServer(selectedServerId); }, 30000);
+
+// On boot, hydrate from cache so the sidebar/detail render before SSE arrives
+(function hydrateFromCache(){
+  const cached = cacheGet("servers");
+  if (cached && cached.length) renderServers(cached);
+})();
+
+// SSE - status
+(function connectStatus(){
+  const es = new EventSource("/api/events");
+  es.onmessage = e => renderServers(JSON.parse(e.data));
+  es.onerror   = () => { es.close(); setTimeout(connectStatus, 5000); };
+})();
+
+// SSE - logs
+(function connectLogs(){
+  const es = new EventSource("/api/log-events");
+  es.onmessage = e => addLog(JSON.parse(e.data));
+  es.onerror   = () => { es.close(); setTimeout(connectLogs, 5000); };
+})();
+
+async function triggerRefresh(){
+  const b = document.getElementById("rfBtn");
+  b.classList.add("spinning"); b.disabled = true;
+  try { await fetch("/api/refresh", {method:"POST"}); } catch(e){}
+  setTimeout(() => { b.classList.remove("spinning"); b.disabled = false; }, 900);
+}
+
+// ── Admin Panel ───────────────────────────────────────────────────────────────
+let currentTab    = "servers";
+let adminServers  = [];
+let currentChecks = [];
+let pendDel       = null;
+let _userStore    = {};
+let pendDelUser   = null;
+
+async function openAdmin(){
+  // Check if logged in before opening admin
+  if (!sessionRole) {
+    window.location.href = "/login";
+    return;
+  }
+  openDrawer("adminDrawer");
+  await switchTab("servers");
+}
+function closeAdmin(){
+  closeDrawer("adminDrawer");
+}
+
+async function switchTab(tab){
+  // Viewers can access Servers, Omada, and Webhooks. Anything else (Groups/Users) bounces back.
+  if (!isAdmin() && !["servers","omada","webhooks"].includes(tab)) tab = "servers";
+  currentTab = tab;
+  serverFormReturn = null;  // switching tabs clears any pending return target
+  document.getElementById("tabServers").classList.toggle("active",  tab === "servers");
+  document.getElementById("tabGroups").classList.toggle("active",   tab === "groups");
+  document.getElementById("tabOmada").classList.toggle("active",    tab === "omada");
+  document.getElementById("tabUsers").classList.toggle("active",    tab === "users");
+  document.getElementById("tabWebhooks").classList.toggle("active", tab === "webhooks");
+  const labels = { servers: "Add Server", groups: "Add Group", omada: "Add Controller", users: "Add User", webhooks: "Add Webhook" };
+  document.getElementById("addBtnLabel").textContent  = labels[tab];
+  document.getElementById("addBtn").onclick           =
+    tab === "servers"  ? () => showServerForm(null) :
+    tab === "groups"   ? () => showGroupForm(null)  :
+    tab === "omada"    ? () => showOmadaForm(null)  :
+    tab === "users"    ? () => showUserForm(null)   :
+                         () => showWebhookForm(null);
+  // Show list view, hide forms
+  document.getElementById("aListView").style.display        = "flex";
+  document.getElementById("aFormView").style.display        = "none";
+  document.getElementById("aUserFormView").style.display    = "none";
+  document.getElementById("aWebhookFormView").style.display = "none";
+  document.getElementById("aGroupFormView").style.display   = "none";
+  document.getElementById("aOmadaFormView").style.display   = "none";
+  document.getElementById("aOmadaSitesView").style.display  = "none";
+  // Load content
+  if      (tab === "servers")  await loadServerList();
+  else if (tab === "groups")   await loadGroupList();
+  else if (tab === "omada")    await loadOmadaList();
+  else if (tab === "users")    await loadUserList();
+  else                         await loadWebhookList();
+}
+
+// ── Server list ───────────────────────────────────────────────────────────────
+function renderAdminServerList(list){
+  const el = document.getElementById("adminPanelBody");
+  document.getElementById("aCount").textContent = `${list.length} server${list.length===1?"":"s"}`;
+  if (!list.length){
+    el.innerHTML = `<div class="empty-state">No servers yet.<br>Click <strong>Add Server</strong> to add one.</div>`;
+    return;
+  }
+  el.innerHTML = list.map((s, idx) => {
+    const checkSummary = (s.checks||[]).map(c =>
+      c.type==="ping"?"Ping":
+      c.type==="tcp"?`TCP :${c.port}`:
+      c.type==="udp"?`UDP :${c.port}`:
+      c.type==="dns"?`DNS ${(c.record_type||"A").toUpperCase()}`:
+      c.type==="omada_gateway"?"Omada":
+      "HTTP"
+    ).join(" - ") || "No checks";
+    // Cert badges: pull from any HTTP check on this server that has live cert info
+    const certBadges = (s.checks||[])
+      .filter(c => c.type === "http" && c.cert && c.cert.expires_at)
+      .map(c => {
+        const d = c.cert.days_left;
+        const ccls = d < 0 ? "cert-expired" : d < 14 ? "cert-warn" : "cert-ok";
+        const txt  = d < 0 ? `SSL expired ${-d}d ago` : d < 1 ? "SSL expires today" : `SSL ${d}d`;
+        const tt   = `${c.cert.subject || ""} · issued by ${c.cert.issuer || "?"} · expires ${new Date(c.cert.expires_at).toLocaleDateString()}`;
+        return `<span class="chip-cert ${ccls}" title="${tt.replace(/"/g,"&quot;")}">${txt}</span>`;
+      }).join("");
+    return `<div class="admin-server-item" onclick="showServerForm(adminServers[${idx}])">
+      <div class="admin-dot ${s.overall||'pending'}"></div>
+      <div class="admin-info">
+        <div class="admin-name">${s.name}</div>
+        <div class="admin-host">${s.host}</div>
+        <div class="admin-checks-label">${checkSummary}${certBadges ? " " + certBadges : ""}</div>
+      </div>
+      <div class="admin-row-actions" onclick="event.stopPropagation()">
+        <button class="btn btn-sm" onclick="showServerForm(adminServers[${idx}])">Edit</button>
+        ${isAdmin() ? `<button class="btn btn-sm btn-danger" onclick="askDel('${s.id}','${s.name}')">Remove</button>` : ``}
+      </div>
+    </div>`;
+  }).join("");
+}
+
+async function loadServerList(){
+  const el = document.getElementById("adminPanelBody");
+
+  // 1) Instant render from cache
+  const cached = cacheGet("admin-servers");
+  if (cached) {
+    adminServers = cached;
+    renderAdminServerList(adminServers);
+  } else {
+    el.innerHTML = `<div style="padding:24px;text-align:center;color:var(--text-2)">Loading servers...</div>`;
+  }
+
+  // 2) Fetch fresh
+  try {
+    const r = await fetch("/api/admin/servers");
+    if (r.status === 401) { window.location.href = "/"; return; }
+    if (!r.ok) {
+      if (!cached) el.innerHTML = `<div class="empty-state">Error ${r.status}</div>`;
+      return;
+    }
+    adminServers = await r.json();
+    cacheSet("admin-servers", adminServers);
+    renderAdminServerList(adminServers);
+    return;
+  } catch(e) {
+    if (!cached) el.innerHTML = `<div class="empty-state">Failed to load: ${e.message}</div>`;
+  }
+}
+
+// ── Server form ───────────────────────────────────────────────────────────────
+let serverPickedGroups = new Set();   // currently-checked group ids in the server form
+
+async function showServerForm(s){
+  document.getElementById("aListView").style.display       = "none";
+  document.getElementById("aFormView").style.display       = "flex";
+  document.getElementById("aUserFormView").style.display   = "none";
+  document.getElementById("aGroupFormView").style.display  = "none";
+  document.getElementById("aOmadaFormView").style.display  = "none";
+  document.getElementById("aOmadaSitesView").style.display = "none";
+  document.getElementById("fHeading").textContent = s ? "Edit Server" : "Add Server";
+  document.getElementById("fId").value    = s?.id || "";
+  document.getElementById("fName").value  = s?.name || "";
+  document.getElementById("fHost").value  = s?.host || "";
+  document.getElementById("fDesc").value  = s?.description || "";
+  document.getElementById("fTags").value  = (s?.tags||[]).join(", ");
+  document.getElementById("fInterval").value = String(s?.poll_interval_sec || 30);
+  document.getElementById("fErr").textContent = "";
+  currentChecks = (s?.checks||[{type:"ping"}]).map(c => ({...c}));
+  // Initialize group selection from the server's existing group_ids
+  serverPickedGroups = new Set(s?.group_ids || []);
+  // If creating a new server as a viewer, default-check their first allowed group
+  if (!s && !isAdmin()) {
+    await ensureGroupsLoaded();
+    if (adminGroups.length && serverPickedGroups.size === 0) {
+      serverPickedGroups.add(adminGroups[0].id);
+    }
+  }
+  // Load groups + omada controllers in parallel before rendering check rows
+  await Promise.all([ensureGroupsLoaded(), ensureOmadaLoaded()]);
+  renderCrows();
+  renderServerGroupsPicker();
+  renderBadgeSection(s);
+}
+
+function renderServerGroupsPicker(){
+  const el = document.getElementById("fGroupsPicker");
+  if (!adminGroups.length) {
+    el.innerHTML = `<div style="padding:14px;color:var(--text-2);font-size:12px;text-align:center">No dashboards yet. Create one in the Groups tab first${isAdmin() ? "" : " (admin only)"}.</div>`;
+    return;
+  }
+  el.innerHTML = adminGroups.map(g => `
+    <label style="display:flex;align-items:center;gap:8px;padding:6px 8px;border-radius:6px;cursor:pointer;font-size:12px;color:var(--text-hi)">
+      <input type="checkbox" value="${g.id}" ${serverPickedGroups.has(g.id) ? "checked" : ""} onchange="toggleServerGroup(${g.id}, this.checked)">
+      <span style="flex:1">${g.name} <span style="color:var(--text-2);font-size:11px">/dashboard/${g.slug}</span></span>
+    </label>
+  `).join("");
+}
+function toggleServerGroup(id, on){
+  if (on) serverPickedGroups.add(id); else serverPickedGroups.delete(id);
+}
+
+function renderBadgeSection(s) {
+  const sec  = document.getElementById("fBadgeSection");
+  const list = document.getElementById("fBadgeList");
+  if (!s || !s.id) { sec.style.display = "none"; return; }
+  sec.style.display = "block";
+  const base   = window.location.origin;
+  const id     = s.id;
+  const badges = [
+    { label: "Status",   url: `${base}/api/badge/${id}/status` },
+    { label: "Uptime 24h", url: `${base}/api/badge/${id}/uptime?duration=24h` },
+    { label: "Uptime 7d",  url: `${base}/api/badge/${id}/uptime?duration=7d` },
+    { label: "Uptime 30d", url: `${base}/api/badge/${id}/uptime?duration=30d` },
+    { label: "Response",   url: `${base}/api/badge/${id}/ping` },
+    { label: "Cert Exp",   url: `${base}/api/badge/${id}/cert-exp` },
+  ];
+  list.innerHTML = badges.map(b => `
+    <div style="display:flex;align-items:center;gap:8px">
+      <span style="font-size:11px;color:var(--text-2);width:68px;flex-shrink:0">${b.label}</span>
+      <img src="${b.url}" alt="${b.label}" style="height:20px;flex-shrink:0" onerror="this.style.display='none'">
+      <input readonly value="${b.url}" onclick="this.select()" style="flex:1;font-size:10px;font-family:var(--mono);background:var(--surface2);border:1px solid var(--border);border-radius:6px;padding:4px 8px;color:var(--text-hi);cursor:text;min-width:0">
+      <button onclick="navigator.clipboard.writeText('${b.url}').then(()=>{this.textContent='Copied';setTimeout(()=>this.textContent='Copy',1500)})" style="font-size:10px;padding:3px 8px;background:var(--surface2);border:1px solid var(--border);border-radius:6px;color:var(--text-2);cursor:pointer;flex-shrink:0;white-space:nowrap">Copy</button>
+    </div>
+  `).join("");
+}
+
+function showList(){
+  document.getElementById("aListView").style.display        = "flex";
+  document.getElementById("aFormView").style.display        = "none";
+  document.getElementById("aUserFormView").style.display    = "none";
+  document.getElementById("aWebhookFormView").style.display = "none";
+  document.getElementById("aGroupFormView").style.display   = "none";
+  document.getElementById("aOmadaFormView").style.display   = "none";
+  document.getElementById("aOmadaSitesView").style.display  = "none";
+  serverFormReturn = null;  // any list navigation drops the return target
+  if      (currentTab === "users")    loadUserList();
+  else if (currentTab === "webhooks") loadWebhookList();
+  else if (currentTab === "groups")   loadGroupList();
+  else if (currentTab === "omada")    loadOmadaList();
+  else                                loadServerList();
+}
+
+function renderCrows(){
+  const c = document.getElementById("crowContainer");
+  if (!currentChecks.length){ c.innerHTML = "<div class=\"no-checks\">No checks yet</div>"; return; }
+  c.innerHTML = currentChecks.map((ck, i) => {
+    const sel = (t) => ck.type===t ? "selected" : "";
+    let detail = "";
+    if (ck.type === "ping") {
+      detail = "<span class=\"crow-hint\">No extra config needed</span>";
+    } else if (ck.type === "tcp") {
+      detail = "<input class=\"finput\" placeholder=\"Port e.g. 3306\" value=\"" + (ck.port||"") + "\" oninput=\"upCk(" + i + ",'port',parseInt(this.value)||0)\" style=\"max-width:160px\">";
+    } else if (ck.type === "udp") {
+      detail = "<input class=\"finput\" placeholder=\"Port e.g. 51820\" value=\"" + (ck.port||"") + "\" oninput=\"upCk(" + i + ",'port',parseInt(this.value)||0)\" style=\"max-width:160px\"><span class=\"crow-hint\">WireGuard: 51820</span>";
+    } else if (ck.type === "http") {
+      // Existing checks default to showing cert info (show_cert undefined or true).
+      // Only when explicitly false do we hide the cert chip.
+      const showCert = ck.show_cert !== false;
+      detail =
+        `<input class="finput" placeholder="URL" value="${ck.url||""}" oninput="upCk(${i},'url',this.value)">` +
+        `<input class="finput" placeholder="Status" value="${ck.expectedStatus||200}" oninput="upCk(${i},'expectedStatus',parseInt(this.value))" style="max-width:90px">` +
+        `<label class="crow-hint" style="display:flex;align-items:center;gap:5px;cursor:pointer;white-space:nowrap" title="Show SSL certificate expiry on the detail view (HTTPS only)">` +
+          `<input type="checkbox" ${showCert ? "checked" : ""} onchange="upCk(${i},'show_cert',this.checked)" style="margin:0">` +
+          `SSL info` +
+        `</label>`;
+    } else if (ck.type === "dns") {
+      // DNS check — hostname, record type dropdown, optional expected value
+      const rtype = (ck.record_type || "A").toUpperCase();
+      const rtOpt = (t) => `<option value="${t}" ${rtype === t ? "selected" : ""}>${t}</option>`;
+      detail =
+        `<input class="finput" placeholder="Hostname e.g. example.com" value="${ck.hostname || ""}" oninput="upCk(${i},'hostname',this.value)" style="max-width:200px">` +
+        `<select class="fselect" onchange="upCk(${i},'record_type',this.value)" style="max-width:90px">` +
+          ["A","AAAA","CNAME","MX","TXT","NS"].map(rtOpt).join("") +
+        `</select>` +
+        `<input class="finput" placeholder="Expected value (optional)" value="${ck.expected || ""}" oninput="upCk(${i},'expected',this.value)">`;
+    } else if (ck.type === "omada_gateway") {
+      // Controller dropdown + site dropdown.
+      // Site dropdown gets populated lazily by populateOmadaSitePicker(i) once a controller is chosen.
+      const ctrlOpts = adminOmada.map(c2 => `<option value="${c2.id}" ${ck.controller_id == c2.id ? "selected" : ""}>${c2.name}</option>`).join("");
+      const ctrlSelect = adminOmada.length
+        ? `<select class="fselect" onchange="upCk(${i},'controller_id',parseInt(this.value)); upCk(${i},'site_id',''); populateOmadaSitePicker(${i})"><option value="">— Controller —</option>${ctrlOpts}</select>`
+        : `<span class="crow-hint" style="color:var(--red)">No Omada controllers configured. Add one in the Omada tab.</span>`;
+      // Site picker — onchange is wired up in populateOmadaSitePicker (handles MSP customer encoding)
+      const siteSelect = ck.controller_id
+        ? `<select class="fselect" id="siteSel${i}"><option value="">${ck.site_id ? "Loading…" : "— Pick site —"}</option></select>`
+        : "";
+      detail = ctrlSelect + siteSelect;
+    }
+    return "<div class=\"crow\">"
+      + "<select class=\"fselect\" onchange=\"changeCT(" + i + ",this.value)\">"
+      + "<option value=\"ping\" " + sel("ping") + ">Ping (ICMP)</option>"
+      + "<option value=\"tcp\" "  + sel("tcp")  + ">TCP Port</option>"
+      + "<option value=\"udp\" "  + sel("udp")  + ">UDP Port</option>"
+      + "<option value=\"http\" " + sel("http") + ">HTTP</option>"
+      + "<option value=\"dns\" "  + sel("dns")  + ">DNS Record</option>"
+      + "<option value=\"omada_gateway\" " + sel("omada_gateway") + ">Omada Gateway</option>"
+      + "</select>"
+      + "<div class=\"crow-detail\">" + detail + "</div>"
+      + "<button class=\"rm-check\" onclick=\"rmCk(" + i + ")\">x</button>"
+      + "</div>";
+  }).join("");
+  // After render, populate any omada site pickers that already have a controller selected
+  currentChecks.forEach((ck, i) => {
+    if (ck.type === "omada_gateway" && ck.controller_id) populateOmadaSitePicker(i);
+  });
+}
+
+async function populateOmadaSitePicker(i){
+  const ck = currentChecks[i];
+  if (!ck || !ck.controller_id) return;
+  const sel = document.getElementById("siteSel" + i);
+  if (!sel) return;
+  // Use cached site list if we have it
+  let sites = omadaSitesCache[ck.controller_id];
+  if (!sites) {
+    try {
+      const r = await fetch(`/api/admin/omada-controllers/${ck.controller_id}/sites`);
+      if (r.ok) { sites = await r.json(); omadaSitesCache[ck.controller_id] = sites; }
+    } catch(e) {}
+  }
+  if (!sites || !sites.length) {
+    sel.innerHTML = `<option value="">— No sites returned —</option>`;
+    return;
+  }
+  // Encode "customerId|siteId" for MSP, plain siteId otherwise
+  // For MSP sites, group by customer using <optgroup> so the picker shows
+  // Customer A
+  //   ├─ Site 1
+  //   └─ Site 2
+  const hasCustomers = sites.some(s => s.customerId);
+  if (hasCustomers) {
+    // Group by customer
+    const byCust = {};
+    sites.forEach(s => {
+      const key = s.customerId || "_uncategorized";
+      if (!byCust[key]) byCust[key] = { name: s.customerName || key, items: [] };
+      byCust[key].items.push(s);
+    });
+    let html = `<option value="">— Pick site —</option>`;
+    for (const [cid, group] of Object.entries(byCust)) {
+      html += `<optgroup label="${group.name}">`;
+      for (const s of group.items) {
+        const sid     = s.siteId || s.id;
+        const value   = `${s.customerId}|${sid}`;
+        const matches = ck.site_id == sid && ck.customer_id == s.customerId;
+        html += `<option value="${value}" ${matches ? "selected" : ""}>${s.name || sid}</option>`;
+      }
+      html += `</optgroup>`;
+    }
+    sel.innerHTML = html;
+  } else {
+    sel.innerHTML = `<option value="">— Pick site —</option>` +
+      sites.map(s => {
+        const sid     = s.siteId || s.id;
+        const matches = ck.site_id == sid && !ck.customer_id;
+        return `<option value="${sid}" ${matches ? "selected" : ""}>${s.name || sid}</option>`;
+      }).join("");
+  }
+  // Wire onchange — parse the encoded value into customer_id (optional) + site_id,
+  // then look up the chosen site from the cached site list to also store the
+  // friendly site_name and customer_name (required for MSP filtering).
+  sel.onchange = function(){
+    const parts = this.value.split("|");
+    let cid, sid;
+    if (parts.length === 2) { cid = parts[0]; sid = parts[1]; }
+    else                    { cid = null;     sid = parts[0]; }
+    upCk(i, "customer_id", cid);
+    upCk(i, "site_id",     sid);
+    // Look up the picked site to grab its name + customer name
+    const sitesList = omadaSitesCache[ck.controller_id] || [];
+    const picked = sitesList.find(s => (s.siteId || s.id) === sid);
+    upCk(i, "site_name",     picked?.name || null);
+    upCk(i, "customer_name", picked?.customerName || null);
+  };
+}
+
+function addCrow()    { currentChecks.push({type:"ping"}); renderCrows(); }
+function rmCk(i)      { currentChecks.splice(i,1); renderCrows(); }
+function changeCT(i,t){ currentChecks[i] = {type:t}; renderCrows(); }
+function upCk(i,k,v)  { currentChecks[i][k] = v; }
+
+async function submitForm(){
+  const name = document.getElementById("fName").value.trim();
+  const host = document.getElementById("fHost").value.trim();
+  if (!name || !host){ document.getElementById("fErr").textContent = "Name and host required."; return; }
+  const id   = document.getElementById("fId").value;
+  const body = {
+    name, host,
+    description:       document.getElementById("fDesc").value.trim(),
+    tags:              document.getElementById("fTags").value.split(",").map(t=>t.trim()).filter(Boolean),
+    checks:            currentChecks.map(c => ({...c})),
+    group_ids:         Array.from(serverPickedGroups),
+    poll_interval_sec: parseInt(document.getElementById("fInterval").value) || 30
+  };
+  try {
+    const r = await fetch(id ? `/api/admin/servers/${id}` : "/api/admin/servers", {
+      method: id ? "PUT" : "POST",
+      headers:{"Content-Type":"application/json"},
+      body: JSON.stringify(body)
+    });
+    const d = await r.json();
+    if (!r.ok){ document.getElementById("fErr").textContent = d.error||"Failed"; return; }
+    cacheDel("admin-servers");
+    cacheDel("admin-groups");
+    toast(id ? "Server updated" : "Server added", "success");
+    // If we came from the Omada sites browser, return there instead of the Servers tab
+    if (serverFormReturn && serverFormReturn.type === "omada-sites" && serverFormReturn.controller) {
+      const ctrl = serverFormReturn.controller;
+      serverFormReturn = null;
+      showOmadaSites(ctrl);
+    } else {
+      showList();
+    }
+  } catch(e){ document.getElementById("fErr").textContent = "Error: "+e.message; }
+}
+
+function askDel(id, name){
+  pendDel = id;
+  document.getElementById("confirmMsg").textContent = `"${name}" will be removed.`;
+  document.getElementById("confirmDlg").classList.add("open");
+  document.querySelector("#confirmDlg .btn-danger").onclick = doDelete;
+}
+function closeConfirm(){
+  document.getElementById("confirmDlg").classList.remove("open");
+  pendDel = null; pendDelUser = null; pendDelGroup = null; pendDelOmada = null;
+}
+async function doDelete(){
+  if (!pendDel) return;
+  try {
+    const r = await fetch(`/api/admin/servers/${pendDel}`, {method:"DELETE"});
+    const d = await r.json();
+    if (r.ok) { cacheDel("admin-servers"); cacheDel("admin-groups"); }
+    toast(r.ok ? "Server removed" : (d.error||"Failed"), r.ok ? "info" : "error");
+  } catch(e){ toast("Error: "+e.message, "error"); }
+  closeConfirm();
+  loadServerList();
+}
+
+// ── User list ─────────────────────────────────────────────────────────────────
+function renderAdminUserList(users){
+  const el = document.getElementById("adminPanelBody");
+  _userStore = {};
+  users.forEach(u => _userStore[u.id] = u);
+  document.getElementById("aCount").textContent = `${users.length} user${users.length===1?"":"s"}`;
+  if (!users.length){ el.innerHTML = `<div class="empty-state">No users found.</div>`; return; }
+  // Build a group-id → group lookup from the cached groups list (loaded by ensureGroupsLoaded)
+  const groupById = {};
+  adminGroups.forEach(g => { groupById[g.id] = g; });
+  el.innerHTML = users.map(u => {
+    // Dashboard pills: admin = "All", viewer = pills for each allowed group
+    let pillsHtml;
+    if (u.role === "admin") {
+      pillsHtml = `<span class="user-dash-pill user-dash-all">All dashboards</span>`;
+    } else {
+      const ids = u.allowed_group_ids || [];
+      if (!ids.length) {
+        pillsHtml = `<span class="user-dash-pill user-dash-none">No dashboards assigned</span>`;
+      } else {
+        pillsHtml = ids.map(gid => {
+          const g = groupById[gid];
+          const name = g ? g.name : `#${gid}`;
+          const color = g && g.accent_color ? g.accent_color : "var(--blue)";
+          return `<span class="user-dash-pill" style="border-color:${color};color:${color}">${name}</span>`;
+        }).join("");
+      }
+    }
+    return `<div class="user-item" onclick="showUserForm(_userStore[${u.id}])">
+      <div class="user-avatar">${(u.username||"?")[0].toUpperCase()}</div>
+      <div class="user-info">
+        <div class="user-name">${u.username}</div>
+        <div class="user-meta">Created ${new Date(u.created_at).toLocaleDateString()}</div>
+        <div class="user-dash-pills">${pillsHtml}</div>
+      </div>
+      <span class="role-badge ${u.role}">${u.role}</span>
+      <div class="admin-row-actions" onclick="event.stopPropagation()">
+        <button class="btn btn-sm" onclick="showUserForm(_userStore[${u.id}])">Edit</button>
+        <button class="btn btn-sm btn-danger" onclick="askDelUser(${u.id})">Remove</button>
+      </div>
+    </div>`;
+  }).join("");
+}
+
+async function loadUserList(){
+  const el = document.getElementById("adminPanelBody");
+
+  // Make sure groups are loaded so user rows can render dashboard pills with real names
+  await ensureGroupsLoaded();
+
+  // 1) Instant render from cache
+  const cached = cacheGet("admin-users");
+  if (cached) renderAdminUserList(cached);
+  else        el.innerHTML = `<div style="padding:24px;text-align:center;color:var(--text-2)">Loading users...</div>`;
+
+  // 2) Fetch fresh
+  try {
+    const r = await fetch("/api/admin/users");
+    if (r.status === 401){ window.location.href = "/"; return; }
+    if (r.status === 403){
+      if (!cached) el.innerHTML = `<div class="empty-state">Admin role required. Log out and back in.</div>`;
+      return;
+    }
+    if (!r.ok){
+      if (!cached) el.innerHTML = `<div class="empty-state">Error ${r.status}</div>`;
+      return;
+    }
+    const users = await r.json();
+    cacheSet("admin-users", users);
+    renderAdminUserList(users);
+  } catch(e){
+    if (!cached) el.innerHTML = `<div class="empty-state">Failed: ${e.message}</div>`;
+  }
+}
+
+// ── User form ─────────────────────────────────────────────────────────────────
+// Tracks the in-form selection of allowed group ids for the user being edited
+let userPickedGroups = new Set();
+
+async function showUserForm(u){
+  document.getElementById("aListView").style.display     = "none";
+  document.getElementById("aFormView").style.display     = "none";
+  document.getElementById("aUserFormView").style.display = "flex";
+  document.getElementById("uFormHeading").textContent    = u ? "Edit User" : "Add User";
+  document.getElementById("uId").value       = u?.id       || "";
+  document.getElementById("uName").value     = u?.username || "";
+  document.getElementById("uRole").value     = u?.role     || "viewer";
+  document.getElementById("uPassword").value = "";
+  document.getElementById("uPwdHint").textContent = u ? "(leave blank to keep current)" : "(required)";
+  document.getElementById("uErr").textContent = "";
+  // Pre-select the user's existing allowed groups
+  userPickedGroups = new Set(u?.allowed_group_ids || []);
+  // Make sure groups are loaded so the picker can render them
+  await ensureGroupsLoaded();
+  renderUserGroupsPicker();
+  onUserRoleChange();
+}
+
+// Hide the Allowed Dashboards row when role=admin (admins see everything)
+function onUserRoleChange(){
+  const role = document.getElementById("uRole").value;
+  document.getElementById("uGroupsRow").style.display = role === "admin" ? "none" : "block";
+}
+
+function renderUserGroupsPicker(){
+  const el = document.getElementById("uGroupsPicker");
+  if (!adminGroups.length) {
+    el.innerHTML = `<div style="padding:14px;color:var(--text-2);font-size:12px;text-align:center">No dashboards yet. Create one in the Groups tab first.</div>`;
+    return;
+  }
+  el.innerHTML = adminGroups.map(g => `
+    <label style="display:flex;align-items:center;gap:8px;padding:6px 8px;border-radius:6px;cursor:pointer;font-size:12px;color:var(--text-hi)">
+      <input type="checkbox" value="${g.id}" ${userPickedGroups.has(g.id) ? "checked" : ""} onchange="toggleUserGroup(${g.id}, this.checked)">
+      <span style="flex:1">${g.name} <span style="color:var(--text-2);font-size:11px">/dashboard/${g.slug}</span></span>
+    </label>
+  `).join("");
+}
+function toggleUserGroup(id, on){
+  if (on) userPickedGroups.add(id); else userPickedGroups.delete(id);
+}
+
+function showUserList(){ showList(); }
+
+async function submitUserForm(){
+  const id       = document.getElementById("uId").value;
+  const username = document.getElementById("uName").value.trim();
+  const role     = document.getElementById("uRole").value;
+  const password = document.getElementById("uPassword").value;
+  const err      = document.getElementById("uErr");
+  if (!username)           { err.textContent = "Username required"; return; }
+  if (!id && !password)    { err.textContent = "Password required for new users"; return; }
+  const body = {username, role};
+  if (password) body.password = password;
+  // Only attach allowed_group_ids when role=viewer (admins are always unrestricted)
+  if (role === "viewer") body.allowed_group_ids = Array.from(userPickedGroups);
+  try {
+    const r = await fetch(id ? `/api/admin/users/${id}` : "/api/admin/users", {
+      method: id ? "PUT" : "POST",
+      headers:{"Content-Type":"application/json"},
+      body: JSON.stringify(body)
+    });
+    const d = await r.json();
+    if (!r.ok){ err.textContent = d.error || "Failed"; return; }
+    cacheDel("admin-users");
+    toast(id ? "User updated" : "User created", "success");
+    showList();
+  } catch(e){ err.textContent = "Error: " + e.message; }
+}
+
+function askDelUser(id){
+  pendDelUser = id;
+  const u = _userStore[id];
+  document.getElementById("confirmMsg").textContent = `"${u?.username}" will be permanently deleted.`;
+  document.getElementById("confirmDlg").classList.add("open");
+  document.querySelector("#confirmDlg .btn-danger").onclick = doDeleteUser;
+}
+async function doDeleteUser(){
+  if (!pendDelUser) return;
+  try {
+    const r = await fetch(`/api/admin/users/${pendDelUser}`, {method:"DELETE"});
+    const d = await r.json();
+    if (r.ok) cacheDel("admin-users");
+    toast(r.ok ? "User removed" : (d.error||"Failed"), r.ok ? "info" : "error");
+  } catch(e){ toast("Error: "+e.message, "error"); }
+  closeConfirm();
+  loadUserList();
+}
+
+// ── Webhook list ──────────────────────────────────────────────────────────────
+let _webhookStore = {};
+let pendDelWebhook = null;
+
+function renderAdminWebhookList(hooks){
+  const el = document.getElementById("adminPanelBody");
+  _webhookStore = {};
+  hooks.forEach(h => _webhookStore[h.id] = h);
+  document.getElementById("aCount").textContent = `${hooks.length} webhook${hooks.length===1?"":"s"}`;
+  if (!hooks.length){
+    el.innerHTML = `<div class="empty-state">No webhooks yet.<br>Click <strong>Add Webhook</strong> to send alerts when servers go down.</div>`;
+    return;
+  }
+  el.innerHTML = hooks.map(h => {
+    const triggers = [h.fire_on_down ? "down" : null, h.fire_on_recovery ? "recovery" : null].filter(Boolean).join(" - ") || "none";
+    const status   = h.enabled ? "" : ' <span style="color:var(--text-2);font-size:10px">(disabled)</span>';
+    const fmt      = h.format === "auto" ? "auto" : h.format;
+    return `<div class="admin-server-item" onclick="showWebhookForm(_webhookStore[${h.id}])">
+      <div class="admin-dot ${h.enabled?'up':'pending'}"></div>
+      <div class="admin-info">
+        <div class="admin-name">${h.name}${status}</div>
+        <div class="admin-host">${h.url.length > 60 ? h.url.slice(0, 60) + "..." : h.url}</div>
+        <div class="admin-checks-label">${fmt} - fires on: ${triggers}</div>
+      </div>
+      <div class="admin-row-actions" onclick="event.stopPropagation()">
+        <button class="btn btn-sm" onclick="testWebhook(${h.id})">Test</button>
+        <button class="btn btn-sm" onclick="showWebhookForm(_webhookStore[${h.id}])">Edit</button>
+        <button class="btn btn-sm btn-danger" onclick="askDelWebhook(${h.id})">Remove</button>
+      </div>
+    </div>`;
+  }).join("");
+}
+
+async function loadWebhookList(){
+  const el = document.getElementById("adminPanelBody");
+
+  // 1) Instant render from cache
+  const cached = cacheGet("admin-webhooks");
+  if (cached) renderAdminWebhookList(cached);
+  else        el.innerHTML = `<div style="padding:24px;text-align:center;color:var(--text-2)">Loading webhooks...</div>`;
+
+  // 2) Fetch fresh
+  try {
+    const r = await fetch("/api/admin/webhooks");
+    if (r.status === 401){ window.location.href = "/"; return; }
+    if (r.status === 403){
+      if (!cached) el.innerHTML = `<div class="empty-state">Admin role required.</div>`;
+      return;
+    }
+    if (!r.ok){
+      if (!cached) el.innerHTML = `<div class="empty-state">Error ${r.status}</div>`;
+      return;
+    }
+    const hooks = await r.json();
+    cacheSet("admin-webhooks", hooks);
+    renderAdminWebhookList(hooks);
+  } catch(e){
+    if (!cached) el.innerHTML = `<div class="empty-state">Failed: ${e.message}</div>`;
+  }
+}
+
+async function showWebhookForm(h){
+  document.getElementById("aListView").style.display        = "none";
+  document.getElementById("aFormView").style.display        = "none";
+  document.getElementById("aUserFormView").style.display    = "none";
+  document.getElementById("aWebhookFormView").style.display = "flex";
+  document.getElementById("wFormHeading").textContent = h ? "Edit Webhook" : "Add Webhook";
+  document.getElementById("wId").value     = h?.id || "";
+  document.getElementById("wName").value   = h?.name || "";
+  document.getElementById("wUrl").value    = h?.url || "";
+  document.getElementById("wFormat").value = h?.format || "auto";
+  document.getElementById("wEnabled").checked    = h ? !!h.enabled          : true;
+  document.getElementById("wOnDown").checked     = h ? !!h.fire_on_down     : true;
+  document.getElementById("wOnRecovery").checked = h ? !!h.fire_on_recovery : true;
+  document.getElementById("wErr").textContent = "";
+  document.getElementById("wTestBtn").style.display = h ? "" : "none";
+  // Owner Group dropdown — admin can pick "Global" (fires for everything), viewers must scope to their group
+  await ensureGroupsLoaded();
+  const sel = document.getElementById("wGroup");
+  if (isAdmin()) {
+    sel.innerHTML = `<option value="">— Global (fires for ALL servers) —</option>` +
+      adminGroups.map(g => `<option value="${g.id}" ${h && h.group_id == g.id ? "selected" : ""}>${g.name} (only fires for these servers)</option>`).join("");
+  } else {
+    const defaultId = (h && h.group_id) || (adminGroups[0] && adminGroups[0].id) || "";
+    sel.innerHTML = adminGroups.map(g => `<option value="${g.id}" ${defaultId == g.id ? "selected" : ""}>${g.name}</option>`).join("");
+  }
+}
+
+async function submitWebhookForm(){
+  const id   = document.getElementById("wId").value;
+  const name = document.getElementById("wName").value.trim();
+  const url  = document.getElementById("wUrl").value.trim();
+  const err  = document.getElementById("wErr");
+  if (!name || !url){ err.textContent = "Name and URL required"; return; }
+  if (!/^https?:\/\//i.test(url)){ err.textContent = "URL must start with http:// or https://"; return; }
+  const groupSel = document.getElementById("wGroup").value;
+  const body = {
+    name, url,
+    format:           document.getElementById("wFormat").value,
+    enabled:          document.getElementById("wEnabled").checked,
+    fire_on_down:     document.getElementById("wOnDown").checked,
+    fire_on_recovery: document.getElementById("wOnRecovery").checked,
+    group_id:         groupSel ? parseInt(groupSel) : null
+  };
+  try {
+    const r = await fetch(id ? `/api/admin/webhooks/${id}` : "/api/admin/webhooks", {
+      method: id ? "PUT" : "POST",
+      headers: {"Content-Type":"application/json"},
+      body: JSON.stringify(body)
+    });
+    const d = await r.json();
+    if (!r.ok){ err.textContent = d.error || "Failed"; return; }
+    cacheDel("admin-webhooks");
+    toast(id ? "Webhook updated" : "Webhook created", "success");
+    showList();
+  } catch(e){ err.textContent = "Error: " + e.message; }
+}
+
+async function testWebhook(id){
+  toast("Sending test webhook...", "info");
+  try {
+    const r = await fetch(`/api/admin/webhooks/${id}/test`, {method:"POST"});
+    const d = await r.json();
+    if (r.ok) toast(`Test sent (HTTP ${d.status}, ${d.format})`, "success");
+    else      toast("Test failed: " + (d.error || "unknown"), "error");
+  } catch(e){ toast("Error: " + e.message, "error"); }
+}
+
+async function testWebhookFromForm(){
+  const id = document.getElementById("wId").value;
+  if (!id) return;
+  await testWebhook(parseInt(id));
+}
+
+function askDelWebhook(id){
+  pendDelWebhook = id;
+  const h = _webhookStore[id];
+  document.getElementById("confirmMsg").textContent = `"${h?.name}" will be removed.`;
+  document.getElementById("confirmDlg").classList.add("open");
+  document.querySelector("#confirmDlg .btn-danger").onclick = doDeleteWebhook;
+}
+async function doDeleteWebhook(){
+  if (!pendDelWebhook) return;
+  try {
+    const r = await fetch(`/api/admin/webhooks/${pendDelWebhook}`, {method:"DELETE"});
+    const d = await r.json();
+    if (r.ok) cacheDel("admin-webhooks");
+    toast(r.ok ? "Webhook removed" : (d.error||"Failed"), r.ok ? "info" : "error");
+  } catch(e){ toast("Error: "+e.message, "error"); }
+  pendDelWebhook = null;
+  closeConfirm();
+  loadWebhookList();
+}
+
+// ── Groups (Dashboards) ──────────────────────────────────────────────────────
+let adminGroups   = [];
+let pendDelGroup  = null;
+let pickedServers = new Set();   // selected server ids while editing a group
+
+function slugifyJS(s){
+  return String(s||"").toLowerCase().trim()
+    .replace(/[^a-z0-9]+/g,"-")
+    .replace(/^-|-$/g,"")
+    .slice(0,64);
+}
+
+// Auto-fill slug when typing the name (only if user hasn't manually edited the slug)
+let _slugDirty = false;
+function autoSlug(name){
+  if (_slugDirty) return;
+  document.getElementById("gSlug").value = slugifyJS(name);
+}
+
+async function ensureGroupsLoaded(){
+  if (adminGroups.length) return;
+  const cached = cacheGet("admin-groups");
+  if (cached) { adminGroups = cached; return; }
+  try {
+    const r = await fetch("/api/admin/groups");
+    if (r.ok) { adminGroups = await r.json(); cacheSet("admin-groups", adminGroups); }
+  } catch(e) { /* swallow */ }
+}
+
+function renderAdminGroupList(list){
+  const el = document.getElementById("adminPanelBody");
+  document.getElementById("aCount").textContent = `${list.length} group${list.length===1?"":"s"}`;
+  if (!list.length){
+    el.innerHTML = `<div class="empty-state">No dashboards yet.<br>Click <strong>Add Group</strong> to create one.</div>`;
+    return;
+  }
+  el.innerHTML = list.map((g, idx) => `
+    <div class="admin-server-item" onclick="showGroupForm(adminGroups[${idx}])">
+      <div class="admin-dot" style="background:${g.accent_color||'#2a7fff'}"></div>
+      <div class="admin-info">
+        <div class="admin-name">${g.name}</div>
+        <div class="admin-host">/dashboard/${g.slug}</div>
+        <div class="admin-checks-label">${g.server_count} server${g.server_count===1?"":"s"}${g.description ? " · " + g.description : ""}</div>
+      </div>
+      <div class="admin-row-actions" onclick="event.stopPropagation()">
+        <a class="btn btn-sm" href="/dashboard/${g.slug}" target="_blank" style="text-decoration:none">View</a>
+        <button class="btn btn-sm" onclick="showGroupForm(adminGroups[${idx}])">Edit</button>
+        <button class="btn btn-sm btn-danger" onclick="askDelGroup(${g.id},'${g.name.replace(/'/g,"\\'")}')">Remove</button>
+      </div>
+    </div>
+  `).join("");
+}
+
+async function loadGroupList(){
+  const el = document.getElementById("adminPanelBody");
+  const cached = cacheGet("admin-groups");
+  if (cached) { adminGroups = cached; renderAdminGroupList(adminGroups); }
+  else el.innerHTML = `<div style="padding:24px;text-align:center;color:var(--text-2)">Loading groups...</div>`;
+  try {
+    const r = await fetch("/api/admin/groups");
+    if (r.status === 401) { window.location.href = "/"; return; }
+    if (!r.ok) { if (!cached) el.innerHTML = `<div class="empty-state">Error ${r.status}</div>`; return; }
+    adminGroups = await r.json();
+    cacheSet("admin-groups", adminGroups);
+    renderAdminGroupList(adminGroups);
+  } catch(e) {
+    if (!cached) el.innerHTML = `<div class="empty-state">Failed to load: ${e.message}</div>`;
+  }
+}
+
+function renderGroupServerPicker(){
+  const el = document.getElementById("gServerPicker");
+  if (!adminServers.length){
+    el.innerHTML = `<div style="padding:14px;color:var(--text-2);font-size:12px;text-align:center">No servers yet. Add servers first.</div>`;
+    document.getElementById("gPickCount").textContent = "(0 selected)";
+    return;
+  }
+  el.innerHTML = adminServers.map(s => `
+    <label style="display:flex;align-items:center;gap:8px;padding:6px 8px;border-radius:6px;cursor:pointer;font-size:12px;color:var(--text-hi)">
+      <input type="checkbox" value="${s.id}" ${pickedServers.has(s.id) ? "checked" : ""} onchange="togglePickedServer('${s.id}', this.checked)">
+      <span style="flex:1">${s.name} <span style="color:var(--text-2);font-size:11px">${s.host}</span></span>
+    </label>
+  `).join("");
+  document.getElementById("gPickCount").textContent = `(${pickedServers.size} selected)`;
+}
+function togglePickedServer(id, on){
+  if (on) pickedServers.add(id); else pickedServers.delete(id);
+  document.getElementById("gPickCount").textContent = `(${pickedServers.size} selected)`;
+}
+
+async function showGroupForm(g){
+  document.getElementById("aListView").style.display        = "none";
+  document.getElementById("aFormView").style.display        = "none";
+  document.getElementById("aUserFormView").style.display    = "none";
+  document.getElementById("aWebhookFormView").style.display = "none";
+  document.getElementById("aGroupFormView").style.display   = "flex";
+  document.getElementById("gFormHeading").textContent = g ? "Edit Group" : "Add Group";
+  document.getElementById("gId").value    = g?.id    || "";
+  document.getElementById("gName").value  = g?.name  || "";
+  document.getElementById("gSlug").value  = g?.slug  || "";
+  document.getElementById("gDesc").value  = g?.description || "";
+  document.getElementById("gLogo").value  = g?.logo_text   || "";
+  document.getElementById("gColor").value = g?.accent_color || "#2a7fff";
+  const lsz = g?.logo_size || 42;
+  document.getElementById("gLogoSize").value = lsz;
+  document.getElementById("gLogoSizeVal").textContent = lsz + "px";
+  document.getElementById("gTheme").value = g?.default_theme || "dark";
+  document.getElementById("gCustomDomain").value = g?.custom_domain || "";
+  // Background color: if the group has one set, enable the toggle and pre-fill; else show default
+  const hasBg = !!g?.bg_color;
+  document.getElementById("gBgColorEnabled").checked = hasBg;
+  document.getElementById("gBgColor").value = g?.bg_color || "#060c18";
+  document.getElementById("gBgColor").disabled = !hasBg;
+  document.getElementById("gErr").textContent = "";
+  // Restore existing logo image if editing
+  document.getElementById("gLogoImageData").value = g?.logo_image || "";
+  document.getElementById("gLogoFile").value = "";
+  renderGroupLogoPreview(g?.logo_image || "");
+  _slugDirty = !!g; // editing => don't auto-overwrite slug
+  pickedServers = new Set(g?.server_ids || []);
+  // View link only on edit
+  const link = document.getElementById("gViewLink");
+  if (g) { link.href = `/dashboard/${g.slug}`; link.textContent = `View /dashboard/${g.slug} →`; link.style.display = "inline"; }
+  else   { link.style.display = "none"; }
+  // Need adminServers loaded for the picker
+  if (!adminServers.length) {
+    try { const r = await fetch("/api/admin/servers"); if (r.ok) adminServers = await r.json(); } catch(e){}
+  }
+  renderGroupServerPicker();
+  // Mark slug field as dirty if user edits manually
+  document.getElementById("gSlug").oninput = () => { _slugDirty = true; };
+}
+
+// Render the chosen/existing logo image inside the small 48x48 preview tile
+function renderGroupLogoPreview(dataUrl){
+  const box = document.getElementById("gLogoPreview");
+  const clr = document.getElementById("gLogoClearBtn");
+  if (dataUrl) {
+    box.innerHTML = `<img src="${dataUrl}" alt="logo" style="width:100%;height:100%;object-fit:contain;border-radius:6px">`;
+    clr.style.display = "inline-flex";
+  } else {
+    box.innerHTML = "none";
+    clr.style.display = "none";
+  }
+}
+
+// File picker handler — reads the image as base64 and stores it on the hidden field
+function onGroupLogoFile(e){
+  const file = e.target.files && e.target.files[0];
+  if (!file) return;
+  if (file.size > 256 * 1024) {
+    document.getElementById("gErr").textContent = `Image too large (${Math.round(file.size/1024)} KB; max 256 KB). Please resize first.`;
+    e.target.value = "";
+    return;
+  }
+  document.getElementById("gErr").textContent = "";
+  const reader = new FileReader();
+  reader.onload = () => {
+    const dataUrl = reader.result;
+    document.getElementById("gLogoImageData").value = dataUrl;
+    renderGroupLogoPreview(dataUrl);
+  };
+  reader.onerror = () => {
+    document.getElementById("gErr").textContent = "Failed to read image file.";
+  };
+  reader.readAsDataURL(file);
+}
+
+function clearGroupLogo(){
+  document.getElementById("gLogoImageData").value = "";
+  document.getElementById("gLogoFile").value = "";
+  renderGroupLogoPreview("");
+}
+
+// Enable/disable the background color picker based on the "use custom" checkbox
+function onBgColorToggle(){
+  const on = document.getElementById("gBgColorEnabled").checked;
+  document.getElementById("gBgColor").disabled = !on;
+  document.getElementById("gBgColorHint").textContent = on
+    ? "Custom background — text color will be auto-picked for contrast"
+    : "Uncheck to use the default theme background";
+}
+
+async function submitGroupForm(){
+  const name = document.getElementById("gName").value.trim();
+  const slug = document.getElementById("gSlug").value.trim();
+  if (!name) { document.getElementById("gErr").textContent = "Name is required."; return; }
+  if (!slug) { document.getElementById("gErr").textContent = "Slug is required."; return; }
+  const id   = document.getElementById("gId").value;
+  // bg_color is sent as the picked color when enabled, or empty string to clear it
+  const bgEnabled = document.getElementById("gBgColorEnabled").checked;
+  const body = {
+    name, slug,
+    description:    document.getElementById("gDesc").value.trim(),
+    logo_text:      document.getElementById("gLogo").value.trim(),
+    logo_image:     document.getElementById("gLogoImageData").value || "",
+    logo_size:      parseInt(document.getElementById("gLogoSize").value) || 42,
+    accent_color:   document.getElementById("gColor").value,
+    bg_color:       bgEnabled ? document.getElementById("gBgColor").value : "",
+    default_theme:  document.getElementById("gTheme").value,
+    custom_domain:  document.getElementById("gCustomDomain").value.trim(),
+    server_ids:     Array.from(pickedServers)
+  };
+  try {
+    const r = await fetch(id ? `/api/admin/groups/${id}` : "/api/admin/groups", {
+      method: id ? "PUT" : "POST",
+      headers: {"Content-Type":"application/json"},
+      body: JSON.stringify(body)
+    });
+    const d = await r.json();
+    if (!r.ok) { document.getElementById("gErr").textContent = d.error || "Failed"; return; }
+    cacheDel("admin-groups");
+    cacheDel("admin-servers");
+    toast(id ? "Group updated" : "Group created", "success");
+    showList();
+  } catch(e) { document.getElementById("gErr").textContent = "Error: " + e.message; }
+}
+
+function askDelGroup(id, name){
+  pendDelGroup = id;
+  document.getElementById("confirmMsg").textContent = `Group "${name}" will be removed. Servers in it will become ungrouped.`;
+  document.getElementById("confirmDlg").classList.add("open");
+  document.querySelector("#confirmDlg .btn-danger").onclick = doDeleteGroup;
+}
+
+async function doDeleteGroup(){
+  if (!pendDelGroup) return;
+  try {
+    const r = await fetch(`/api/admin/groups/${pendDelGroup}`, {method:"DELETE"});
+    const d = await r.json();
+    if (r.ok) { cacheDel("admin-groups"); cacheDel("admin-servers"); }
+    toast(r.ok ? "Group removed" : (d.error||"Failed"), r.ok ? "info" : "error");
+  } catch(e) { toast("Error: " + e.message, "error"); }
+  pendDelGroup = null;
+  closeConfirm();
+  loadGroupList();
+}
+
+// ── Omada Controllers ─────────────────────────────────────────────────────────
+let adminOmada     = [];
+let pendDelOmada   = null;
+let omadaSitesCache = {}; // { controllerId: [sites] } — for the server form picker
+
+async function ensureOmadaLoaded(){
+  if (adminOmada.length) return;
+  const cached = cacheGet("admin-omada");
+  if (cached) { adminOmada = cached; return; }
+  try {
+    const r = await fetch("/api/admin/omada-controllers");
+    if (r.ok) { adminOmada = await r.json(); cacheSet("admin-omada", adminOmada); }
+  } catch(e) {}
+}
+
+function renderAdminOmadaList(list){
+  const el = document.getElementById("adminPanelBody");
+  document.getElementById("aCount").textContent = `${list.length} controller${list.length===1?"":"s"}`;
+  if (!list.length){
+    el.innerHTML = `<div class="empty-state">No Omada controllers yet.<br>Click <strong>Add Controller</strong> to register one.</div>`;
+    return;
+  }
+  el.innerHTML = list.map((c, idx) => {
+    const modeBadge = c.mode === "msp" ? ` <span style="font-size:9px;font-weight:600;padding:1px 6px;border-radius:8px;background:var(--blue-soft);color:var(--blue);letter-spacing:.04em;vertical-align:middle">MSP</span>` : "";
+    const errorBadge = c.last_error ? `<div class="admin-checks-label" style="color:var(--red)">⚠ ${c.last_error}</div>` : `<div class="admin-checks-label">omadacId: <span style="font-family:var(--mono)">${(c.omadac_id||"—").slice(0,16)}…</span></div>`;
+    return `<div class="admin-server-item" onclick="showOmadaSites(adminOmada[${idx}])">
+      <div class="admin-dot ${c.last_error ? 'down' : 'up'}"></div>
+      <div class="admin-info">
+        <div class="admin-name">${c.name}${modeBadge}</div>
+        <div class="admin-host">${c.base_url}</div>
+        ${errorBadge}
+      </div>
+      <div class="admin-row-actions" onclick="event.stopPropagation()">
+        <button class="btn btn-sm" onclick="showOmadaSites(adminOmada[${idx}])">Sites</button>
+        <button class="btn btn-sm" onclick="showOmadaForm(adminOmada[${idx}])">Edit</button>
+        <button class="btn btn-sm btn-danger" onclick="askDelOmada(${c.id},'${c.name.replace(/'/g,"\\'")}')">Remove</button>
+      </div>
+    </div>`;
+  }).join("");
+}
+
+async function loadOmadaList(){
+  const el = document.getElementById("adminPanelBody");
+  const cached = cacheGet("admin-omada");
+  if (cached) { adminOmada = cached; renderAdminOmadaList(adminOmada); }
+  else el.innerHTML = `<div style="padding:24px;text-align:center;color:var(--text-2)">Loading controllers...</div>`;
+  try {
+    const r = await fetch("/api/admin/omada-controllers");
+    if (r.status === 401) { window.location.href = "/"; return; }
+    if (!r.ok) { if (!cached) el.innerHTML = `<div class="empty-state">Error ${r.status}</div>`; return; }
+    adminOmada = await r.json();
+    cacheSet("admin-omada", adminOmada);
+    renderAdminOmadaList(adminOmada);
+  } catch(e) {
+    if (!cached) el.innerHTML = `<div class="empty-state">Failed to load: ${e.message}</div>`;
+  }
+}
+
+async function showOmadaForm(c){
+  document.getElementById("aListView").style.display        = "none";
+  document.getElementById("aFormView").style.display        = "none";
+  document.getElementById("aUserFormView").style.display    = "none";
+  document.getElementById("aWebhookFormView").style.display = "none";
+  document.getElementById("aGroupFormView").style.display   = "none";
+  document.getElementById("aOmadaSitesView").style.display  = "none";
+  document.getElementById("aOmadaFormView").style.display   = "flex";
+  document.getElementById("oFormHeading").textContent  = c ? "Edit Omada Controller" : "Add Omada Controller";
+  document.getElementById("oId").value           = c?.id        || "";
+  document.getElementById("oName").value         = c?.name      || "";
+  document.getElementById("oUrl").value          = c?.base_url  || "";
+  document.getElementById("oClientId").value     = c?.client_id || "";
+  document.getElementById("oClientSecret").value = "";  // never round-trip the secret
+  document.getElementById("oVerifyTls").checked  = c ? !!c.verify_tls : true;
+  document.getElementById("oSecretHint").textContent = c ? "(leave blank to keep existing)" : "*";
+  document.getElementById("oErr").textContent = "";
+  // Populate the Owner Group dropdown — admin can pick "Global" (no group), viewers must pick one of theirs
+  await ensureGroupsLoaded();
+  const sel = document.getElementById("oGroup");
+  if (isAdmin()) {
+    sel.innerHTML = `<option value="">— Global (admin only) —</option>` +
+      adminGroups.map(g => `<option value="${g.id}" ${c && c.group_id == g.id ? "selected" : ""}>${g.name}</option>`).join("");
+  } else {
+    const defaultId = (c && c.group_id) || (adminGroups[0] && adminGroups[0].id) || "";
+    sel.innerHTML = adminGroups.map(g => `<option value="${g.id}" ${defaultId == g.id ? "selected" : ""}>${g.name}</option>`).join("");
+  }
+}
+
+async function submitOmadaForm(){
+  const name          = document.getElementById("oName").value.trim();
+  const base_url      = document.getElementById("oUrl").value.trim();
+  const client_id     = document.getElementById("oClientId").value.trim();
+  const client_secret = document.getElementById("oClientSecret").value;
+  const verify_tls    = document.getElementById("oVerifyTls").checked;
+  const groupSel      = document.getElementById("oGroup").value;
+  const id            = document.getElementById("oId").value;
+  if (!name || !base_url || !client_id) {
+    document.getElementById("oErr").textContent = "Name, URL and Client ID are required.";
+    return;
+  }
+  if (!id && !client_secret) {
+    document.getElementById("oErr").textContent = "Client Secret is required for new controllers.";
+    return;
+  }
+  document.getElementById("oErr").textContent = "Contacting controller…";
+  try {
+    const r = await fetch(id ? `/api/admin/omada-controllers/${id}` : "/api/admin/omada-controllers", {
+      method: id ? "PUT" : "POST",
+      headers: {"Content-Type":"application/json"},
+      body: JSON.stringify({ name, base_url, client_id, client_secret, verify_tls, group_id: groupSel ? parseInt(groupSel) : null })
+    });
+    const d = await r.json();
+    if (!r.ok) { document.getElementById("oErr").textContent = d.error || "Failed"; return; }
+    cacheDel("admin-omada");
+    if (d.warning) toast(d.warning, "info"); else toast(id ? "Controller updated" : "Controller added", "success");
+    showList();
+  } catch(e) {
+    document.getElementById("oErr").textContent = "Error: " + e.message;
+  }
+}
+
+function askDelOmada(id, name){
+  pendDelOmada = id;
+  document.getElementById("confirmMsg").textContent = `Omada controller "${name}" will be removed. Servers using it will fail their checks until reconfigured.`;
+  document.getElementById("confirmDlg").classList.add("open");
+  document.querySelector("#confirmDlg .btn-danger").onclick = doDeleteOmada;
+}
+
+async function doDeleteOmada(){
+  if (!pendDelOmada) return;
+  try {
+    const r = await fetch(`/api/admin/omada-controllers/${pendDelOmada}`, {method:"DELETE"});
+    const d = await r.json();
+    if (r.ok) cacheDel("admin-omada");
+    toast(r.ok ? "Controller removed" : (d.error||"Failed"), r.ok ? "info" : "error");
+  } catch(e) { toast("Error: " + e.message, "error"); }
+  pendDelOmada = null;
+  closeConfirm();
+  loadOmadaList();
+}
+
+async function showOmadaSites(c){
+  document.getElementById("aListView").style.display        = "none";
+  document.getElementById("aFormView").style.display        = "none";
+  document.getElementById("aUserFormView").style.display    = "none";
+  document.getElementById("aWebhookFormView").style.display = "none";
+  document.getElementById("aGroupFormView").style.display   = "none";
+  document.getElementById("aOmadaFormView").style.display   = "none";
+  document.getElementById("aOmadaSitesView").style.display  = "flex";
+  const modeBadge = c.mode === "msp" ? ' <span style="font-size:9px;font-weight:600;padding:1px 6px;border-radius:8px;background:var(--blue-soft);color:var(--blue);letter-spacing:.04em;vertical-align:middle">MSP</span>' : "";
+  document.getElementById("oSitesHeading").innerHTML = `Sites — ${c.name}${modeBadge}`;
+  document.getElementById("oSitesSubhead").textContent = c.base_url;
+  const list = document.getElementById("oSitesList");
+  list.innerHTML = `<div style="padding:18px;text-align:center;color:var(--text-2);font-size:12px">Fetching sites from controller…</div>`;
+  try {
+    const r = await fetch(`/api/admin/omada-controllers/${c.id}/sites`);
+    if (!r.ok) {
+      const d = await r.json().catch(()=>({error:"unknown"}));
+      list.innerHTML = `<div style="padding:18px;text-align:center;color:var(--red);font-size:12px">${d.error || ("HTTP "+r.status)}</div>`;
+      return;
+    }
+    const sites = await r.json();
+    omadaSitesCache[c.id] = sites;
+    if (!sites.length) {
+      list.innerHTML = `<div style="padding:18px;text-align:center;color:var(--text-2);font-size:12px">No sites returned by this controller.</div>`;
+      return;
+    }
+    // Build a row helper that includes customer_id and the friendly names when present
+    const esc = (v) => String(v||"").replace(/'/g,"\\'");
+    const renderSiteRow = (s) => {
+      const sid    = s.siteId || s.id;
+      const sname  = s.name || sid;
+      const cid    = s.customerId || "";
+      const cname  = s.customerName || "";
+      const args   = `${c.id}, '${esc(sid)}', '${esc(sname)}', '${esc(cid)}', '${esc(cname)}'`;
+      return `<div style="display:flex;align-items:center;gap:12px;padding:10px 14px;background:var(--surface);border:1px solid var(--border);border-radius:var(--r-sm)">
+        <div style="flex:1;min-width:0">
+          <div style="font-size:13px;font-weight:500;color:var(--text-hi)">${sname}</div>
+          <div style="font-family:var(--mono);font-size:10px;color:var(--text-2);margin-top:2px">${sid}</div>
+        </div>
+        <button class="btn btn-sm btn-primary" onclick="createServerFromSite(${args})">+ Create server</button>
+      </div>`;
+    };
+    if (c.mode === "msp") {
+      // Group sites by customer
+      const byCust = {};
+      sites.forEach(s => {
+        const key = s.customerId || "unknown";
+        if (!byCust[key]) byCust[key] = { name: s.customerName || key, items: [] };
+        byCust[key].items.push(s);
+      });
+      list.innerHTML = Object.entries(byCust).map(([cid, group]) => `
+        <div style="margin-top:8px">
+          <div style="font-size:11px;font-weight:600;letter-spacing:.06em;text-transform:uppercase;color:var(--text-2);padding:4px 0 8px">${group.name}</div>
+          <div style="display:flex;flex-direction:column;gap:6px">${group.items.map(renderSiteRow).join("")}</div>
+        </div>
+      `).join("");
+    } else {
+      list.innerHTML = sites.map(renderSiteRow).join("");
+    }
+  } catch(e) {
+    list.innerHTML = `<div style="padding:18px;text-align:center;color:var(--red);font-size:12px">${e.message}</div>`;
+  }
+}
+
+// Where to bounce back to after the server form closes — used by createServerFromSite
+// to return the admin to the Omada sites browser instead of the Servers tab.
+let serverFormReturn = null;
+
+// One-click: jump to the server form pre-filled with an omada_gateway check
+async function createServerFromSite(controllerId, siteId, siteName, customerId, customerName){
+  await showServerForm(null);
+  // Set the return target AFTER showServerForm so it doesn't get cleared by edit/add flows
+  serverFormReturn = { type: "omada-sites", controller: adminOmada.find(c => c.id === controllerId) };
+  document.getElementById("fName").value = siteName;
+  document.getElementById("fHost").value = "omada-managed";  // host is unused for omada checks but required by validation
+  // Replace the default ping check with an omada_gateway check.
+  // We store BOTH the IDs and the friendly names — the names are required to filter
+  // /devices/known-devices (which doesn't return siteId per device).
+  const check = { type: "omada_gateway", controller_id: controllerId, site_id: siteId, site_name: siteName };
+  if (customerId)   check.customer_id   = customerId;
+  if (customerName) check.customer_name = customerName;
+  currentChecks = [check];
+  renderCrows();
+}
+
+// ── Toast ─────────────────────────────────────────────────────────────────────
+function toast(msg, type="info"){
+  const s  = document.getElementById("toasts");
+  const el = document.createElement("div");
+  el.className   = `toast ${type}`;
+  el.textContent = msg;
+  s.appendChild(el);
+  setTimeout(() => el.remove(), 3000);
+}
+
+
+</script>
+</body>
+</html>

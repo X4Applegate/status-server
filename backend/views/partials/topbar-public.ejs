@@ -1,0 +1,46 @@
+<!-- TOP BAR -->
+<%
+  // Per-dashboard logo size. Outer square = logoSize, inner image = logoSize - 4 so
+  // it keeps the same breathing room the default 42/38 pair had.
+  const _logoOuter = (typeof logoSize !== 'undefined' && logoSize) ? parseInt(logoSize) : 42;
+  const _logoInner = Math.max(14, _logoOuter - 4);
+%>
+<div class="topbar">
+  <div class="topbar-brand">
+    <div class="topbar-icon" style="width:<%= _logoOuter %>px;height:<%= _logoOuter %>px">
+      <% if (typeof logoImage !== 'undefined' && logoImage) { %>
+        <img src="<%= logoImage %>" alt="logo" class="topbar-logo-img" style="width:<%= _logoInner %>px;height:<%= _logoInner %>px">
+      <% } else if (typeof logoText !== 'undefined' && logoText && logoText.length) { %>
+        <span class="topbar-icon-text"><%= logoText %></span>
+      <% } else { %>
+        <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="color:var(--blue)"><polygon points="12 2 22 8.5 22 15.5 12 22 2 15.5 2 8.5"/></svg>
+      <% } %>
+    </div>
+    <div>
+      <div class="topbar-name">
+        <% const _name = (typeof groupName !== 'undefined' && groupName) ? groupName : 'Status.Monitor';
+           const _parts = _name.split('.'); %>
+        <% _parts.forEach(function(p, i){ %><%= p %><% if (i < _parts.length - 1){ %><span>.</span><% } %><% }); %>
+      </div>
+      <% if (typeof groupSubtitle !== 'undefined' && groupSubtitle && groupSubtitle.length) { %>
+        <div class="topbar-subtitle"><%= groupSubtitle %></div>
+      <% } %>
+    </div>
+  </div>
+  <!-- Dashboard quick-nav: one pill per dashboard the viewer can access, plus an Admin pill (admins only) -->
+  <div class="topbar-dashboards" id="topbarDashboards"></div>
+  <div class="topbar-right">
+    <div class="topbar-status">
+      <div class="status-dot" id="globalDot"></div>
+      <span id="globalStatus">All systems operational</span>
+    </div>
+    <div class="topbar-clock" id="clock">00:00:00</div>
+    <button type="button" class="topbar-theme" onclick="toggleTheme()" title="Toggle theme" aria-label="Toggle theme">
+      <svg class="icon-sun" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="5"/><line x1="12" y1="1" x2="12" y2="3"/><line x1="12" y1="21" x2="12" y2="23"/><line x1="4.22" y1="4.22" x2="5.64" y2="5.64"/><line x1="18.36" y1="18.36" x2="19.78" y2="19.78"/><line x1="1" y1="12" x2="3" y2="12"/><line x1="21" y1="12" x2="23" y2="12"/><line x1="4.22" y1="19.78" x2="5.64" y2="18.36"/><line x1="18.36" y1="5.64" x2="19.78" y2="4.22"/></svg>
+      <svg class="icon-moon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/></svg>
+    </button>
+    <% if (adminHref) { %>
+      <a class="topbar-admin" href="<%= adminHref %>">Admin</a>
+    <% } %>
+  </div>
+</div>

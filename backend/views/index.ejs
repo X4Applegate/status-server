@@ -1,0 +1,948 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="<%= defaultTheme %>">
+<head>
+<%- include('partials/head', { title: pageTitle }) %>
+<script>
+// Pre-paint theme apply: read per-dashboard preference from localStorage if set,
+// otherwise use the server-rendered defaultTheme. Runs before any CSS so no flash.
+(function(){
+  try {
+    var key = "sm-dash-theme-" + <%- JSON.stringify(groupSlug || "_main") %>;
+    var saved = localStorage.getItem(key);
+    if (saved === "light" || saved === "dark") {
+      document.documentElement.setAttribute("data-theme", saved);
+    }
+  } catch(e) {}
+})();
+</script>
+<style>
+*,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+:root,[data-theme="dark"]{
+  --bg:       #060c18;
+  --bg2:      #0a1220;
+  --sidebar:  #080f1c;
+  --surface:  #0d1829;
+  --surface2: #111f35;
+  --border:   rgba(30,100,200,0.15);
+  --border-hi:rgba(30,100,200,0.28);
+  --text:     #7a9cc0;
+  --text-2:   #3d6080;
+  --text-hi:  #c8dff0;
+  --text-white:#e8f4ff;
+  --blue:     #2a7fff;
+  --blue-soft:rgba(42,127,255,0.12);
+  --blue-glow:rgba(42,127,255,0.25);
+  --orange:   #ff8c2a;
+  --orange-soft:rgba(255,140,42,0.12);
+  --orange-glow:rgba(255,140,42,0.3);
+  --green:    #10e88a;
+  --green-soft:rgba(16,232,138,0.10);
+  --red:      #ff3d5a;
+  --red-soft: rgba(255,61,90,0.10);
+  --mono:     'JetBrains Mono',monospace;
+  --sans:     'Inter',sans-serif;
+}
+[data-theme="light"]{
+  --bg:       #f4f7fb;
+  --bg2:      #ffffff;
+  --sidebar:  #ffffff;
+  --surface:  #ffffff;
+  --surface2: #f0f4f9;
+  --border:   rgba(30,100,200,0.12);
+  --border-hi:rgba(30,100,200,0.22);
+  --text:     #5a6a7e;
+  --text-2:   #8fa0b5;
+  --text-hi:  #2d3a4a;
+  --text-white:#1a2535;
+  --blue:     #2a7fff;
+  --blue-soft:rgba(42,127,255,0.08);
+  --blue-glow:rgba(42,127,255,0.20);
+  --orange:   #ff8c2a;
+  --orange-soft:rgba(255,140,42,0.10);
+  --orange-glow:rgba(255,140,42,0.25);
+  --green:    #10b87a;
+  --green-soft:rgba(16,184,122,0.10);
+  --red:      #ef3d5a;
+  --red-soft: rgba(239,61,90,0.10);
+  --mono:     'JetBrains Mono',monospace;
+  --sans:     'Inter',sans-serif;
+}
+body{font-family:var(--sans);background:var(--bg);color:var(--text);min-height:100vh;display:flex;flex-direction:column;font-size:14px;-webkit-font-smoothing:antialiased;overflow-x:hidden}
+
+/* bg glow */
+body::before{content:'';position:fixed;inset:0;pointer-events:none;background:radial-gradient(ellipse 60% 50% at 20% 50%,rgba(42,127,255,0.05) 0%,transparent 70%),radial-gradient(ellipse 40% 40% at 80% 20%,rgba(255,140,42,0.04) 0%,transparent 60%);z-index:0}
+
+/* -- TOP BAR -- */
+.topbar{position:relative;z-index:10;display:flex;align-items:center;justify-content:space-between;padding:0 28px;height:64px;border-bottom:1px solid var(--border);background:linear-gradient(180deg,var(--sidebar) 0%,var(--bg2) 100%);backdrop-filter:blur(12px)}
+.topbar-brand{display:flex;align-items:center;gap:12px}
+.topbar-icon{width:42px;height:42px;border-radius:10px;background:var(--blue-soft);border:1px solid rgba(42,127,255,0.25);display:flex;align-items:center;justify-content:center;font-size:14px;overflow:hidden}
+.topbar-logo-img{width:38px;height:38px;border-radius:8px;object-fit:contain;display:block}
+.topbar-icon-text{font-weight:700;font-size:18px;color:var(--blue);font-family:var(--sans);letter-spacing:-.02em}
+.topbar-name{font-size:15px;font-weight:700;color:var(--text-white);letter-spacing:-.02em}
+.topbar-name span{color:var(--blue)}
+.topbar-right{display:flex;align-items:center;gap:14px;font-size:12px;color:var(--text-2)}
+.topbar-status{display:flex;align-items:center;gap:6px}
+.status-dot{width:7px;height:7px;border-radius:50%;background:var(--green);animation:pulse 2s ease-in-out infinite}
+@keyframes pulse{0%,100%{box-shadow:0 0 0 0 rgba(16,232,138,0.4)}50%{box-shadow:0 0 0 5px transparent}}
+.topbar-clock{font-family:var(--mono);font-size:12px;color:var(--text-2)}
+.topbar-admin{padding:5px 12px;border:1px solid var(--border-hi);border-radius:6px;color:var(--text-hi);font-size:12px;font-weight:500;text-decoration:none;transition:all .15s}
+.topbar-admin:hover{background:var(--blue-soft);border-color:var(--blue);color:var(--blue)}
+
+/* Dashboard quick-nav pills in the topbar — center-aligned, fills the gap between brand and topbar-right */
+.topbar-dashboards{display:flex;align-items:center;justify-content:center;gap:6px;flex:1 1 auto;flex-wrap:wrap;margin:0 16px;min-width:0}
+.dash-nav{display:inline-flex;align-items:center;gap:6px;padding:5px 11px;border:1px solid var(--border);border-radius:20px;color:var(--text-hi);font-size:11px;font-weight:500;text-decoration:none;background:var(--surface);white-space:nowrap;transition:all .15s;cursor:pointer}
+.dash-nav:hover{border-color:var(--blue);background:var(--blue-soft);color:var(--blue)}
+.dash-nav.active{border-color:var(--blue);background:var(--blue-soft);color:var(--blue)}
+.dash-nav-dot{width:8px;height:8px;border-radius:50%;flex-shrink:0}
+.dash-nav-admin{border-color:var(--border-hi);color:var(--text-hi);background:transparent}
+.dash-nav-admin:hover{border-color:var(--orange);background:var(--orange-soft);color:var(--orange)}
+
+/* -- LAYOUT -- */
+.layout{position:relative;z-index:1;display:flex;flex:1;overflow:hidden;height:calc(100vh - 56px)}
+
+/* -- SIDEBAR -- */
+/* Borderless look: no right divider, no header bottom line, no per-group dividers, no
+   active-row inner outline. Selection is shown with background + left accent bar only. */
+.sidebar{width:280px;flex-shrink:0;background:var(--sidebar);display:flex;flex-direction:column;overflow:hidden}
+.sidebar-header{padding:16px 20px 12px;flex-shrink:0}
+.sidebar-title{font-size:11px;font-weight:600;letter-spacing:.08em;text-transform:uppercase;color:var(--text-2)}
+.sidebar-body{flex:1;overflow-y:auto;padding:8px 0}
+.sidebar-body::-webkit-scrollbar{width:3px}
+.sidebar-body::-webkit-scrollbar-thumb{background:var(--surface2);border-radius:2px}
+
+/* Server row */
+.srv-row{display:flex;align-items:center;gap:10px;padding:11px 20px;cursor:pointer;border-left:3px solid transparent;transition:background .18s cubic-bezier(.4,0,.2,1),border-left-color .18s}
+.srv-row:hover{background:var(--surface);border-left-color:var(--border-hi)}
+.srv-row.active{background:linear-gradient(90deg,var(--blue-soft) 0%,var(--surface) 60%);border-left-color:var(--blue)}
+.srv-row.active .srv-name{color:var(--text-white)}
+
+/* Grouped sidebar sections (master / view only) — no divider lines for a cleaner list */
+.srv-group{}
+.srv-group-head{display:flex;align-items:center;gap:9px;padding:12px 20px;cursor:pointer;user-select:none;background:var(--bg2);transition:background .15s}
+.srv-group-head:hover{background:var(--surface)}
+.srv-group-dot{width:8px;height:8px;border-radius:50%;flex-shrink:0;box-shadow:0 0 6px rgba(255,255,255,.08)}
+.srv-group-name{font-size:11px;font-weight:700;color:var(--text-hi);letter-spacing:.06em;text-transform:uppercase;flex:1;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.srv-group-count{font-size:10px;font-weight:600;color:var(--text-2);padding:2px 7px;border-radius:10px;background:var(--surface);border:1px solid var(--border)}
+.srv-group-chevron{display:flex;align-items:center;justify-content:center;color:var(--text-2);transition:transform .2s}
+.srv-group.collapsed .srv-group-chevron{transform:rotate(-90deg)}
+.srv-group-body{max-height:2000px;overflow:hidden;transition:max-height .25s ease}
+.srv-group.collapsed .srv-group-body{max-height:0}
+.srv-group .srv-row{padding-left:24px}
+
+/* Quick create button */
+.srv-create-btn{display:flex;align-items:center;gap:8px;padding:12px 20px;font-size:11px;font-weight:600;color:var(--blue);text-decoration:none;border-bottom:1px solid var(--border);letter-spacing:.04em;text-transform:uppercase;transition:background .15s}
+.srv-create-btn:hover{background:var(--blue-soft)}
+.srv-create-btn svg{width:12px;height:12px;flex-shrink:0}
+.srv-dot{width:8px;height:8px;border-radius:50%;flex-shrink:0;transition:none}
+.srv-dot.up      {background:var(--green);box-shadow:0 0 6px rgba(16,232,138,0.5),0 0 0 0 rgba(16,232,138,0.5);animation:srvDotPulse 2.4s ease-in-out infinite}
+@keyframes srvDotPulse{0%,100%{box-shadow:0 0 6px rgba(16,232,138,0.5),0 0 0 0 rgba(16,232,138,0)}50%{box-shadow:0 0 6px rgba(16,232,138,0.5),0 0 0 4px rgba(16,232,138,0)}}
+.srv-dot.down    {background:var(--red);animation:blink 1.2s ease-in-out infinite}
+.srv-dot.degraded{background:var(--orange)}
+.srv-dot.pending {background:var(--text-2)}
+@keyframes blink{0%,100%{opacity:1}50%{opacity:.3}}
+.srv-info{min-width:0;flex:1}
+.srv-name{font-size:13px;font-weight:500;color:var(--text-hi);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.srv-host{font-family:var(--mono);font-size:10px;color:var(--text-2);margin-top:1px}
+.srv-badge{font-size:10px;font-weight:600;padding:2px 7px;border-radius:10px;flex-shrink:0;letter-spacing:.04em}
+.srv-badge.up      {color:var(--green);background:var(--green-soft)}
+.srv-badge.down    {color:var(--red);background:var(--red-soft)}
+.srv-badge.degraded{color:var(--orange);background:var(--orange-soft)}
+.srv-badge.pending {color:var(--text-2);background:var(--surface2)}
+
+/* -- MAIN AREA -- */
+.main{flex:1;overflow-y:auto;padding:28px 32px}
+.main::-webkit-scrollbar{width:4px}
+.main::-webkit-scrollbar-thumb{background:var(--surface2);border-radius:2px}
+
+/* empty state */
+.empty-main{display:flex;align-items:center;justify-content:center;height:100%;color:var(--text-2);font-size:14px}
+
+/* -- SERVER DETAIL -- */
+.detail-header{display:flex;align-items:flex-start;justify-content:space-between;margin-bottom:24px;gap:16px;flex-wrap:wrap}
+.detail-name{font-size:22px;font-weight:700;color:var(--text-white);letter-spacing:-.02em}
+.detail-host{font-family:var(--mono);font-size:12px;color:var(--text-2);margin-top:4px}
+.detail-desc{font-size:13px;color:var(--text);margin-top:4px}
+.detail-tags{display:flex;gap:5px;margin-top:6px;flex-wrap:wrap}
+.detail-tag{font-size:10px;font-weight:600;letter-spacing:.05em;padding:2px 8px;border-radius:4px;background:var(--surface2);color:var(--text-2);border:1px solid var(--border);text-transform:uppercase}
+.status-big{display:flex;align-items:center;gap:12px;padding:12px 20px;border-radius:12px;border:1px solid;flex-shrink:0;transition:transform .2s,box-shadow .2s;backdrop-filter:blur(4px)}
+.status-big:hover{transform:translateY(-1px);box-shadow:0 6px 20px rgba(0,0,0,0.15)}
+.status-big.up      {color:var(--green);border-color:rgba(16,232,138,0.2);background:var(--green-soft)}
+.status-big.down    {color:var(--red);border-color:rgba(255,61,90,0.2);background:var(--red-soft)}
+.status-big.degraded{color:var(--orange);border-color:rgba(255,140,42,0.2);background:var(--orange-soft)}
+.status-big.pending {color:var(--text-2);border-color:var(--border);background:var(--surface)}
+.status-big-dot{width:10px;height:10px;border-radius:50%;background:currentColor}
+.status-big.up .status-big-dot{animation:pulse 2s ease-in-out infinite}
+.status-big-label{font-size:13px;font-weight:700;letter-spacing:.05em}
+.status-big-time{font-size:11px;opacity:.7;margin-top:2px}
+.edit-server-btn{display:inline-flex;align-items:center;gap:6px;font-size:11px;font-weight:600;color:var(--text-2);background:var(--surface);border:1px solid var(--border-hi);border-radius:8px;padding:6px 12px;text-decoration:none;transition:color .15s,border-color .15s,background .15s}
+.edit-server-btn:hover{color:var(--text-hi);border-color:var(--blue);background:var(--blue-soft)}
+
+/* -- UPTIME CARDS -- */
+.uptime-row{display:grid;grid-template-columns:repeat(3,1fr);gap:12px;margin-bottom:24px}
+.uptime-card{background:var(--surface);border:1px solid var(--border);border-radius:12px;padding:18px 20px;text-align:center;transition:transform .2s cubic-bezier(.4,0,.2,1),border-color .2s,box-shadow .2s;position:relative;overflow:hidden}
+.uptime-card::before{content:'';position:absolute;inset:0;background:linear-gradient(135deg,var(--blue-soft) 0%,transparent 50%);opacity:0;transition:opacity .25s;pointer-events:none}
+.uptime-card:hover{transform:translateY(-2px);border-color:var(--border-hi);box-shadow:0 8px 24px rgba(0,0,0,0.2)}
+.uptime-card:hover::before{opacity:1}
+.uptime-label{font-size:11px;font-weight:600;letter-spacing:.06em;text-transform:uppercase;color:var(--text-2);margin-bottom:8px}
+.uptime-pct{font-size:28px;font-weight:700;letter-spacing:-.03em;line-height:1}
+.uptime-pct.great{color:var(--green)}
+.uptime-pct.good {color:var(--blue)}
+.uptime-pct.warn {color:var(--orange)}
+.uptime-pct.bad  {color:var(--red)}
+.uptime-sub{font-size:11px;color:var(--text-2);margin-top:4px}
+
+/* -- SECTION -- */
+.section{background:var(--surface);border:1px solid var(--border);border-radius:12px;margin-bottom:20px;overflow:hidden;transition:border-color .2s,box-shadow .2s}
+.section:hover{border-color:var(--border-hi)}
+.section-head{display:flex;align-items:center;justify-content:space-between;padding:14px 20px;border-bottom:1px solid var(--border)}
+.section-title{font-size:12px;font-weight:600;letter-spacing:.06em;text-transform:uppercase;color:var(--text-2)}
+.section-body{padding:20px}
+
+/* -- HEARTBEAT TIMELINE -- */
+/* Bars use flex:1 so they stretch to fill the full section width on any screen,
+   instead of staying at a fixed 10px and leaving empty space on wide monitors. */
+.heartbeat{display:flex;gap:3px;align-items:flex-end;width:100%}
+.hb-dot{flex:1 1 0;min-width:3px;height:28px;border-radius:3px;transition:opacity .2s;cursor:pointer;position:relative}
+.hb-dot.up     {background:var(--green);opacity:.7}
+.hb-dot.up:last-child{opacity:1}
+.hb-dot.down   {background:var(--red);opacity:.9}
+.hb-dot.pending{background:var(--surface2)}
+.hb-dot:hover  {opacity:1!important}
+.hb-legend{display:flex;align-items:center;justify-content:space-between;font-size:11px;color:var(--text-2);margin-top:8px}
+
+/* -- RESPONSE TIME CHART -- */
+.chart-wrap{position:relative;height:120px;width:100%}
+canvas#responseChart{width:100%!important}
+.chart-empty{display:flex;align-items:center;justify-content:center;height:120px;font-size:13px;color:var(--text-2)}
+
+/* -- CHECKS -- */
+.checks-row{display:flex;gap:10px;flex-wrap:wrap}
+.check-chip{display:inline-flex;align-items:center;gap:8px;padding:8px 14px;border-radius:8px;font-size:12px;border:1px solid}
+.check-chip.ok  {border-color:rgba(16,232,138,0.2);background:var(--green-soft)}
+.check-chip.fail{border-color:rgba(255,61,90,0.2);background:var(--red-soft)}
+/* SSL cert badge — inline inside the HTTP check chip */
+.chip-cert{display:inline-flex;align-items:center;gap:4px;font-size:10px;font-weight:600;padding:2px 7px;border-radius:10px;letter-spacing:.02em;margin-left:4px;white-space:nowrap}
+.chip-cert.cert-ok     {color:var(--green);background:var(--green-soft);border:1px solid rgba(16,232,138,0.25)}
+.chip-cert.cert-warn   {color:var(--orange);background:var(--orange-soft);border:1px solid rgba(255,140,42,0.3)}
+.chip-cert.cert-expired{color:var(--red);background:var(--red-soft);border:1px solid rgba(255,61,90,0.3)}
+.chip-cert svg{flex-shrink:0;opacity:.85}
+.chip-dot{width:7px;height:7px;border-radius:50%;flex-shrink:0}
+.check-chip.ok   .chip-dot{background:var(--green)}
+.check-chip.fail .chip-dot{background:var(--red)}
+.chip-label {font-weight:500;color:var(--text-hi)}
+.chip-detail{font-family:var(--mono);font-size:11px;color:var(--text-2);padding-left:6px;border-left:1px solid var(--border)}
+
+/* -- INCIDENTS -- */
+.incident-list{display:flex;flex-direction:column;gap:0}
+.incident-row{display:grid;grid-template-columns:auto 1fr auto;align-items:center;gap:16px;padding:12px 0;border-bottom:1px solid var(--border)}
+.incident-row:last-child{border-bottom:none}
+.incident-dot{width:8px;height:8px;border-radius:50%;background:var(--red);flex-shrink:0}
+.incident-dot.resolved{background:var(--green)}
+.incident-info{}
+.incident-cause{font-size:13px;color:var(--text-hi);font-weight:500}
+.incident-time{font-size:11px;color:var(--text-2);margin-top:2px;font-family:var(--mono)}
+.incident-dur{font-size:12px;font-weight:600;text-align:right}
+.incident-dur.resolved{color:var(--text-2)}
+.incident-dur.open{color:var(--red)}
+.no-incidents{text-align:center;padding:20px;color:var(--text-2);font-size:13px}
+
+/* -- SKELETON -- */
+.skeleton{background:linear-gradient(90deg,var(--surface) 25%,var(--surface2) 50%,var(--surface) 75%);background-size:200% 100%;animation:shimmer 1.5s infinite;border-radius:6px}
+@keyframes shimmer{0%{background-position:200% 0}100%{background-position:-200% 0}}
+
+/* -- RESPONSIVE -- */
+@media(max-width:760px){
+  .topbar{padding:8px 12px;height:auto;min-height:56px;flex-wrap:wrap;gap:8px;row-gap:6px}
+  .topbar-brand{flex-shrink:0}
+  .topbar-name{font-size:14px}
+  .topbar-icon{width:36px;height:36px;border-radius:9px}
+  .topbar-logo-img{width:32px;height:32px;border-radius:7px}
+  .topbar-right{gap:10px;flex-wrap:wrap;justify-content:flex-end;font-size:11px;flex:1;min-width:0}
+  .topbar-status span{font-size:11px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:140px}
+  .topbar-clock{display:none}
+  .topbar-admin{padding:4px 9px;font-size:11px}
+  .topbar-dashboards{width:100%;order:3;margin:0;flex-basis:100%;overflow-x:auto;flex-wrap:nowrap;padding-bottom:2px;-webkit-overflow-scrolling:touch}
+  .topbar-dashboards::-webkit-scrollbar{display:none}
+  .dash-nav{padding:4px 10px;font-size:10px}
+  .layout{flex-direction:column;height:auto;overflow:visible}
+  .sidebar{width:100%;height:auto;border-right:none;border-bottom:1px solid var(--border)}
+  .sidebar-body{max-height:240px}
+  .main{padding:14px 12px}
+  .detail-header{flex-direction:column;gap:10px;margin-bottom:18px}
+  .detail-name{font-size:18px}
+  .uptime-row{grid-template-columns:repeat(3,1fr);gap:8px;margin-bottom:18px}
+  .uptime-card{padding:12px 6px}
+  .uptime-pct{font-size:20px}
+  .uptime-label{font-size:9px;letter-spacing:.04em}
+  .uptime-sub{font-size:9px}
+  .section{margin-bottom:14px}
+  .section-head{padding:11px 14px}
+  .section-body{padding:14px}
+  .heartbeat{gap:2px}
+  .hb-dot{min-width:2px;height:24px}
+  .checks-row{gap:6px}
+  .check-chip{padding:6px 10px;font-size:11px}
+  .chip-detail{font-size:10px}
+  .incident-row{gap:10px;padding:10px 0}
+  .incident-cause{font-size:12px}
+  .incident-time{font-size:10px}
+}
+
+/* -- BRAND SUBTITLE (per-dashboard branding) -- */
+.topbar-subtitle{font-size:11px;color:var(--text-2);margin-top:1px;font-weight:400}
+
+/* -- THEME TOGGLE -- */
+.topbar-theme{width:30px;height:30px;border-radius:7px;border:1px solid var(--border-hi);background:var(--surface);color:var(--text-hi);cursor:pointer;display:flex;align-items:center;justify-content:center;transition:background .15s,border-color .15s,color .15s;padding:0}
+.topbar-theme:hover{background:var(--surface2);border-color:var(--blue);color:var(--blue)}
+[data-theme="dark"]  .topbar-theme .icon-sun  {display:none}
+[data-theme="light"] .topbar-theme .icon-moon {display:none}
+</style>
+<%
+// Color helpers (used to derive readable text + shaded surfaces from a custom bg)
+function _hexParse(hex) {
+  let h = String(hex||"").replace("#","");
+  if (h.length === 3) h = h.split("").map(c => c+c).join("");
+  if (h.length !== 6) return null;
+  return {
+    r: parseInt(h.substring(0,2), 16),
+    g: parseInt(h.substring(2,4), 16),
+    b: parseInt(h.substring(4,6), 16)
+  };
+}
+function _hexToRgba(hex, a) {
+  const c = _hexParse(hex) || {r:42,g:127,b:255};
+  return `rgba(${c.r},${c.g},${c.b},${a})`;
+}
+// W3C-style relative luminance (0=dark, 1=light)
+function _luminance(hex) {
+  const c = _hexParse(hex);
+  if (!c) return 0;
+  const channel = (v) => {
+    v /= 255;
+    return v <= 0.03928 ? v / 12.92 : Math.pow((v + 0.055) / 1.055, 2.4);
+  };
+  return 0.2126*channel(c.r) + 0.7152*channel(c.g) + 0.0722*channel(c.b);
+}
+// Shift each channel toward white (positive amount) or black (negative amount). 0 = unchanged.
+function _shade(hex, amount) {
+  const c = _hexParse(hex);
+  if (!c) return hex;
+  const adj = (v) => Math.max(0, Math.min(255, Math.round(amount > 0 ? v + (255 - v) * amount : v * (1 + amount))));
+  const toHex = (v) => v.toString(16).padStart(2, "0");
+  return `#${toHex(adj(c.r))}${toHex(adj(c.g))}${toHex(adj(c.b))}`;
+}
+%>
+<style>:root{
+  --blue: <%= accentColor %>;
+  --blue-soft: <%= _hexToRgba(accentColor, 0.12) %>;
+  --blue-glow: <%= _hexToRgba(accentColor, 0.25) %>;
+}</style>
+
+<% if (bgColor) {
+  // Custom background mode: derive shades + pick a readable text palette by luminance
+  const lum         = _luminance(bgColor);
+  const isDarkBg    = lum < 0.5;
+  // Lighter backgrounds get progressively darker shades for surface contrast; darker backgrounds get lighter ones
+  const shadeStep   = isDarkBg ? 0.12 : -0.06;
+  const bg          = bgColor;
+  const bg2         = _shade(bgColor, shadeStep * 1.0);
+  const sidebar     = _shade(bgColor, shadeStep * 1.5);
+  const surface     = _shade(bgColor, shadeStep * 2.0);
+  const surface2    = _shade(bgColor, shadeStep * 2.8);
+  // Text + border palettes — picked by luminance, NOT by the user's default_theme
+  const text        = isDarkBg ? "#c8d6e8" : "#3a4658";
+  const text2       = isDarkBg ? "rgba(255,255,255,0.55)" : "rgba(20,30,45,0.55)";
+  const textHi      = isDarkBg ? "#ffffff" : "#1a2535";
+  const textWhite   = isDarkBg ? "#ffffff" : "#0f1720";
+  const border      = isDarkBg ? "rgba(255,255,255,0.12)" : "rgba(20,30,45,0.12)";
+  const borderHi    = isDarkBg ? "rgba(255,255,255,0.22)" : "rgba(20,30,45,0.22)";
+%>
+<style id="custom-bg-overrides">
+:root, [data-theme="dark"], [data-theme="light"] {
+  --bg:        <%= bg %> !important;
+  --bg2:       <%= bg2 %> !important;
+  --sidebar:   <%= sidebar %> !important;
+  --surface:   <%= surface %> !important;
+  --surface2:  <%= surface2 %> !important;
+  --text:      <%= text %> !important;
+  --text-2:    <%= text2 %> !important;
+  --text-hi:   <%= textHi %> !important;
+  --text-white:<%= textWhite %> !important;
+  --border:    <%= border %> !important;
+  --border-hi: <%= borderHi %> !important;
+}
+</style>
+<% } %>
+</head>
+<body>
+
+<%- include('partials/topbar-public', {
+  adminHref:     adminHref,
+  groupName:     groupName,
+  groupSubtitle: groupSubtitle,
+  logoText:      logoText,
+  logoImage:     logoImage
+}) %>
+
+<div class="layout">
+  <!-- SIDEBAR -->
+  <div class="sidebar">
+    <div class="sidebar-header">
+      <div class="sidebar-title">Servers</div>
+    </div>
+    <div class="sidebar-body" id="sidebarList">
+      <!-- populated by JS -->
+    </div>
+  </div>
+
+  <!-- MAIN -->
+  <div class="main" id="mainArea">
+    <div class="empty-main">Select a server to view details</div>
+  </div>
+</div>
+
+<script>
+// -- Group context (injected from server)
+const GROUP_SLUG = <%- JSON.stringify(groupSlug) %>;
+let   currentGroupId = null; // populated from /api/public/group/:slug response
+
+// -- Dashboard grouping state (master / view only)
+// dashboardGroups holds the metadata (id, name, slug, accent_color) for the groups the
+// current user can see. Populated by loadDashboardGroups() after login is confirmed.
+let dashboardGroups = [];
+let sidebarSession  = { loggedIn: false, role: null };
+const COLLAPSE_KEY  = "sm-sidebar-collapsed";
+let collapsedGroups = new Set(JSON.parse(localStorage.getItem(COLLAPSE_KEY) || "[]"));
+
+async function loadDashboardGroups(){
+  try {
+    // Session lookup runs on every page so the topbar quick-nav knows the role.
+    const meRes = await fetch("/api/me");
+    if (meRes.ok) {
+      const me = await meRes.json();
+      sidebarSession = { loggedIn: !!me.loggedIn, role: me.role || null };
+    }
+    // Only logged-in users get dashboard pills, and the list is scoped to what
+    // the server says they're allowed to see (admins: all; viewers: their grants;
+    // public visitors on /dashboard/<slug>: nothing — each dashboard is private).
+    if (sidebarSession.loggedIn) {
+      const groupsRes = await fetch("/api/admin/groups");
+      if (groupsRes.ok) {
+        dashboardGroups = await groupsRes.json();
+      }
+    }
+  } catch(e) { /* silent — fall back to flat rendering */ }
+  // Paint the topbar pills (empty for public visitors, scoped for viewers, full for admins)
+  renderTopbarDashboards();
+  // Sidebar grouping only applies on the master view
+  if (!GROUP_SLUG && servers.length) renderSidebar();
+}
+
+// Paint the topbar dashboard quick-nav. One pill per accessible dashboard, plus
+// an "Admin" pill at the end (admins only — viewers don't see it, and even if
+// they somehow do, clicking it shows a permission-denied toast).
+function renderTopbarDashboards(){
+  const el = document.getElementById("topbarDashboards");
+  if (!el) return;
+  const pills = (dashboardGroups || []).map(g => {
+    const dot = g.accent_color || "var(--blue)";
+    const isCurrent = GROUP_SLUG === g.slug;
+    return `<a class="dash-nav ${isCurrent ? 'active' : ''}" href="/dashboard/${g.slug}" title="Open ${g.name}">
+      <span class="dash-nav-dot" style="background:${dot}"></span>
+      ${g.name}
+    </a>`;
+  });
+  // Admin pill:
+  //   • Admins  → "/" (master dashboard — all servers across all groups)
+  //   • Viewers → "/admin" (management panel; their tabs are already filtered by role
+  //               to Servers / Omada / Webhooks — Groups + Users are hidden by applyRoleVisibility)
+  // Public (logged-out) visitors don't get the pill at all.
+  if (sidebarSession.role === "admin") {
+    const isMaster = !GROUP_SLUG;
+    pills.push(`<a class="dash-nav dash-nav-admin ${isMaster ? 'active' : ''}" href="/" title="Admin master view — all servers">
+      <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2l3 7h7l-5.5 4 2 7-6.5-4.5L5.5 20l2-7L2 9h7z"/></svg>
+      Admin
+    </a>`);
+  } else if (sidebarSession.loggedIn) {
+    pills.push(`<a class="dash-nav dash-nav-admin" href="/admin" title="Manage your servers, Omada controllers, and webhooks">
+      <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2l3 7h7l-5.5 4 2 7-6.5-4.5L5.5 20l2-7L2 9h7z"/></svg>
+      Admin
+    </a>`);
+  }
+  el.innerHTML = pills.join("");
+}
+
+function toggleGroup(gid){
+  if (collapsedGroups.has(gid)) collapsedGroups.delete(gid);
+  else                          collapsedGroups.add(gid);
+  try { localStorage.setItem(COLLAPSE_KEY, JSON.stringify(Array.from(collapsedGroups))); } catch(e){}
+  renderSidebar();
+}
+
+// -- Theme toggle (per-dashboard preference, persisted in localStorage)
+const THEME_KEY = "sm-dash-theme-" + (GROUP_SLUG || "_main");
+function toggleTheme(){
+  const cur  = document.documentElement.getAttribute("data-theme") || "dark";
+  const next = cur === "dark" ? "light" : "dark";
+  document.documentElement.setAttribute("data-theme", next);
+  try { localStorage.setItem(THEME_KEY, next); } catch(e) {}
+}
+
+// -- Clock
+setInterval(() => {
+  document.getElementById("clock").textContent = new Date().toLocaleTimeString("en-US", {hour12:false});
+}, 1000);
+
+// -- State
+let servers    = [];
+let selectedId = null;
+
+// -- Helpers
+function fmtDur(secs){
+  if (!secs) return "ongoing";
+  if (secs < 60)   return `${secs}s`;
+  if (secs < 3600) return `${Math.floor(secs/60)}m ${secs%60}s`;
+  return `${Math.floor(secs/3600)}h ${Math.floor((secs%3600)/60)}m`;
+}
+
+function fmtTime(ts){
+  return new Date(ts).toLocaleString("en-US",{month:"short",day:"numeric",hour:"2-digit",minute:"2-digit",hour12:false});
+}
+
+function uptimeCls(pct){
+  if (pct === null) return "";
+  if (pct >= 99)   return "great";
+  if (pct >= 95)   return "good";
+  if (pct >= 80)   return "warn";
+  return "bad";
+}
+
+// -- Sidebar
+function renderSidebar(){
+  const el   = document.getElementById("sidebarList");
+  const down = servers.filter(s => s.overall === "down").length;
+  const deg  = servers.filter(s => s.overall === "degraded").length;
+  const dot  = document.getElementById("globalDot");
+  const lbl  = document.getElementById("globalStatus");
+
+  if (down > 0){
+    dot.style.background = "var(--red)";  dot.style.animation="none";
+    lbl.textContent = `${down} system${down>1?"s":""} down`;
+  } else if (deg > 0){
+    dot.style.background = "var(--orange)"; dot.style.animation="none";
+    lbl.textContent = `${deg} system${deg>1?"s":""} degraded`;
+  } else {
+    dot.style.background = "var(--green)"; dot.style.animation="";
+    lbl.textContent = "All systems operational";
+  }
+
+  // Helper that renders one server row
+  const renderRow = (s) => `
+    <div class="srv-row ${s.id===selectedId?"active":""}" onclick="selectServer('${s.id}')">
+      <div class="srv-dot ${s.overall||'pending'}"></div>
+      <div class="srv-info">
+        <div class="srv-name">${s.name}</div>
+        <div class="srv-host">${s.host}</div>
+      </div>
+      <div class="srv-badge ${s.overall||'pending'}">${(s.overall||"pending").toUpperCase()}</div>
+    </div>`;
+
+  // On public dashboard pages OR when we don't have groups loaded yet → flat list
+  if (GROUP_SLUG || !dashboardGroups.length) {
+    el.innerHTML = servers.map(renderRow).join("");
+    return;
+  }
+
+  // Master view → group servers by their dashboard group(s).
+  // Servers in multiple groups show under each one; servers with no groups go to "Ungrouped".
+  const sections = [];
+
+  // Optional admin shortcut: + New Dashboard
+  if (sidebarSession.role === "admin") {
+    sections.push(`<a class="srv-create-btn" href="/admin?newGroup=1">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+      New Dashboard
+    </a>`);
+  }
+
+  for (const g of dashboardGroups) {
+    const groupServers = servers.filter(s => (s.group_ids || []).includes(g.id));
+    if (!groupServers.length) continue;
+    const downCount = groupServers.filter(s => s.overall === "down").length;
+    const degCount  = groupServers.filter(s => s.overall === "degraded").length;
+    const dotColor  = downCount > 0 ? "var(--red)" : degCount > 0 ? "var(--orange)" : (g.accent_color || "var(--blue)");
+    const isCollapsed = collapsedGroups.has("g" + g.id);
+    sections.push(`
+      <div class="srv-group ${isCollapsed ? 'collapsed' : ''}">
+        <div class="srv-group-head" onclick="toggleGroup('g${g.id}')">
+          <span class="srv-group-dot" style="background:${dotColor}"></span>
+          <span class="srv-group-name">${g.name}</span>
+          <span class="srv-group-count">${groupServers.length}</span>
+          <span class="srv-group-chevron"><svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"/></svg></span>
+        </div>
+        <div class="srv-group-body">${groupServers.map(renderRow).join("")}</div>
+      </div>`);
+  }
+
+  // Ungrouped section — servers not in any dashboard (admin-only infrastructure)
+  const ungrouped = servers.filter(s => !(s.group_ids || []).length);
+  if (ungrouped.length) {
+    const downU = ungrouped.filter(s => s.overall === "down").length;
+    const degU  = ungrouped.filter(s => s.overall === "degraded").length;
+    const dotU  = downU > 0 ? "var(--red)" : degU > 0 ? "var(--orange)" : "var(--text-2)";
+    const isCollapsedU = collapsedGroups.has("ungrouped");
+    sections.push(`
+      <div class="srv-group ${isCollapsedU ? 'collapsed' : ''}">
+        <div class="srv-group-head" onclick="toggleGroup('ungrouped')">
+          <span class="srv-group-dot" style="background:${dotU}"></span>
+          <span class="srv-group-name">Ungrouped</span>
+          <span class="srv-group-count">${ungrouped.length}</span>
+          <span class="srv-group-chevron"><svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"/></svg></span>
+        </div>
+        <div class="srv-group-body">${ungrouped.map(renderRow).join("")}</div>
+      </div>`);
+  }
+
+  el.innerHTML = sections.join("");
+}
+
+// -- Select server
+// -- localStorage cache helpers (stale-while-revalidate)
+const CACHE_PREFIX = "sm-cache-";
+function cacheGet(key){
+  try { const v = localStorage.getItem(CACHE_PREFIX + key); return v ? JSON.parse(v) : null; }
+  catch(e){ return null; }
+}
+function cacheSet(key, val){
+  try { localStorage.setItem(CACHE_PREFIX + key, JSON.stringify(val)); } catch(e){}
+}
+
+async function selectServer(id){
+  selectedId = id;
+  cacheSet(CACHE_KEY_SELECTED, id);
+  renderSidebar();
+  const server = servers.find(s => s.id === id);
+  if (!server) return;
+
+  // 1) Render from cache instantly if available, otherwise show skeleton
+  const cached = cacheGet("detail-" + id);
+  if (cached) renderDetail(server, cached.uptime, cached.heartbeat, cached.incidents);
+  else        renderDetailSkeleton(server);
+
+  // 2) Fetch fresh data in parallel and update when ready
+  const [uptime, heartbeat, incidents] = await Promise.all([
+    fetch(`/api/public/uptime/${id}`).then(r=>r.json()).catch(()=>({})),
+    fetch(`/api/public/heartbeat/${id}`).then(r=>r.json()).catch(()=>[]),
+    fetch(`/api/public/incidents/${id}`).then(r=>r.json()).catch(()=>[]),
+  ]);
+
+  // Avoid clobbering newer selection
+  if (selectedId !== id) return;
+  renderDetail(server, uptime, heartbeat, incidents);
+  cacheSet("detail-" + id, { uptime, heartbeat, incidents });
+}
+
+// -- Skeleton while loading
+function renderDetailSkeleton(s){
+  document.getElementById("mainArea").innerHTML = `
+    <div class="detail-header">
+      <div>
+        <div class="detail-name">${s.name}</div>
+        <div class="detail-host">${s.host}</div>
+      </div>
+    </div>
+    <div class="uptime-row">
+      ${["24h","7d","30d"].map(l=>`<div class="uptime-card"><div class="uptime-label">${l}</div><div class="skeleton" style="height:32px;width:80px;margin:0 auto"></div></div>`).join("")}
+    </div>
+    <div class="section"><div class="section-head"><div class="section-title">Heartbeat</div></div><div class="section-body"><div class="skeleton" style="height:28px"></div></div></div>
+    <div class="section"><div class="section-head"><div class="section-title">Response Time</div></div><div class="section-body"><div class="skeleton" style="height:120px"></div></div></div>
+  `;
+}
+
+// -- Full detail render
+function renderDetail(s, uptime, heartbeat, incidents){
+  const statusLabel = s.overall==="up"?"Online":s.overall==="down"?"Offline":s.overall==="degraded"?"Degraded":"Pending";
+  const tags = (s.tags||[]).map(t=>`<span class="detail-tag">${t}</span>`).join("");
+
+  // Uptime cards
+  const uptimeCards = [
+    {label:"Last 24h", val:uptime.h24},
+    {label:"Last 7 days", val:uptime.d7},
+    {label:"Last 30 days", val:uptime.d30}
+  ].map(u => `
+    <div class="uptime-card">
+      <div class="uptime-label">${u.label}</div>
+      <div class="uptime-pct ${uptimeCls(u.val)}">${u.val !== null ? u.val+"%" : "—"}</div>
+      <div class="uptime-sub">${u.val >= 99 ? "Excellent" : u.val >= 95 ? "Good" : u.val !== null ? "Needs attention" : "No data yet"}</div>
+    </div>`).join("");
+
+  // Heartbeat dots
+  const hbPad = Math.max(0, 90 - heartbeat.length);
+  const hbDots = [
+    ...Array(hbPad).fill(null).map(() => `<div class="hb-dot pending" title="No data"></div>`),
+    ...heartbeat.map(h => `<div class="hb-dot ${h.ok?"up":"down"}" title="${fmtTime(h.checked_at)} · ${h.ok?"Up":"Down"}${h.response_ms?" ("+h.response_ms+"ms)":""}"></div>`)
+  ].join("");
+
+  // Current checks — cert info is inlined as a small badge on the HTTP chip itself
+  const checkChips = (s.checks||[]).map(c => {
+    const lbl     = c.type==="ping"?"Ping":c.type==="tcp"?`TCP :${c.port}`:c.type==="udp"?`UDP :${c.port}`:c.type==="dns"?`DNS ${(c.record_type||"A").toUpperCase()}`:"HTTP";
+    const chipCls = c.ok ? "ok" : "fail";
+    // Inline cert badge: only when this HTTP check fetched a cert (HTTPS + show_cert !== false)
+    let certBadge = "";
+    if (c.cert && c.cert.expires_at) {
+      const d = c.cert.days_left;
+      const ccls = d < 0 ? "cert-expired" : d < 14 ? "cert-warn" : "cert-ok";
+      const txt  = d < 0 ? `Expired ${-d}d ago` : d < 1 ? "Expires today" : `SSL ${d}d`;
+      const tt   = `${c.cert.subject || ""} · issued by ${c.cert.issuer || "?"} · expires ${new Date(c.cert.expires_at).toLocaleDateString()}`;
+      certBadge = `<span class="chip-cert ${ccls}" title="${tt}">
+        <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="11" width="18" height="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>
+        ${txt}
+      </span>`;
+    }
+    return `<div class="check-chip ${chipCls}">
+      <div class="chip-dot"></div>
+      <span class="chip-label">${lbl}</span>
+      <span class="chip-detail">${c.detail||""}</span>
+      ${certBadge}
+    </div>`;
+  }).join("");
+
+  // Incidents
+  const incidentRows = incidents.length === 0
+    ? `<div class="no-incidents">✓ No incidents recorded</div>`
+    : incidents.map(i => `
+      <div class="incident-row">
+        <div class="incident-dot ${i.ended_at?"resolved":""}"></div>
+        <div class="incident-info">
+          <div class="incident-cause">${i.cause||"Service unavailable"}</div>
+          <div class="incident-time">${fmtTime(i.started_at)}${i.ended_at?" → "+fmtTime(i.ended_at):""}</div>
+        </div>
+        <div class="incident-dur ${i.ended_at?"resolved":"open"}">${i.ended_at?fmtDur(i.duration_s):"ONGOING"}</div>
+      </div>`).join("");
+
+  const lastChecked = s.lastChecked ? `Last checked ${new Date(s.lastChecked).toLocaleTimeString()}` : "Not yet checked";
+
+  document.getElementById("mainArea").innerHTML = `
+    <div class="detail-header">
+      <div>
+        <div class="detail-name">${s.name}</div>
+        <div class="detail-host">${s.host}${s.description ? " · "+s.description : ""}</div>
+        <div class="detail-tags">${tags}</div>
+      </div>
+      <div style="display:flex;flex-direction:column;align-items:flex-end;gap:10px">
+        <div class="status-big ${s.overall||'pending'}">
+          <div class="status-big-dot"></div>
+          <div>
+            <div class="status-big-label">${statusLabel}</div>
+            <div class="status-big-time">${lastChecked}</div>
+          </div>
+        </div>
+        ${sidebarSession.loggedIn ? `<a href="/admin?edit=${s.id}" class="edit-server-btn"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>Edit Server</a>` : ""}
+      </div>
+    </div>
+
+    <div class="uptime-row">${uptimeCards}</div>
+
+    <div class="section">
+      <div class="section-head">
+        <div class="section-title">Current Checks</div>
+      </div>
+      <div class="section-body">
+        <div class="checks-row">${checkChips||"<span style='color:var(--text-2);font-size:12px'>No checks configured</span>"}</div>
+      </div>
+    </div>
+
+    <div class="section">
+      <div class="section-head">
+        <div class="section-title">Heartbeat</div>
+        <span style="font-size:11px;color:var(--text-2)">Last 90 checks</span>
+      </div>
+      <div class="section-body">
+        <div class="heartbeat">${hbDots}</div>
+        <div class="hb-legend">
+          <span>${heartbeat.length > 0 ? fmtTime(heartbeat[0].checked_at) : ""}</span>
+          <span style="display:flex;align-items:center;gap:10px">
+            <span style="display:flex;align-items:center;gap:4px"><span style="width:8px;height:8px;border-radius:2px;background:var(--green);display:inline-block"></span> Up</span>
+            <span style="display:flex;align-items:center;gap:4px"><span style="width:8px;height:8px;border-radius:2px;background:var(--red);display:inline-block"></span> Down</span>
+          </span>
+          <span>Now</span>
+        </div>
+      </div>
+    </div>
+
+    <div class="section">
+      <div class="section-head">
+        <div class="section-title">Response Time</div>
+        <span style="font-size:11px;color:var(--text-2)">Last 24h (avg ms)</span>
+      </div>
+      <div class="section-body" style="padding:16px 20px">
+        ${heartbeat.filter(h=>h.response_ms).length > 0
+          ? `<div class="chart-wrap"><canvas id="responseChart"></canvas></div>`
+          : `<div class="chart-empty">No response time data yet — check back after a few cycles</div>`
+        }
+      </div>
+    </div>
+
+    <div class="section">
+      <div class="section-head">
+        <div class="section-title">Incident History</div>
+        <span style="font-size:11px;color:var(--text-2)">${incidents.length} incident${incidents.length===1?"":"s"}</span>
+      </div>
+      <div class="section-body" style="padding:0 20px">
+        <div class="incident-list">${incidentRows}</div>
+      </div>
+    </div>
+  `;
+
+  // Draw response time chart if we have data
+  const chartData = heartbeat.filter(h => h.response_ms !== null);
+  if (chartData.length > 0) drawChart(chartData);
+}
+
+// -- Simple canvas chart (no external libs)
+function drawChart(data){
+  const canvas = document.getElementById("responseChart");
+  if (!canvas) return;
+  const dpr    = window.devicePixelRatio || 1;
+  const rect   = canvas.parentElement.getBoundingClientRect();
+  canvas.width  = rect.width  * dpr;
+  canvas.height = 120 * dpr;
+  canvas.style.width  = rect.width  + "px";
+  canvas.style.height = "120px";
+  const ctx = canvas.getContext("2d");
+  ctx.scale(dpr, dpr);
+  const W = rect.width, H = 120, PAD = {top:10, right:10, bottom:24, left:40};
+  const cW = W - PAD.left - PAD.right;
+  const cH = H - PAD.top  - PAD.bottom;
+  const vals = data.map(d => d.response_ms);
+  const maxV = Math.max(...vals, 10);
+  const minV = 0;
+  ctx.clearRect(0, 0, W, H);
+
+  // Grid lines
+  ctx.strokeStyle = "rgba(30,100,200,0.1)";
+  ctx.lineWidth   = 1;
+  [0, 0.25, 0.5, 0.75, 1].forEach(f => {
+    const y = PAD.top + cH * (1 - f);
+    ctx.beginPath(); ctx.moveTo(PAD.left, y); ctx.lineTo(W - PAD.right, y); ctx.stroke();
+    ctx.fillStyle   = "rgba(61,96,128,0.8)";
+    ctx.font        = "10px JetBrains Mono, monospace";
+    ctx.textAlign   = "right";
+    ctx.fillText(Math.round(maxV * f) + "ms", PAD.left - 4, y + 3);
+  });
+
+  // Fill gradient
+  const grad = ctx.createLinearGradient(0, PAD.top, 0, PAD.top + cH);
+  grad.addColorStop(0, "rgba(42,127,255,0.3)");
+  grad.addColorStop(1, "rgba(42,127,255,0.0)");
+  ctx.fillStyle = grad;
+  ctx.beginPath();
+  data.forEach((d, i) => {
+    const x = PAD.left + (i / (data.length - 1 || 1)) * cW;
+    const y = PAD.top  + cH * (1 - (d.response_ms - minV) / (maxV - minV));
+    i === 0 ? ctx.moveTo(x, y) : ctx.lineTo(x, y);
+  });
+  ctx.lineTo(PAD.left + cW, PAD.top + cH);
+  ctx.lineTo(PAD.left, PAD.top + cH);
+  ctx.closePath(); ctx.fill();
+
+  // Line
+  ctx.strokeStyle = "rgba(42,127,255,0.9)";
+  ctx.lineWidth   = 2;
+  ctx.lineJoin    = "round";
+  ctx.beginPath();
+  data.forEach((d, i) => {
+    const x = PAD.left + (i / (data.length - 1 || 1)) * cW;
+    const y = PAD.top  + cH * (1 - (d.response_ms - minV) / (maxV - minV));
+    i === 0 ? ctx.moveTo(x, y) : ctx.lineTo(x, y);
+  });
+  ctx.stroke();
+
+  // Dots
+  ctx.fillStyle = "rgba(42,127,255,1)";
+  if (data.length <= 30) {
+    data.forEach((d, i) => {
+      const x = PAD.left + (i / (data.length - 1 || 1)) * cW;
+      const y = PAD.top  + cH * (1 - (d.response_ms - minV) / (maxV - minV));
+      ctx.beginPath(); ctx.arc(x, y, 3, 0, Math.PI * 2); ctx.fill();
+    });
+  }
+}
+
+// -- Cache key (per-group so dashboards don't share cache)
+const CACHE_KEY_SERVERS  = GROUP_SLUG ? `servers-${GROUP_SLUG}` : "servers";
+const CACHE_KEY_SELECTED = GROUP_SLUG ? `selected-id-${GROUP_SLUG}` : "selected-id";
+
+// -- Load servers + auto-select first (uses cache for instant render)
+async function loadServers(){
+  // 1) Instant render from cache if available
+  const cachedServers = cacheGet(CACHE_KEY_SERVERS);
+  const cachedSelected = cacheGet(CACHE_KEY_SELECTED);
+  if (cachedServers && cachedServers.length) {
+    servers = cachedServers;
+    renderSidebar();
+    const initialId = cachedSelected && servers.find(s => s.id === cachedSelected) ? cachedSelected : servers[0].id;
+    selectServer(initialId);
+  }
+
+  // 2) Fetch fresh server list and update
+  try {
+    const url = GROUP_SLUG ? `/api/public/group/${GROUP_SLUG}` : "/api/public/servers";
+    const r = await fetch(url);
+    const data = await r.json();
+    const fresh = GROUP_SLUG ? data.servers : data;
+    if (GROUP_SLUG && data.group) currentGroupId = data.group.id;
+    servers = fresh;
+    cacheSet(CACHE_KEY_SERVERS, fresh);
+    renderSidebar();
+    if (!selectedId && servers.length > 0) selectServer(servers[0].id);
+    if (GROUP_SLUG && servers.length === 0) {
+      document.getElementById("sidebarList").innerHTML = `<div style="padding:16px;color:var(--text-2);font-size:12px">No servers in this dashboard yet</div>`;
+      document.getElementById("mainArea").innerHTML = `<div class="empty-main">No servers assigned to this dashboard</div>`;
+    }
+  } catch(e) {
+    if (!cachedServers) {
+      document.getElementById("sidebarList").innerHTML = `<div style="padding:16px;color:var(--text-2);font-size:12px">Failed to load servers</div>`;
+    }
+  }
+}
+
+// -- Live updates via SSE
+(function connectSSE(){
+  const es = new EventSource("/api/events");
+  es.onmessage = e => {
+    let data = JSON.parse(e.data);
+    // On a dashboard, filter the global stream down to our group (many-to-many aware)
+    if (GROUP_SLUG && currentGroupId !== null) {
+      data = data.filter(s => Array.isArray(s.group_ids) && s.group_ids.includes(currentGroupId));
+    }
+    servers = data.map(s => ({...s}));
+    cacheSet(CACHE_KEY_SERVERS, servers);
+    renderSidebar();
+    // Refresh detail if selected server updated
+    if (selectedId) {
+      const updated = servers.find(s => s.id === selectedId);
+      if (updated) {
+        // Just update the status badge and checks without full reload
+        const bigBadge = document.querySelector(".status-big");
+        if (bigBadge) {
+          bigBadge.className = `status-big ${updated.overall||"pending"}`;
+          const lbl = bigBadge.querySelector(".status-big-label");
+          if (lbl) lbl.textContent = updated.overall==="up"?"Online":updated.overall==="down"?"Offline":updated.overall==="degraded"?"Degraded":"Pending";
+        }
+      }
+    }
+  };
+  es.onerror = () => { es.close(); setTimeout(connectSSE, 5000); };
+})();
+
+// Refresh detail data every 30s for selected server
+setInterval(() => {
+  if (selectedId) selectServer(selectedId);
+}, 30000);
+
+loadServers();
+loadDashboardGroups();  // master view: paints sidebar groups; public dashboards: paints topbar quick-nav pills
+</script>
+</body>
+</html>
