@@ -4,6 +4,30 @@ All notable changes to this project are documented here.
 
 ---
 
+## [2.5.0] — 2026-04-12
+
+### Added
+- **First-time signup flow** — fresh installs prompt admin to create an account on `/login`; replaces hardcoded `ADMIN_USERNAME`/`ADMIN_PASSWORD` env vars
+- **Email notifications via SMTP** — new "Email" webhook format sends rich HTML alerts (color-coded header, structured table, alert details, dashboard button)
+- **Settings tab in admin** — manage SMTP host/port/user/password/from from the web UI; settings stored in DB, env vars work as fallback
+- **Per-server Section/Category field** — group servers under named headings on dashboards (e.g. "Omada Network", "DNS Servers"); autocomplete suggests existing categories
+- **Interactive response time chart** — hover shows a crosshair, dot snaps to nearest data point, and tooltip displays exact ms + timestamp
+- **`SMTP_HOST`/`SMTP_PORT`/`SMTP_USER`/`SMTP_PASS`/`SMTP_FROM`/`SMTP_SECURE` env vars** — optional SMTP fallback for first-run
+
+### Changed
+- **Topbar grows vertically** when logo or dashboard pills overflow — wraps instead of clipping
+- **Omada response time** now measures controller API latency instead of broken LAN ping (private IPs aren't routable from monitoring server)
+- **Webhook URL field** accepts email addresses when format is set to Email; auto-detect recognizes email patterns
+- **Caddy setup example** in group form — removed TLS cert paths
+
+### Fixed
+- **Admin user form** now fetches fresh group list every time so newly-created dashboards show up in the picker
+- **Response time chart** filtered out 0ms values as falsy — now treats 0 and `<1ms` as valid data
+- **Sub-1ms ping precision** — keeps one decimal (e.g. `0.3ms`) instead of rounding to 0
+- **Dead `ADMIN_USERNAME`/`ADMIN_PASSWORD` env vars** removed from server.js, docker-compose example, and README
+
+---
+
 ## [2.4.0] — 2026-04-12
 
 ### Added
