@@ -28,9 +28,6 @@ const DB_USER = process.env.DB_USER     || "root";
 const DB_PASS = process.env.DB_PASSWORD || "";
 const DB_NAME = process.env.DB_NAME     || "status_monitor";
 
-// -- Initial admin credentials (used only on first run) -----------------------
-const INIT_USER = process.env.ADMIN_USERNAME || "admin";
-const INIT_PASS = process.env.ADMIN_PASSWORD || "changeme";
 const SESSION_SECRET = process.env.SESSION_SECRET || "change-this-secret-in-production";
 
 // -- Global safety net ---------------------------------------------------------
