@@ -73,7 +73,7 @@ body{font-family:var(--sans);background:var(--bg);color:var(--text);min-height:1
 body::before{content:'';position:fixed;inset:0;pointer-events:none;background:radial-gradient(ellipse 60% 50% at 20% 50%,rgba(42,127,255,0.05) 0%,transparent 70%),radial-gradient(ellipse 40% 40% at 80% 20%,rgba(255,140,42,0.04) 0%,transparent 60%);z-index:0}
 
 /* -- TOP BAR -- */
-.topbar{position:relative;z-index:10;display:flex;align-items:center;justify-content:space-between;padding:0 28px;height:64px;border-bottom:1px solid var(--border);background:linear-gradient(180deg,var(--sidebar) 0%,var(--bg2) 100%);backdrop-filter:blur(12px)}
+.topbar{position:relative;z-index:10;display:flex;align-items:center;justify-content:space-between;padding:10px 28px;min-height:64px;flex-wrap:wrap;gap:12px;border-bottom:1px solid var(--border);background:linear-gradient(180deg,var(--sidebar) 0%,var(--bg2) 100%);backdrop-filter:blur(12px)}
 .topbar-brand{display:flex;align-items:center;gap:12px}
 .topbar-icon{width:42px;height:42px;border-radius:10px;background:var(--blue-soft);border:1px solid rgba(42,127,255,0.25);display:flex;align-items:center;justify-content:center;font-size:14px;overflow:hidden}
 .topbar-logo-img{width:38px;height:38px;border-radius:8px;object-fit:contain;display:block}
@@ -104,7 +104,7 @@ body::before{content:'';position:fixed;inset:0;pointer-events:none;background:ra
 .dash-nav-admin:hover{border-color:var(--orange);background:var(--orange-soft);color:var(--orange)}
 
 /* -- LAYOUT -- */
-.layout{position:relative;z-index:1;flex:1;overflow:hidden;height:calc(100vh - 56px)}
+.layout{position:relative;z-index:1;flex:1;overflow:hidden;min-height:calc(100vh - 64px)}
 
 /* -- SERVER LIST (full-screen grid) -- */
 .sidebar{width:100%;height:100%;background:var(--bg);overflow-y:auto;padding:24px 32px}
@@ -279,7 +279,7 @@ canvas#responseChart{width:100%!important}
 
 /* -- RESPONSIVE -- */
 @media(max-width:760px){
-  .topbar{padding:8px 12px;height:auto;min-height:56px;flex-wrap:wrap;gap:8px;row-gap:6px}
+  .topbar{padding:8px 12px;min-height:56px;gap:8px;row-gap:6px}
   .topbar-brand{flex-shrink:0}
   .topbar-name{font-size:14px}
   .topbar-icon{width:36px;height:36px;border-radius:9px}
