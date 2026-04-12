@@ -660,7 +660,6 @@ body{font-family:var(--sans);background:var(--bg);color:var(--text);min-height:1
           <div class="fg full" style="background:var(--surface2);border:1px solid var(--border);border-radius:var(--r-sm);padding:10px 12px;font-size:11px;color:var(--text-2);line-height:1.5">
             <strong style="color:var(--text-hi)">Caddy setup required:</strong> after saving, add a block to your Caddyfile that proxies your custom domain to <span style="font-family:var(--mono);color:var(--blue)">status-server:3000</span>, then recreate Caddy. Example:
             <pre style="margin:6px 0 0;font-family:var(--mono);font-size:10px;color:var(--text-hi);background:var(--bg);padding:8px;border-radius:4px;white-space:pre-wrap">status.example.com {
-    tls /richardapplegate/fullchain.pem /richardapplegate/privkey.pem
     reverse_proxy http://status-server:3000
 }</pre>
           </div>
