@@ -8,6 +8,7 @@ const path         = require("path");
 const mysql        = require("mysql2/promise");
 const bcrypt       = require("bcryptjs");
 const session      = require("express-session");
+const nodemailer   = require("nodemailer");
 
 const app  = express();
 const { version: APP_VERSION } = require("./package.json");
@@ -29,6 +30,24 @@ const DB_PASS = process.env.DB_PASSWORD || "";
 const DB_NAME = process.env.DB_NAME     || "status_monitor";
 
 const SESSION_SECRET = process.env.SESSION_SECRET || "change-this-secret-in-production";
+
+// -- SMTP config (for email webhook notifications) ----------------------------
+const SMTP_HOST = process.env.SMTP_HOST || "";
+const SMTP_PORT = parseInt(process.env.SMTP_PORT || "587");
+const SMTP_USER = process.env.SMTP_USER || "";
+const SMTP_PASS = process.env.SMTP_PASS || "";
+const SMTP_FROM = process.env.SMTP_FROM || SMTP_USER || "monitor@example.com";
+const SMTP_SECURE = (process.env.SMTP_SECURE || "false") === "true"; // true for port 465
+
+let smtpTransport = null;
+if (SMTP_HOST) {
+  smtpTransport = nodemailer.createTransport({
+    host: SMTP_HOST,
+    port: SMTP_PORT,
+    secure: SMTP_SECURE,
+    auth: SMTP_USER ? { user: SMTP_USER, pass: SMTP_PASS } : undefined
+  });
+}
 
 // -- Global safety net ---------------------------------------------------------
 // Catch any unhandled promise rejection or exception so one bug can't kill the poll
@@ -330,7 +349,7 @@ async function initDB() {
       enabled          TINYINT(1)   NOT NULL DEFAULT 1,
       fire_on_down     TINYINT(1)   NOT NULL DEFAULT 1,
       fire_on_recovery TINYINT(1)   NOT NULL DEFAULT 1,
-      format           ENUM('auto','generic','discord','slack') NOT NULL DEFAULT 'auto',
+      format           ENUM('auto','generic','discord','slack','email') NOT NULL DEFAULT 'auto',
       group_id         INT          DEFAULT NULL,
       created_at       TIMESTAMP DEFAULT CURRENT_TIMESTAMP
     )
@@ -339,6 +358,10 @@ async function initDB() {
   try {
     await db.query("ALTER TABLE status_webhooks ADD COLUMN group_id INT DEFAULT NULL");
   } catch(e) { /* column already exists */ }
+  // Upgrade-safe: add 'email' to format enum for existing installs
+  try {
+    await db.query("ALTER TABLE status_webhooks MODIFY COLUMN format ENUM('auto','generic','discord','slack','email') NOT NULL DEFAULT 'auto'");
+  } catch(e) { /* already updated */ }
 
   // No longer auto-creates admin — first user signs up via /login
 
@@ -1202,6 +1225,41 @@ function buildWebhookPayload(format, evt) {
       attachments: [{ color, blocks }]
     };
   }
+  if (format === "email") {
+    const subject = `${emoji} ${evt.server} ${verb}`;
+    const checkDetails = Array.isArray(evt.checks) && evt.checks.length
+      ? evt.checks.filter(c => !c.ok || evt.isRecovery || evt.isTest).map(c => {
+          const label = c.type === "ping" ? "PING" : c.type === "tcp" ? `TCP :${c.port}` : c.type === "udp" ? `UDP :${c.port}` : c.type.toUpperCase();
+          return `${c.ok ? "✅" : "❌"} ${label}: ${c.detail}`;
+        }).join("\n")
+      : null;
+    const html = `
+      <div style="font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;max-width:600px;margin:0 auto;background:#0d1117;border:1px solid #30363d;border-radius:12px;overflow:hidden">
+        <div style="background:${evt.isTest ? '#5865f2' : evt.isRecovery ? '#10e88a' : evt.status === 'down' ? '#ff3d5a' : '#ff8c2a'};padding:20px 24px">
+          <h1 style="margin:0;font-size:20px;font-weight:700;color:#fff">${emoji} Service ${verb}</h1>
+        </div>
+        <div style="padding:24px">
+          <table style="width:100%;border-collapse:collapse;font-size:14px;color:#c9d1d9">
+            <tr><td style="padding:8px 0;color:#8b949e;width:100px"><strong>Service:</strong></td><td style="padding:8px 0">${evt.server}</td></tr>
+            <tr><td style="padding:8px 0;color:#8b949e"><strong>Status:</strong></td><td style="padding:8px 0">${statusEmoji} ${statusLabel}</td></tr>
+            <tr><td style="padding:8px 0;color:#8b949e"><strong>Target:</strong></td><td style="padding:8px 0;font-family:monospace">${evt.host}</td></tr>
+            <tr><td style="padding:8px 0;color:#8b949e"><strong>Time:</strong></td><td style="padding:8px 0">${displayTime}</td></tr>
+          </table>
+          ${checkDetails || evt.cause ? `
+          <div style="margin-top:16px">
+            <div style="font-size:13px;font-weight:600;color:#8b949e;margin-bottom:8px">⚠️ Alert Details</div>
+            <pre style="background:#161b22;border:1px solid #30363d;border-radius:8px;padding:12px;font-size:12px;color:#c9d1d9;white-space:pre-wrap;margin:0">${checkDetails || evt.cause}</pre>
+          </div>` : ""}
+          ${evt.dashboardUrl ? `
+          <div style="margin-top:20px">
+            <a href="${evt.dashboardUrl}" style="display:inline-block;padding:10px 20px;background:#238636;color:#fff;text-decoration:none;border-radius:6px;font-size:13px;font-weight:600">View Dashboard</a>
+          </div>` : ""}
+        </div>
+        ${evt.webhookName ? `<div style="padding:12px 24px;border-top:1px solid #30363d;font-size:11px;color:#484f58">Sent by ${evt.webhookName}</div>` : ""}
+      </div>`;
+    const text = `${emoji} ${evt.server} ${verb}\n\nService: ${evt.server}\nStatus: ${statusLabel}\nTarget: ${evt.host}\nTime: ${displayTime}\n${checkDetails || evt.cause ? "\nAlert Details:\n" + (checkDetails || evt.cause) : ""}${evt.dashboardUrl ? "\n\nDashboard: " + evt.dashboardUrl : ""}`;
+    return { _email: true, subject, html, text };
+  }
   // generic
   return {
     event: evt.isTest ? "webhook.test" : evt.isRecovery ? "server.recovered" : "server.down",
@@ -1216,6 +1274,7 @@ function buildWebhookPayload(format, evt) {
 }
 
 function detectFormat(url) {
+  if (/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(url)) return "email";
   if (/discord(app)?\.com\/api\/webhooks/i.test(url)) return "discord";
   if (/hooks\.slack\.com/i.test(url)) return "slack";
   return "generic";
@@ -1250,6 +1309,17 @@ function postWebhook(url, body) {
     req.on("timeout", () => { req.destroy(); reject(new Error("timeout")); });
     req.write(data);
     req.end();
+  });
+}
+
+async function sendEmailAlert(to, payload) {
+  if (!smtpTransport) throw new Error("SMTP not configured — set SMTP_HOST, SMTP_USER, SMTP_PASS env vars");
+  await smtpTransport.sendMail({
+    from: SMTP_FROM,
+    to,
+    subject: payload.subject,
+    text: payload.text,
+    html: payload.html
   });
 }
 
@@ -1309,13 +1379,21 @@ async function fireWebhooks(evt) {
     // Fire-and-forget with one retry
     (async () => {
       try {
-        await postWebhook(h.url, body);
+        if (body._email) {
+          await sendEmailAlert(h.url, body);
+        } else {
+          await postWebhook(h.url, body);
+        }
         addLog({ level:"info", server:"webhook", message:`Sent "${h.name}" for ${evt.server} (${evt.isRecovery?"recovery":evt.status})` });
       } catch(e1) {
         addLog({ level:"warn", server:"webhook", message:`Webhook "${h.name}" attempt 1 failed: ${e1.message}` });
         await new Promise(r => setTimeout(r, 1500));
         try {
-          await postWebhook(h.url, body);
+          if (body._email) {
+            await sendEmailAlert(h.url, body);
+          } else {
+            await postWebhook(h.url, body);
+          }
           addLog({ level:"info", server:"webhook", message:`Sent "${h.name}" on retry for ${evt.server}` });
         } catch(e2) {
           addLog({ level:"error", server:"webhook", message:`Webhook "${h.name}" failed: ${e2.message}` });
@@ -1894,8 +1972,9 @@ app.get("/api/admin/webhooks", requireAuth, async (req, res) => {
 app.post("/api/admin/webhooks", requireAuth, async (req, res) => {
   const { name, url, enabled, fire_on_down, fire_on_recovery, format, group_id } = req.body;
   if (!name || !url) return res.status(400).json({ error:"Name and URL required" });
-  if (!/^https?:\/\//i.test(url)) return res.status(400).json({ error:"URL must start with http:// or https://" });
-  const fmt = ["auto","generic","discord","slack"].includes(format) ? format : "auto";
+  const isEmail = /^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(url);
+  if (!isEmail && !/^https?:\/\//i.test(url)) return res.status(400).json({ error:"URL must start with http:// or https:// (or be an email address)" });
+  const fmt = ["auto","generic","discord","slack","email"].includes(format) ? format : "auto";
   // Viewers must scope the webhook to one of their allowed groups; admin can omit (= global)
   let groupIdToStore = null;
   if (req.session.role !== "admin") {
@@ -1921,8 +2000,9 @@ app.post("/api/admin/webhooks", requireAuth, async (req, res) => {
 app.put("/api/admin/webhooks/:id", requireAuth, async (req, res) => {
   const { name, url, enabled, fire_on_down, fire_on_recovery, format, group_id } = req.body;
   if (!name || !url) return res.status(400).json({ error:"Name and URL required" });
-  if (!/^https?:\/\//i.test(url)) return res.status(400).json({ error:"URL must start with http:// or https://" });
-  const fmt = ["auto","generic","discord","slack"].includes(format) ? format : "auto";
+  const isEmail = /^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(url);
+  if (!isEmail && !/^https?:\/\//i.test(url)) return res.status(400).json({ error:"URL must start with http:// or https:// (or be an email address)" });
+  const fmt = ["auto","generic","discord","slack","email"].includes(format) ? format : "auto";
   try {
     const [existing] = await db.query("SELECT group_id FROM status_webhooks WHERE id=?", [req.params.id]);
     if (!existing.length) return res.status(404).json({ error:"Webhook not found" });
@@ -1997,9 +2077,15 @@ app.post("/api/admin/webhooks/:id/test", requireAuth, async (req, res) => {
       dashboardUrl
     });
     try {
-      const result = await postWebhook(h.url, body);
-      addLog({ level:"info", server:"webhook", message:`Test sent for "${h.name}" (HTTP ${result.status})` });
-      res.json({ ok:true, status: result.status, format: fmt });
+      if (body._email) {
+        await sendEmailAlert(h.url, body);
+        addLog({ level:"info", server:"webhook", message:`Test email sent for "${h.name}" to ${h.url}` });
+        res.json({ ok:true, status: 200, format: fmt });
+      } else {
+        const result = await postWebhook(h.url, body);
+        addLog({ level:"info", server:"webhook", message:`Test sent for "${h.name}" (HTTP ${result.status})` });
+        res.json({ ok:true, status: result.status, format: fmt });
+      }
     } catch(e) {
       addLog({ level:"warn", server:"webhook", message:`Test failed for "${h.name}": ${e.message}` });
       res.status(502).json({ error: e.message });

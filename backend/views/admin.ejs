@@ -700,11 +700,12 @@ body{font-family:var(--sans);background:var(--bg);color:var(--text);min-height:1
         <input type="hidden" id="wId">
         <div class="form-grid">
           <div class="fg full"><label class="flabel">Name *</label><input class="finput" id="wName" placeholder="e.g. Discord Alerts"></div>
-          <div class="fg full"><label class="flabel">URL *</label><input class="finput" id="wUrl" placeholder="https://discord.com/api/webhooks/..."></div>
-          <div class="fg full"><label class="flabel">Format</label><select class="fselect" id="wFormat">
-            <option value="auto">Auto-detect (Discord / Slack / Generic)</option>
+          <div class="fg full"><label class="flabel" id="wUrlLabel">URL *</label><input class="finput" id="wUrl" placeholder="https://discord.com/api/webhooks/..."></div>
+          <div class="fg full"><label class="flabel">Format</label><select class="fselect" id="wFormat" onchange="updateWebhookUrlHint()">
+            <option value="auto">Auto-detect (Discord / Slack / Email)</option>
             <option value="discord">Discord</option>
             <option value="slack">Slack</option>
+            <option value="email">Email</option>
             <option value="generic">Generic JSON</option>
           </select></div>
           <div class="fg full"><label class="flabel">Owner Group <span style="font-weight:400;text-transform:none;letter-spacing:0;color:var(--text-2)" id="wGroupHint">(only fires for servers in this dashboard)</span></label><select class="fselect" id="wGroup"></select></div>
@@ -2145,6 +2146,20 @@ async function loadWebhookList(){
   }
 }
 
+function updateWebhookUrlHint(){
+  const fmt = document.getElementById("wFormat").value;
+  const label = document.getElementById("wUrlLabel");
+  const input = document.getElementById("wUrl");
+  if (fmt === "email") {
+    label.textContent = "Email Address *";
+    input.placeholder = "alerts@example.com";
+    input.type = "email";
+  } else {
+    label.textContent = "URL *";
+    input.placeholder = "https://discord.com/api/webhooks/...";
+    input.type = "text";
+  }
+}
 async function showWebhookForm(h){
   document.getElementById("aListView").style.display        = "none";
   document.getElementById("aFormView").style.display        = "none";
@@ -2155,6 +2170,7 @@ async function showWebhookForm(h){
   document.getElementById("wName").value   = h?.name || "";
   document.getElementById("wUrl").value    = h?.url || "";
   document.getElementById("wFormat").value = h?.format || "auto";
+  updateWebhookUrlHint();
   document.getElementById("wEnabled").checked    = h ? !!h.enabled          : true;
   document.getElementById("wOnDown").checked     = h ? !!h.fire_on_down     : true;
   document.getElementById("wOnRecovery").checked = h ? !!h.fire_on_recovery : true;
@@ -2178,7 +2194,9 @@ async function submitWebhookForm(){
   const url  = document.getElementById("wUrl").value.trim();
   const err  = document.getElementById("wErr");
   if (!name || !url){ err.textContent = "Name and URL required"; return; }
-  if (!/^https?:\/\//i.test(url)){ err.textContent = "URL must start with http:// or https://"; return; }
+  const isEmail = document.getElementById("wFormat").value === "email" || /^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(url);
+  if (!isEmail && !/^https?:\/\//i.test(url)){ err.textContent = "URL must start with http:// or https://"; return; }
+  if (isEmail && !/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(url)){ err.textContent = "Please enter a valid email address"; return; }
   const groupSel = document.getElementById("wGroup").value;
   const body = {
     name, url,

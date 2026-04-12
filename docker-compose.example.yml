@@ -28,6 +28,14 @@ services:
       # Container timezone (optional — defaults to UTC)
       - TZ=America/Los_Angeles
 
+      # SMTP for email notifications (optional — required for email webhook format)
+      # - SMTP_HOST=smtp.gmail.com
+      # - SMTP_PORT=587
+      # - SMTP_USER=you@gmail.com
+      # - SMTP_PASS=your-app-password
+      # - SMTP_FROM=monitor@yourdomain.com
+      # - SMTP_SECURE=false
+
       # Branding for legal pages and update notifications (optional)
       - APP_OWNER=Your Name
       - APP_CONTACT_EMAIL=you@example.com
