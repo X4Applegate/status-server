@@ -521,7 +521,7 @@ body{font-family:var(--sans);background:var(--bg);color:var(--text);min-height:1
   </div>
   <div id="aListView" class="admin-section">
     <div class="drawer-toolbar">
-      <div class="admin-tabs"><button class="admin-tab active" id="tabServers" onclick="switchTab('servers')">Servers</button><button class="admin-tab" id="tabGroups" onclick="switchTab('groups')">Groups</button><button class="admin-tab" id="tabOmada" onclick="switchTab('omada')">Omada</button><button class="admin-tab" id="tabUsers" onclick="switchTab('users')">Users</button><button class="admin-tab" id="tabWebhooks" onclick="switchTab('webhooks')">Webhooks</button></div>
+      <div class="admin-tabs"><button class="admin-tab active" id="tabServers" onclick="switchTab('servers')">Servers</button><button class="admin-tab" id="tabGroups" onclick="switchTab('groups')">Groups</button><button class="admin-tab" id="tabOmada" onclick="switchTab('omada')">Omada</button><button class="admin-tab" id="tabUsers" onclick="switchTab('users')">Users</button><button class="admin-tab" id="tabWebhooks" onclick="switchTab('webhooks')">Webhooks</button><button class="admin-tab" id="tabSettings" onclick="switchTab('settings')">Settings</button></div>
       <span style="font-size:11px;color:var(--text-2)" id="aCount"></span>
       <div class="drawer-spacer"></div>
       <button class="btn btn-primary" id="addBtn" onclick="showServerForm(null)" style="font-size:11px;padding:5px 11px"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" style="width:12px;height:12px"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg><span id="addBtnLabel">Add Server</span></button>
@@ -946,7 +946,7 @@ function isViewer(){ return sessionRole === "viewer"; }
 // Users tab stays admin-only.
 function applyRoleVisibility(){
   if (isAdmin()) return;  // admins see everything; nothing to hide
-  ["tabUsers"].forEach(id => {
+  ["tabUsers", "tabSettings"].forEach(id => {
     const el = document.getElementById(id);
     if (el) el.style.display = "none";
   });
@@ -1503,7 +1503,7 @@ function closeAdmin(){
 }
 
 async function switchTab(tab){
-  // Viewers can access Servers, Omada, Webhooks, and Groups. Users tab bounces back.
+  // Viewers can access Servers, Omada, Webhooks, and Groups. Users + Settings tabs bounce back.
   if (!isAdmin() && !["servers","omada","webhooks","groups"].includes(tab)) tab = "servers";
   currentTab = tab;
   serverFormReturn = null;  // switching tabs clears any pending return target
@@ -1512,16 +1512,18 @@ async function switchTab(tab){
   document.getElementById("tabOmada").classList.toggle("active",    tab === "omada");
   document.getElementById("tabUsers").classList.toggle("active",    tab === "users");
   document.getElementById("tabWebhooks").classList.toggle("active", tab === "webhooks");
-  const labels = { servers: "Add Server", groups: "Add Group", omada: "Add Controller", users: "Add User", webhooks: "Add Webhook" };
+  document.getElementById("tabSettings").classList.toggle("active", tab === "settings");
+  const labels = { servers: "Add Server", groups: "Add Group", omada: "Add Controller", users: "Add User", webhooks: "Add Webhook", settings: "" };
   document.getElementById("addBtnLabel").textContent  = labels[tab];
-  // Hide Add button for viewers on admin-only-create tabs (groups, users)
-  const hideAdd = !isAdmin() && (tab === "groups" || tab === "users");
+  // Hide Add button for viewers on admin-only-create tabs and on Settings
+  const hideAdd = (!isAdmin() && (tab === "groups" || tab === "users")) || tab === "settings";
   document.getElementById("addBtn").style.display = hideAdd ? "none" : "";
   document.getElementById("addBtn").onclick           =
     tab === "servers"  ? () => showServerForm(null) :
     tab === "groups"   ? () => showGroupForm(null)  :
     tab === "omada"    ? () => showOmadaForm(null)  :
     tab === "users"    ? () => showUserForm(null)   :
+    tab === "settings" ? () => {} :
                          () => showWebhookForm(null);
   // Show list view, hide forms
   document.getElementById("aListView").style.display        = "flex";
@@ -1536,6 +1538,7 @@ async function switchTab(tab){
   else if (tab === "groups")   await loadGroupList();
   else if (tab === "omada")    await loadOmadaList();
   else if (tab === "users")    await loadUserList();
+  else if (tab === "settings") await loadSettings();
   else                         await loadWebhookList();
 }
 
@@ -2116,6 +2119,85 @@ function renderAdminWebhookList(hooks){
       </div>
     </div>`;
   }).join("");
+}
+
+async function loadSettings(){
+  const el = document.getElementById("adminPanelBody");
+  document.getElementById("aCount").textContent = "SMTP & Email Notifications";
+  el.innerHTML = `<div style="padding:20px;color:var(--text-2);font-size:12px">Loading…</div>`;
+  try {
+    const r = await fetch("/api/admin/settings/smtp");
+    if (!r.ok) { el.innerHTML = `<div class="empty-state">Admin role required.</div>`; return; }
+    const s = await r.json();
+    el.innerHTML = `
+      <div style="padding:24px;max-width:640px">
+        <div style="margin-bottom:20px">
+          <div style="font-size:14px;font-weight:600;color:var(--text-hi);margin-bottom:4px">Email (SMTP)</div>
+          <div style="font-size:12px;color:var(--text-2);line-height:1.6">Configure outbound email so webhook alerts with the <strong>Email</strong> format can deliver. ${s.configured ? '<span style="color:var(--green)">● Configured</span>' : '<span style="color:var(--orange)">● Not configured</span>'}</div>
+        </div>
+        <div class="form-grid">
+          <div class="fg"><label class="flabel">SMTP Host *</label><input class="finput" id="setSmtpHost" placeholder="smtp.gmail.com" value="${s.host || ''}"></div>
+          <div class="fg"><label class="flabel">Port</label><input class="finput" id="setSmtpPort" type="number" placeholder="587" value="${s.port || 587}"></div>
+          <div class="fg"><label class="flabel">Username</label><input class="finput" id="setSmtpUser" placeholder="you@gmail.com" value="${s.user || ''}"></div>
+          <div class="fg"><label class="flabel">Password</label><input class="finput" id="setSmtpPass" type="password" placeholder="${s.pass ? '(leave blank to keep current)' : 'app password'}" value=""></div>
+          <div class="fg full"><label class="flabel">From Address <span style="font-weight:400;text-transform:none;letter-spacing:0;color:var(--text-2)">(defaults to username)</span></label><input class="finput" id="setSmtpFrom" placeholder="alerts@yourdomain.com" value="${s.from || ''}"></div>
+          <div class="fg full"><label class="flabel"><input type="checkbox" id="setSmtpSecure" ${s.secure ? 'checked' : ''} style="vertical-align:middle;margin-right:6px">Use SSL/TLS (port 465)</label></div>
+        </div>
+        <div style="display:flex;gap:10px;margin-top:20px;flex-wrap:wrap">
+          <button class="btn btn-primary" onclick="saveSmtpSettings()">Save Settings</button>
+          <button class="btn" onclick="testSmtpSettings()">Send Test Email</button>
+        </div>
+        <div id="setMsg" style="margin-top:14px;font-size:12px"></div>
+      </div>`;
+  } catch(e) {
+    el.innerHTML = `<div class="empty-state">Failed to load settings: ${e.message}</div>`;
+  }
+}
+
+async function saveSmtpSettings(){
+  const msg = document.getElementById("setMsg");
+  msg.textContent = "Saving…"; msg.style.color = "var(--text-2)";
+  const body = {
+    host:   document.getElementById("setSmtpHost").value.trim(),
+    port:   parseInt(document.getElementById("setSmtpPort").value) || 587,
+    user:   document.getElementById("setSmtpUser").value.trim(),
+    pass:   document.getElementById("setSmtpPass").value,
+    from:   document.getElementById("setSmtpFrom").value.trim(),
+    secure: document.getElementById("setSmtpSecure").checked
+  };
+  try {
+    const r = await fetch("/api/admin/settings/smtp", {
+      method: "POST",
+      headers: {"Content-Type":"application/json"},
+      body: JSON.stringify(body)
+    });
+    const d = await r.json();
+    if (!r.ok) { msg.textContent = "Error: " + (d.error || "Failed"); msg.style.color = "var(--red)"; return; }
+    msg.textContent = "Settings saved" + (d.configured ? " — SMTP is now active" : ""); msg.style.color = "var(--green)";
+    toast("SMTP settings saved", "success");
+  } catch(e) {
+    msg.textContent = "Error: " + e.message; msg.style.color = "var(--red)";
+  }
+}
+
+async function testSmtpSettings(){
+  const msg = document.getElementById("setMsg");
+  const to = prompt("Send test email to:");
+  if (!to) return;
+  msg.textContent = "Sending test email…"; msg.style.color = "var(--text-2)";
+  try {
+    const r = await fetch("/api/admin/settings/smtp/test", {
+      method: "POST",
+      headers: {"Content-Type":"application/json"},
+      body: JSON.stringify({ to })
+    });
+    const d = await r.json();
+    if (!r.ok) { msg.textContent = "Failed: " + (d.error || "Error"); msg.style.color = "var(--red)"; return; }
+    msg.textContent = "Test email sent to " + to; msg.style.color = "var(--green)";
+    toast("Test email sent", "success");
+  } catch(e) {
+    msg.textContent = "Error: " + e.message; msg.style.color = "var(--red)";
+  }
 }
 
 async function loadWebhookList(){

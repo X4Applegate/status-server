@@ -32,21 +32,50 @@ const DB_NAME = process.env.DB_NAME     || "status_monitor";
 const SESSION_SECRET = process.env.SESSION_SECRET || "change-this-secret-in-production";
 
 // -- SMTP config (for email webhook notifications) ----------------------------
-const SMTP_HOST = process.env.SMTP_HOST || "";
-const SMTP_PORT = parseInt(process.env.SMTP_PORT || "587");
-const SMTP_USER = process.env.SMTP_USER || "";
-const SMTP_PASS = process.env.SMTP_PASS || "";
-const SMTP_FROM = process.env.SMTP_FROM || SMTP_USER || "monitor@example.com";
-const SMTP_SECURE = (process.env.SMTP_SECURE || "false") === "true"; // true for port 465
-
+// Loaded from DB settings table (web UI); env vars are fallback for first-run setups.
+let smtpConfig = {
+  host:   process.env.SMTP_HOST   || "",
+  port:   parseInt(process.env.SMTP_PORT || "587"),
+  user:   process.env.SMTP_USER   || "",
+  pass:   process.env.SMTP_PASS   || "",
+  from:   process.env.SMTP_FROM   || process.env.SMTP_USER || "",
+  secure: (process.env.SMTP_SECURE || "false") === "true"
+};
 let smtpTransport = null;
-if (SMTP_HOST) {
-  smtpTransport = nodemailer.createTransport({
-    host: SMTP_HOST,
-    port: SMTP_PORT,
-    secure: SMTP_SECURE,
-    auth: SMTP_USER ? { user: SMTP_USER, pass: SMTP_PASS } : undefined
-  });
+
+function rebuildSmtpTransport() {
+  if (smtpConfig.host) {
+    smtpTransport = nodemailer.createTransport({
+      host: smtpConfig.host,
+      port: smtpConfig.port,
+      secure: smtpConfig.secure,
+      auth: smtpConfig.user ? { user: smtpConfig.user, pass: smtpConfig.pass } : undefined
+    });
+  } else {
+    smtpTransport = null;
+  }
+}
+rebuildSmtpTransport();
+
+async function loadSmtpFromDb() {
+  if (!db) return;
+  try {
+    const [rows] = await db.query("SELECT key_name, value FROM status_settings WHERE key_name LIKE 'smtp_%'");
+    if (!rows.length) return;
+    const m = {};
+    rows.forEach(r => { m[r.key_name] = r.value; });
+    if (m.smtp_host) {
+      smtpConfig = {
+        host:   m.smtp_host || "",
+        port:   parseInt(m.smtp_port || "587"),
+        user:   m.smtp_user || "",
+        pass:   m.smtp_pass || "",
+        from:   m.smtp_from || m.smtp_user || "",
+        secure: m.smtp_secure === "true"
+      };
+      rebuildSmtpTransport();
+    }
+  } catch(e) { /* settings table may not exist yet */ }
 }
 
 // -- Global safety net ---------------------------------------------------------
@@ -362,6 +391,18 @@ async function initDB() {
   try {
     await db.query("ALTER TABLE status_webhooks MODIFY COLUMN format ENUM('auto','generic','discord','slack','email') NOT NULL DEFAULT 'auto'");
   } catch(e) { /* already updated */ }
+
+  // Settings table — key-value store for app-wide config (SMTP, etc.)
+  await db.query(`
+    CREATE TABLE IF NOT EXISTS status_settings (
+      key_name   VARCHAR(64) PRIMARY KEY,
+      value      TEXT,
+      updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+    )
+  `);
+
+  // Load SMTP config from DB (overrides env vars if set)
+  await loadSmtpFromDb();
 
   // No longer auto-creates admin — first user signs up via /login
 
@@ -1313,9 +1354,9 @@ function postWebhook(url, body) {
 }
 
 async function sendEmailAlert(to, payload) {
-  if (!smtpTransport) throw new Error("SMTP not configured — set SMTP_HOST, SMTP_USER, SMTP_PASS env vars");
+  if (!smtpTransport) throw new Error("SMTP not configured — set it up in Manage → Settings");
   await smtpTransport.sendMail({
-    from: SMTP_FROM,
+    from: smtpConfig.from || smtpConfig.user || "monitor@example.com",
     to,
     subject: payload.subject,
     text: payload.text,
@@ -1857,6 +1898,66 @@ async function getUserAllowedGroupIds(userId, role) {
   const [rows] = await db.query("SELECT group_id FROM status_user_groups WHERE user_id=?", [userId]);
   return rows.map(r => r.group_id);
 }
+
+// -- Settings (SMTP, etc.) ---------------------------------------------------
+app.get("/api/admin/settings/smtp", requireAdmin, async (req, res) => {
+  try {
+    res.json({
+      host:   smtpConfig.host,
+      port:   smtpConfig.port,
+      user:   smtpConfig.user,
+      pass:   smtpConfig.pass ? "********" : "",  // never expose actual password
+      from:   smtpConfig.from,
+      secure: smtpConfig.secure,
+      configured: !!smtpTransport
+    });
+  } catch(e) { res.status(500).json({ error: e.message }); }
+});
+
+app.post("/api/admin/settings/smtp", requireAdmin, async (req, res) => {
+  const { host, port, user, pass, from, secure } = req.body;
+  try {
+    const newPort = parseInt(port) || 587;
+    const newSecure = !!secure;
+    // Only update password if a real value (not the masked placeholder) was sent
+    const finalPass = (pass && pass !== "********") ? pass : smtpConfig.pass;
+    const settings = [
+      ["smtp_host", host || ""],
+      ["smtp_port", String(newPort)],
+      ["smtp_user", user || ""],
+      ["smtp_pass", finalPass || ""],
+      ["smtp_from", from || ""],
+      ["smtp_secure", newSecure ? "true" : "false"]
+    ];
+    for (const [k, v] of settings) {
+      await db.query("INSERT INTO status_settings (key_name, value) VALUES (?, ?) ON DUPLICATE KEY UPDATE value=VALUES(value)", [k, v]);
+    }
+    smtpConfig = { host: host || "", port: newPort, user: user || "", pass: finalPass || "", from: from || "", secure: newSecure };
+    rebuildSmtpTransport();
+    addLog({ level:"info", server:"admin", message:`SMTP settings updated by ${req.session.username}` });
+    res.json({ ok:true, configured: !!smtpTransport });
+  } catch(e) { res.status(500).json({ error: e.message }); }
+});
+
+app.post("/api/admin/settings/smtp/test", requireAdmin, async (req, res) => {
+  const { to } = req.body;
+  if (!to) return res.status(400).json({ error: "Recipient email required" });
+  if (!smtpTransport) return res.status(400).json({ error: "SMTP not configured — save your settings first" });
+  try {
+    await smtpTransport.sendMail({
+      from: smtpConfig.from || smtpConfig.user || "monitor@example.com",
+      to,
+      subject: "🧪 Applegate Monitor — SMTP Test",
+      text: "This is a test email from Applegate Monitor. If you received this, your SMTP settings are working correctly!",
+      html: `<div style="font-family:sans-serif;padding:24px;background:#0d1117;color:#c9d1d9;border-radius:12px;max-width:480px;margin:0 auto"><h2 style="color:#10e88a;margin:0 0 12px">✅ SMTP Test Successful</h2><p>Your Applegate Monitor SMTP settings are working correctly. You'll now receive email alerts when servers go down.</p></div>`
+    });
+    addLog({ level:"info", server:"admin", message:`SMTP test email sent to ${to} by ${req.session.username}` });
+    res.json({ ok: true });
+  } catch(e) {
+    addLog({ level:"warn", server:"admin", message:`SMTP test failed: ${e.message}` });
+    res.status(500).json({ error: e.message });
+  }
+});
 
 app.get("/api/admin/users", requireAdmin, async (req, res) => {
   const [users] = await db.query("SELECT id, username, role, created_at FROM status_users ORDER BY created_at");
