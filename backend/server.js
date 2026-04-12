@@ -899,7 +899,7 @@ async function omadaGatewayCheck(controllerId, siteId, customerId, siteName, cus
     }
 
     // Omada device.status: 1 = Connected (Wired), 11 = Connected (Wireless), 0 = Disconnected
-    const ok = gateway.status === 1 || gateway.status === 11;
+    let omadaOk = gateway.status === 1 || gateway.status === 11;
     const name  = gateway.name || gateway.deviceName || "Gateway";
     const model = gateway.model || gateway.modelName || gateway.product || null;
     const uptimeSec = parseOmadaUptime(gateway.uptimeLong ?? gateway.uptime ?? null);
@@ -908,20 +908,25 @@ async function omadaGatewayCheck(controllerId, siteId, customerId, siteName, cus
     const wanIp     = gateway.publicIp || null;
     const wanStr    = wanIp ? ` · WAN ${wanIp}` : "";
 
-    const detail = ok
-      ? `${modelStr}connected${uptimeStr}${wanStr}`
-      : `${name} offline (status ${gateway.status})`;
-
-    // Ping the gateway's LAN IP (from the Omada API device object) for response-time history.
-    // Falls back to def.host if the API didn't return an IP. Failure is non-fatal.
-    const pingTarget = gateway.ip || host;
+    // Ping the WAN IP (public/static IP) to verify the router is actually reachable.
+    // Falls back to LAN IP, then def.host. If ping fails, mark as down even if Omada says connected.
+    const pingTarget = wanIp || gateway.ip || host;
     let response_ms = null;
-    if (ok && pingTarget && pingTarget !== "omada-managed") {
+    let pingOk = true;
+    if (pingTarget && pingTarget !== "omada-managed") {
       try {
         const p = await pingCheck(pingTarget);
+        pingOk = p.ok;
         if (p.ok && p.response_ms != null) response_ms = p.response_ms;
-      } catch(e) { /* ping failure is non-fatal */ }
+      } catch(e) { pingOk = false; }
     }
+
+    const ok = omadaOk && pingOk;
+    const detail = ok
+      ? `${modelStr}connected${uptimeStr}${wanStr}`
+      : !pingOk && omadaOk
+        ? `${name} unreachable (ping ${pingTarget} failed)${wanStr}`
+        : `${name} offline (status ${gateway.status})`;
 
     return { type:"omada_gateway", ok, detail, response_ms };
   } catch(e) {
