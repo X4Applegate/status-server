@@ -924,7 +924,7 @@ function renderDetail(s, uptime, heartbeat, incidents){
         <span style="font-size:11px;color:var(--text-2)">Last 24h (avg ms)</span>
       </div>
       <div class="section-body" style="padding:16px 20px">
-        ${heartbeat.filter(h=>h.response_ms).length > 0
+        ${heartbeat.filter(h => h.response_ms !== null && h.response_ms !== undefined).length > 0
           ? `<div class="chart-wrap"><canvas id="responseChart"></canvas></div>`
           : `<div class="chart-empty">No response time data yet — check back after a few cycles</div>`
         }

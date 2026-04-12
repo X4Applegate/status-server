@@ -524,7 +524,9 @@ function pingCheck(host) {
     exec(`ping -c 2 -W 2 ${host}`, (err, stdout) => {
       if (err) return resolve({ type:"ping", ok:false, detail:"No response" });
       const match = stdout.match(/rtt[^=]+=\s*([\d.]+)\/([\d.]+)/);
-      const ms = match ? Math.round(parseFloat(match[2])) : null;
+      // Keep one decimal for sub-ms pings so we don't store 0
+      const raw = match ? parseFloat(match[2]) : null;
+      const ms  = raw !== null ? (raw < 1 ? Math.round(raw * 10) / 10 : Math.round(raw)) : null;
       resolve({ type:"ping", ok:true, response_ms: ms, detail: ms !== null ? `${ms}ms` : "ok" });
     });
   });
