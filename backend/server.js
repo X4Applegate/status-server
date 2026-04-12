@@ -1379,7 +1379,14 @@ async function pollAll(force = false) {
 // dashboard (e.g. AnthemAdmin → /dashboard/anthemstatus) so they immediately see
 // the branded page for the group they manage, not a generic master view.
 async function computeLoginRedirect(userId, role) {
-  if (role === "admin") return "/";
+  if (role === "admin") {
+    // Fresh install: no servers yet → send admin straight to management panel
+    try {
+      const [cnt] = await db.query("SELECT COUNT(*) AS c FROM status_servers");
+      if (cnt[0].c === 0) return "/admin?welcome=1";
+    } catch(_) {}
+    return "/";
+  }
   try {
     const allowed = await getUserAllowedGroupIds(userId, role);
     if (!Array.isArray(allowed) || allowed.length === 0) return "/";

@@ -257,6 +257,14 @@ body{font-family:var(--sans);background:var(--bg);color:var(--text);min-height:1
 .chip-cert.cert-expired{color:var(--red);background:var(--red-soft);border:1px solid rgba(255,61,90,.3)}
 .admin-row-actions{display:flex;gap:5px;flex-shrink:0}
 .empty-state{padding:32px;text-align:center;color:var(--text-2);font-size:12px;line-height:1.7}
+.welcome-overlay{position:fixed;inset:0;background:rgba(0,0,0,.6);z-index:9999;display:flex;align-items:center;justify-content:center;animation:wFade .2s}
+.welcome-box{background:var(--surface);border:1px solid var(--border-hi);border-radius:16px;padding:40px;max-width:480px;width:90%;text-align:center;box-shadow:0 8px 40px rgba(0,0,0,.5)}
+.welcome-icon{font-size:48px;margin-bottom:16px}
+.welcome-title{font-size:22px;font-weight:700;color:var(--text-hi);margin-bottom:8px}
+.welcome-text{font-size:14px;color:var(--text-2);line-height:1.6;margin-bottom:24px}
+.welcome-btn{display:inline-block;padding:12px 28px;background:var(--blue);color:#fff;border:none;border-radius:8px;font-size:14px;font-weight:600;cursor:pointer;transition:background .15s}
+.welcome-btn:hover{background:#1a6fe8}
+@keyframes wFade{from{opacity:0}to{opacity:1}}
 .user-item{display:flex;align-items:center;gap:10px;padding:11px 18px;border-bottom:1px solid var(--border);cursor:pointer}
 .user-item:hover{background:var(--surface)}
 .user-avatar{width:30px;height:30px;border-radius:50%;background:var(--blue-soft);border:1px solid rgba(42,127,255,.22);display:flex;align-items:center;justify-content:center;font-size:12px;font-weight:700;color:var(--blue);flex-shrink:0}
@@ -808,6 +816,19 @@ function fmtTime(ts){
 function fmtTimeFull(ts){
   return new Date(ts).toLocaleString("en-US",{month:"short",day:"numeric",year:"numeric",hour:"numeric",minute:"2-digit",second:"2-digit",hour12:true});
 }
+function showAdminWelcome(){
+  const overlay = document.createElement("div");
+  overlay.className = "welcome-overlay";
+  overlay.innerHTML = `
+    <div class="welcome-box">
+      <div class="welcome-icon">🖥️</div>
+      <div class="welcome-title">Welcome to Applegate Monitor</div>
+      <div class="welcome-text">You're all set! Click the button below to add your first server and start monitoring uptime, response times, and alerts.</div>
+      <button class="welcome-btn" onclick="this.closest('.welcome-overlay').remove(); showServerForm(null)">Add Your First Server</button>
+    </div>`;
+  overlay.addEventListener("click", e => { if (e.target === overlay) overlay.remove(); });
+  document.body.appendChild(overlay);
+}
 function showHbTip(el){
   hideHbTip();
   const rect = el.getBoundingClientRect();
@@ -881,9 +902,13 @@ function isViewer(){ return sessionRole === "viewer"; }
       renderTopbarDashboards();
       // If the page was opened with ?edit=<server_id>, auto-open the admin drawer + server form.
       // This powers the inline Edit buttons on the status page sidebar.
-      const editId  = new URLSearchParams(window.location.search).get("edit");
+      const editId   = new URLSearchParams(window.location.search).get("edit");
       const newGroup = new URLSearchParams(window.location.search).get("newGroup");
-      if (editId) {
+      const welcome  = new URLSearchParams(window.location.search).get("welcome");
+      if (welcome) {
+        setTimeout(() => { showAdminWelcome(); openAdmin(); }, 0);
+        history.replaceState(null, "", "/admin");
+      } else if (editId) {
         setTimeout(() => autoOpenServerEdit(editId), 0);
       } else if (newGroup) {
         setTimeout(() => autoOpenNewGroup(), 0);
