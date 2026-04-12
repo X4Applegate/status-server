@@ -919,7 +919,9 @@ async function omadaGatewayCheck(controllerId, siteId, customerId, siteName, cus
         if (match) { siteName = match.name; customerName = match.customerName; }
       } catch(e) { /* fall through, the check will report an error */ }
     }
+    const apiStart = Date.now();
     const devices = await omadaListDevices(ctrl, siteId, customerId, siteName, customerName);
+    const apiResponseMs = Date.now() - apiStart;
 
     // Match gateway by several heuristics — type/deviceType strings, numeric type,
     // and model name (Omada gateway hardware all starts with "ER").
@@ -965,25 +967,15 @@ async function omadaGatewayCheck(controllerId, siteId, customerId, siteName, cus
     const wanIp     = gateway.publicIp || null;
     const wanStr    = wanIp ? ` · WAN ${wanIp}` : "";
 
-    // Ping the gateway's LAN IP to measure response time and verify reachability.
-    // LAN IP is preferred (reachable over VPN/local network); WAN IPs often block ICMP.
-    const pingTarget = gateway.ip || host;
-    let response_ms = null;
-    let pingOk = true;
-    if (omadaOk && pingTarget && pingTarget !== "omada-managed") {
-      try {
-        const p = await pingCheck(pingTarget);
-        pingOk = p.ok;
-        if (p.ok && p.response_ms != null) response_ms = p.response_ms;
-      } catch(e) { /* ping failure is non-fatal when Omada says connected */ }
-    }
-
+    // Use the Omada controller API response time as the meaningful latency metric.
+    // (Pinging the gateway's LAN IP doesn't work — those private IPs aren't routable
+    // from outside the customer's network.)
     const ok = omadaOk;
     const detail = ok
       ? `${modelStr}connected${uptimeStr}${wanStr}`
       : `${name} offline (status ${gateway.status})`;
 
-    return { type:"omada_gateway", ok, detail, response_ms };
+    return { type:"omada_gateway", ok, detail, response_ms: apiResponseMs };
   } catch(e) {
     return { type:"omada_gateway", ok:false, detail: e.message };
   }
