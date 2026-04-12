@@ -167,6 +167,25 @@ app.use(session({
   cookie: { secure: false, httpOnly: true, maxAge: 24 * 60 * 60 * 1000 } // 24h
 }));
 
+// -- Health check (Docker HEALTHCHECK / reverse proxy probe) -----------------
+// Lightweight liveness+DB ping. Returns 200 when the DB pool responds to
+// SELECT 1, 503 otherwise. No auth. No session. Not logged to the system log.
+app.get("/healthz", async (req, res) => {
+  res.setHeader("Cache-Control", "no-store");
+  try {
+    if (!db) return res.status(503).json({ ok: false, db: "not-initialized" });
+    await db.query("SELECT 1");
+    res.json({
+      ok:      true,
+      version: APP_VERSION,
+      uptime:  Math.floor(process.uptime()),
+      db:      "ok"
+    });
+  } catch (e) {
+    res.status(503).json({ ok: false, db: "down" });
+  }
+});
+
 // Auth middleware � protects admin routes
 function requireAuth(req, res, next) {
   if (req.session && req.session.userId) return next();
