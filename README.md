@@ -138,8 +138,6 @@ Edit `docker-compose.yml` and set:
 | `DB_PASSWORD` | Database password |
 | `DB_NAME` | Database name (created automatically on first run) |
 | `SESSION_SECRET` | Random string for session signing — change this |
-| `ADMIN_USERNAME` | Username for the initial admin account |
-| `ADMIN_PASSWORD` | Password for the initial admin account |
 
 ### 3. Deploy
 
@@ -147,11 +145,11 @@ Edit `docker-compose.yml` and set:
 docker compose up -d --build
 ```
 
-The server starts on port `3000`. On first boot it creates all database tables and the initial admin user automatically.
+The server starts on port `3000`. On first boot it creates all database tables automatically.
 
-### 4. Log in
+### 4. Create your admin account
 
-Navigate to `http://localhost:3000/login` (or your domain) and sign in with the credentials you set above.
+Navigate to `http://localhost:3000/login` (or your domain). On first visit you'll be prompted to create your admin account — choose a username and password. After that, the login page switches to a normal sign-in form.
 
 ---
 
@@ -264,8 +262,8 @@ GET /api/badge/:id/cert-exp
 | `DB_PASSWORD` | Yes | — | Database password |
 | `DB_NAME` | Yes | — | Database name |
 | `SESSION_SECRET` | Yes | — | Secret for session signing |
-| `ADMIN_USERNAME` | No | `admin` | Initial admin username (first run only) |
-| `ADMIN_PASSWORD` | No | — | Initial admin password (first run only) |
+| `EXTERNAL_URL` | No | — | Fallback base URL for webhook dashboard links |
+| `TZ` | No | `UTC` | Container timezone (e.g. `America/Los_Angeles`) |
 | `CHECK_INTERVAL` | No | `30000` | Global poll interval in ms |
 | `APP_OWNER` | No | `Richard Applegate` | Owner name shown on Privacy Policy and Terms pages |
 | `APP_CONTACT_EMAIL` | No | `admin@richardapplegate.io` | Contact email shown on legal pages |

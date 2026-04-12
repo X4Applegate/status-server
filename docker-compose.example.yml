@@ -22,9 +22,11 @@ services:
       # Session signing secret — generate a long random string
       - SESSION_SECRET=CHANGE_ME_TO_A_RANDOM_STRING
 
-      # Initial admin account — only used on the very first boot
-      - ADMIN_USERNAME=admin
-      - ADMIN_PASSWORD=CHANGE_ME
+      # Fallback URL for dashboard links in webhook alerts (optional)
+      # - EXTERNAL_URL=https://uptime.example.com
+
+      # Container timezone (optional — defaults to UTC)
+      - TZ=America/Los_Angeles
 
       # Branding for legal pages and update notifications (optional)
       - APP_OWNER=Your Name
