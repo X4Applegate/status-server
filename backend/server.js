@@ -908,25 +908,23 @@ async function omadaGatewayCheck(controllerId, siteId, customerId, siteName, cus
     const wanIp     = gateway.publicIp || null;
     const wanStr    = wanIp ? ` · WAN ${wanIp}` : "";
 
-    // Ping the WAN IP (public/static IP) to verify the router is actually reachable.
-    // Falls back to LAN IP, then def.host. If ping fails, mark as down even if Omada says connected.
-    const pingTarget = wanIp || gateway.ip || host;
+    // Ping the gateway's LAN IP to measure response time and verify reachability.
+    // LAN IP is preferred (reachable over VPN/local network); WAN IPs often block ICMP.
+    const pingTarget = gateway.ip || host;
     let response_ms = null;
     let pingOk = true;
-    if (pingTarget && pingTarget !== "omada-managed") {
+    if (omadaOk && pingTarget && pingTarget !== "omada-managed") {
       try {
         const p = await pingCheck(pingTarget);
         pingOk = p.ok;
         if (p.ok && p.response_ms != null) response_ms = p.response_ms;
-      } catch(e) { pingOk = false; }
+      } catch(e) { /* ping failure is non-fatal when Omada says connected */ }
     }
 
-    const ok = omadaOk && pingOk;
+    const ok = omadaOk;
     const detail = ok
       ? `${modelStr}connected${uptimeStr}${wanStr}`
-      : !pingOk && omadaOk
-        ? `${name} unreachable (ping ${pingTarget} failed)${wanStr}`
-        : `${name} offline (status ${gateway.status})`;
+      : `${name} offline (status ${gateway.status})`;
 
     return { type:"omada_gateway", ok, detail, response_ms };
   } catch(e) {
