@@ -65,6 +65,7 @@ body{font-family:var(--sans);background:var(--bg);color:var(--text);min-height:1
     <label class="label">Confirm Password</label>
     <input class="input" id="confirmPassword" type="password" placeholder="Confirm password" autocomplete="new-password">
   </div>
+  <div id="turnstileWrap" style="display:none;margin-top:4px;margin-bottom:4px"></div>
   <button class="btn-login" id="loginBtn" onclick="doLogin()">Sign In</button>
   <div class="error" id="errorMsg"></div>
 </div>
@@ -74,6 +75,20 @@ html.setAttribute("data-theme", localStorage.getItem("sm-theme") || "dark");
 function toggleTheme(){const n=html.getAttribute("data-theme")==="dark"?"light":"dark";html.setAttribute("data-theme",n);localStorage.setItem("sm-theme",n)}
 
 let setupMode = false;
+let turnstileWidgetId = null;
+let turnstileSiteKey  = "";
+
+function renderTurnstile(){
+  if (!turnstileSiteKey || !window.turnstile) return;
+  const wrap = document.getElementById("turnstileWrap");
+  wrap.style.display = "block";
+  wrap.innerHTML = "";
+  turnstileWidgetId = window.turnstile.render(wrap, {
+    sitekey: turnstileSiteKey,
+    theme: "auto",
+    size: "flexible"
+  });
+}
 
 // Check if this is a fresh install (no users) or existing install
 (async () => {
@@ -98,7 +113,25 @@ let setupMode = false;
       document.getElementById("password").autocomplete = "new-password";
     }
   } catch(e) {}
+
+  // Load Cloudflare Turnstile widget if the admin has enabled it.
+  // Skipped during setup mode — no admin exists yet to configure it.
+  if (!setupMode) {
+    try {
+      const r = await fetch("/api/turnstile-config");
+      const d = await r.json();
+      if (d.enabled && d.site_key) {
+        turnstileSiteKey = d.site_key;
+        const s = document.createElement("script");
+        s.src = "https://challenges.cloudflare.com/turnstile/v0/api.js?onload=onTurnstileReady";
+        s.async = true; s.defer = true;
+        document.head.appendChild(s);
+      }
+    } catch(e) {}
+  }
 })();
+
+window.onTurnstileReady = renderTurnstile;
 
 document.getElementById("password").addEventListener("keydown", e => {
   if (e.key === "Enter") {
@@ -143,14 +176,32 @@ async function doLogin(){
     return;
   }
 
+  let turnstile_token = "";
+  if (turnstileSiteKey) {
+    if (window.turnstile && turnstileWidgetId !== null) {
+      turnstile_token = window.turnstile.getResponse(turnstileWidgetId) || "";
+    }
+    if (!turnstile_token) {
+      err.textContent = "Please complete the captcha.";
+      err.classList.add("show");
+      return;
+    }
+  }
+
   btn.disabled=true;btn.textContent="Signing in…";err.classList.remove("show");
   try{
-    const r=await fetch("/api/login",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({username,password})});
+    const r=await fetch("/api/login",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({username,password,turnstile_token})});
     const data=await r.json();
-    if(!r.ok){err.textContent=data.error||"Login failed";err.classList.add("show");btn.disabled=false;btn.textContent="Sign In";return}
+    if(!r.ok){
+      err.textContent=data.error||"Login failed";err.classList.add("show");
+      btn.disabled=false;btn.textContent="Sign In";
+      if (window.turnstile && turnstileWidgetId !== null) window.turnstile.reset(turnstileWidgetId);
+      return;
+    }
     window.location.href = data.redirect || "/";
   }catch(e){
     err.textContent="Connection error — try again";err.classList.add("show");btn.disabled=false;btn.textContent="Sign In";
+    if (window.turnstile && turnstileWidgetId !== null) window.turnstile.reset(turnstileWidgetId);
   }
 }
 </script>

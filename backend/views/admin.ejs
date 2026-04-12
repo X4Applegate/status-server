@@ -2134,12 +2134,16 @@ function renderAdminWebhookList(hooks){
 
 async function loadSettings(){
   const el = document.getElementById("adminPanelBody");
-  document.getElementById("aCount").textContent = "SMTP & Email Notifications";
+  document.getElementById("aCount").textContent = "Settings";
   el.innerHTML = `<div style="padding:20px;color:var(--text-2);font-size:12px">Loading…</div>`;
   try {
-    const r = await fetch("/api/admin/settings/smtp");
-    if (!r.ok) { el.innerHTML = `<div class="empty-state">Admin role required.</div>`; return; }
-    const s = await r.json();
+    const [smtpRes, tsRes] = await Promise.all([
+      fetch("/api/admin/settings/smtp"),
+      fetch("/api/admin/settings/turnstile")
+    ]);
+    if (!smtpRes.ok) { el.innerHTML = `<div class="empty-state">Admin role required.</div>`; return; }
+    const s = await smtpRes.json();
+    const t = tsRes.ok ? await tsRes.json() : { enabled:false, site_key:"", secret_key:"" };
     el.innerHTML = `
       <div style="padding:24px;max-width:640px">
         <div style="margin-bottom:20px">
@@ -2159,9 +2163,50 @@ async function loadSettings(){
           <button class="btn" onclick="testSmtpSettings()">Send Test Email</button>
         </div>
         <div id="setMsg" style="margin-top:14px;font-size:12px"></div>
+
+        <div style="height:1px;background:var(--border);margin:32px 0"></div>
+
+        <div style="margin-bottom:20px">
+          <div style="font-size:14px;font-weight:600;color:var(--text-hi);margin-bottom:4px">Login Protection (Cloudflare Turnstile)</div>
+          <div style="font-size:12px;color:var(--text-2);line-height:1.6">Protect the login form against brute-force and bot spam with Cloudflare's free CAPTCHA alternative. Create a site at <a href="https://dash.cloudflare.com/?to=/:account/turnstile" target="_blank" rel="noopener" style="color:var(--accent)">dash.cloudflare.com → Turnstile</a> to get your keys. ${t.enabled ? '<span style="color:var(--green)">● Enabled</span>' : '<span style="color:var(--orange)">● Disabled</span>'}</div>
+        </div>
+        <div class="form-grid">
+          <div class="fg full"><label class="flabel"><input type="checkbox" id="setTsEnabled" ${t.enabled ? 'checked' : ''} style="vertical-align:middle;margin-right:6px">Enable Turnstile on login page</label></div>
+          <div class="fg full"><label class="flabel">Site Key</label><input class="finput" id="setTsSiteKey" placeholder="0x4AAAAAAA..." value="${t.site_key || ''}"></div>
+          <div class="fg full"><label class="flabel">Secret Key</label><input class="finput" id="setTsSecretKey" type="password" placeholder="${t.secret_key ? '(leave blank to keep current)' : '0x4AAAAAAA...'}" value=""></div>
+        </div>
+        <div style="display:flex;gap:10px;margin-top:20px;flex-wrap:wrap">
+          <button class="btn btn-primary" onclick="saveTurnstileSettings()">Save Turnstile Settings</button>
+        </div>
+        <div id="setTsMsg" style="margin-top:14px;font-size:12px"></div>
       </div>`;
   } catch(e) {
     el.innerHTML = `<div class="empty-state">Failed to load settings: ${e.message}</div>`;
+  }
+}
+
+async function saveTurnstileSettings(){
+  const msg = document.getElementById("setTsMsg");
+  msg.textContent = "Saving…"; msg.style.color = "var(--text-2)";
+  const body = {
+    enabled:    document.getElementById("setTsEnabled").checked,
+    site_key:   document.getElementById("setTsSiteKey").value.trim(),
+    secret_key: document.getElementById("setTsSecretKey").value
+  };
+  try {
+    const r = await fetch("/api/admin/settings/turnstile", {
+      method: "POST",
+      headers: {"Content-Type":"application/json"},
+      body: JSON.stringify(body)
+    });
+    const d = await r.json();
+    if (!r.ok) { msg.textContent = "Error: " + (d.error || "Failed"); msg.style.color = "var(--red)"; return; }
+    msg.textContent = d.enabled ? "Saved — Turnstile is now protecting the login form" : "Saved — Turnstile disabled";
+    msg.style.color = "var(--green)";
+    toast("Turnstile settings saved", "success");
+    document.getElementById("setTsSecretKey").value = "";
+  } catch(e) {
+    msg.textContent = "Error: " + e.message; msg.style.color = "var(--red)";
   }
 }
 

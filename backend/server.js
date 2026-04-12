@@ -78,6 +78,49 @@ async function loadSmtpFromDb() {
   } catch(e) { /* settings table may not exist yet */ }
 }
 
+// -- Cloudflare Turnstile (login bot/spam protection) -------------------------
+// Loaded from DB settings table. Admin enters their own Cloudflare Site Key +
+// Secret Key in the settings tab; we verify login submissions against Cloudflare.
+let turnstileConfig = { enabled: false, site_key: "", secret_key: "" };
+
+async function loadTurnstileFromDb() {
+  if (!db) return;
+  try {
+    const [rows] = await db.query("SELECT key_name, value FROM status_settings WHERE key_name LIKE 'turnstile_%'");
+    const m = {};
+    rows.forEach(r => { m[r.key_name] = r.value; });
+    turnstileConfig = {
+      enabled:    m.turnstile_enabled === "true",
+      site_key:   m.turnstile_site_key   || "",
+      secret_key: m.turnstile_secret_key || ""
+    };
+  } catch(e) { /* settings table may not exist yet */ }
+}
+
+async function verifyTurnstile(token, remoteIp) {
+  if (!turnstileConfig.enabled) return { ok: true };
+  if (!turnstileConfig.secret_key) return { ok: false, error: "Turnstile is enabled but not configured" };
+  if (!token) return { ok: false, error: "Captcha verification required" };
+  try {
+    const fetch = require("node-fetch");
+    const params = new URLSearchParams();
+    params.append("secret", turnstileConfig.secret_key);
+    params.append("response", token);
+    if (remoteIp) params.append("remoteip", remoteIp);
+    const r = await fetch("https://challenges.cloudflare.com/turnstile/v0/siteverify", {
+      method: "POST",
+      headers: { "Content-Type": "application/x-www-form-urlencoded" },
+      body: params.toString(),
+      timeout: 8000
+    });
+    const data = await r.json();
+    if (data.success) return { ok: true };
+    return { ok: false, error: "Captcha verification failed" };
+  } catch(e) {
+    return { ok: false, error: "Captcha verification unreachable" };
+  }
+}
+
 // -- Global safety net ---------------------------------------------------------
 // Catch any unhandled promise rejection or exception so one bug can't kill the poll
 // loop. We log and keep running — much better UX than a crash-restart loop.
@@ -406,6 +449,7 @@ async function initDB() {
 
   // Load SMTP config from DB (overrides env vars if set)
   await loadSmtpFromDb();
+  await loadTurnstileFromDb();
 
   // No longer auto-creates admin — first user signs up via /login
 
@@ -1541,9 +1585,17 @@ async function computeLoginRedirect(userId, role) {
 }
 
 app.post("/api/login", async (req, res) => {
-  const { username, password } = req.body;
+  const { username, password, turnstile_token } = req.body;
   if (!username || !password) return res.status(400).json({ error:"Username and password required" });
   try {
+    if (turnstileConfig.enabled) {
+      const ip = (req.headers["x-forwarded-for"] || "").split(",")[0].trim() || req.socket.remoteAddress;
+      const cap = await verifyTurnstile(turnstile_token, ip);
+      if (!cap.ok) {
+        addLog({ level:"warn", server:"auth", message:`Login blocked by Turnstile for ${username}: ${cap.error}` });
+        return res.status(400).json({ error: cap.error, turnstile_failed: true });
+      }
+    }
     const [rows] = await db.query("SELECT * FROM status_users WHERE username = ?", [username]);
     if (!rows.length) return res.status(401).json({ error:"Invalid credentials" });
     const valid = await bcrypt.compare(password, rows[0].password_hash);
@@ -1934,6 +1986,46 @@ app.post("/api/admin/settings/smtp", requireAdmin, async (req, res) => {
     rebuildSmtpTransport();
     addLog({ level:"info", server:"admin", message:`SMTP settings updated by ${req.session.username}` });
     res.json({ ok:true, configured: !!smtpTransport });
+  } catch(e) { res.status(500).json({ error: e.message }); }
+});
+
+// Public — login page reads this to know whether to render the Turnstile widget.
+// Only exposes the site key (safe for client-side); never the secret.
+app.get("/api/turnstile-config", (req, res) => {
+  res.json({
+    enabled:  !!(turnstileConfig.enabled && turnstileConfig.site_key),
+    site_key: turnstileConfig.enabled ? (turnstileConfig.site_key || "") : ""
+  });
+});
+
+app.get("/api/admin/settings/turnstile", requireAdmin, async (req, res) => {
+  res.json({
+    enabled:    turnstileConfig.enabled,
+    site_key:   turnstileConfig.site_key,
+    secret_key: turnstileConfig.secret_key ? "********" : ""
+  });
+});
+
+app.post("/api/admin/settings/turnstile", requireAdmin, async (req, res) => {
+  const { enabled, site_key, secret_key } = req.body;
+  try {
+    const newEnabled  = !!enabled;
+    const newSiteKey  = (site_key || "").trim();
+    const finalSecret = (secret_key && secret_key !== "********") ? secret_key.trim() : turnstileConfig.secret_key;
+    if (newEnabled && (!newSiteKey || !finalSecret)) {
+      return res.status(400).json({ error: "Site Key and Secret Key are both required to enable Turnstile" });
+    }
+    const settings = [
+      ["turnstile_enabled",    newEnabled ? "true" : "false"],
+      ["turnstile_site_key",   newSiteKey],
+      ["turnstile_secret_key", finalSecret || ""]
+    ];
+    for (const [k, v] of settings) {
+      await db.query("INSERT INTO status_settings (key_name, value) VALUES (?, ?) ON DUPLICATE KEY UPDATE value=VALUES(value)", [k, v]);
+    }
+    turnstileConfig = { enabled: newEnabled, site_key: newSiteKey, secret_key: finalSecret || "" };
+    addLog({ level:"info", server:"admin", message:`Turnstile ${newEnabled ? "enabled" : "disabled"} by ${req.session.username}` });
+    res.json({ ok: true, enabled: turnstileConfig.enabled });
   } catch(e) { res.status(500).json({ error: e.message }); }
 });
 

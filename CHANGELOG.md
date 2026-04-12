@@ -4,6 +4,21 @@ All notable changes to this project are documented here.
 
 ---
 
+## [2.6.0] — 2026-04-12
+
+### Added
+- **Cloudflare Turnstile login protection** — optional CAPTCHA-alternative that blocks bots and brute-force login attempts without user friction; uses Cloudflare's free Turnstile service (a privacy-friendly alternative to reCAPTCHA)
+- **Turnstile settings in admin Settings tab** — enter your Cloudflare Site Key and Secret Key, toggle on/off; live status indicator shows enabled/disabled state
+- **`/api/turnstile-config` public endpoint** — login page fetches this on load to know whether to render the widget; only exposes the site key (never the secret)
+- **Auto-render Turnstile widget** — login page dynamically loads the Cloudflare script and renders the widget when enabled; skipped automatically during first-time setup (no admin configured yet)
+- **Login verification** — `/api/login` verifies the Turnstile token against Cloudflare's siteverify API before checking credentials; failed verifications are logged and return a clear error
+- **Widget auto-reset on failed login** — if login fails (bad password or captcha), the Turnstile widget resets so the user can try again without a page reload
+
+### Changed
+- **Settings tab header** updated from "SMTP & Email Notifications" to "Settings" to reflect the expanded scope
+
+---
+
 ## [2.5.0] — 2026-04-12
 
 ### Added
