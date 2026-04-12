@@ -163,6 +163,16 @@ body::before{content:'';position:fixed;inset:0;pointer-events:none;background:ra
 /* empty state */
 .empty-main{display:flex;align-items:center;justify-content:center;height:100%;color:var(--text-2);font-size:14px}
 
+/* welcome popup */
+.welcome-overlay{position:fixed;inset:0;background:rgba(0,0,0,.6);z-index:9999;display:flex;align-items:center;justify-content:center;animation:fadeIn .2s}
+.welcome-box{background:var(--surface);border:1px solid var(--border-hi);border-radius:16px;padding:40px;max-width:480px;width:90%;text-align:center;box-shadow:0 8px 40px rgba(0,0,0,.5)}
+.welcome-icon{font-size:48px;margin-bottom:16px}
+.welcome-title{font-size:22px;font-weight:700;color:var(--text-hi);margin-bottom:8px}
+.welcome-text{font-size:14px;color:var(--text-2);line-height:1.6;margin-bottom:24px}
+.welcome-btn{display:inline-block;padding:12px 28px;background:var(--blue);color:#fff;border:none;border-radius:8px;font-size:14px;font-weight:600;cursor:pointer;transition:background .15s}
+.welcome-btn:hover{background:#1a6fe8}
+@keyframes fadeIn{from{opacity:0}to{opacity:1}}
+
 /* -- SERVER DETAIL -- */
 .detail-header{display:flex;align-items:flex-start;justify-content:space-between;margin-bottom:24px;gap:16px;flex-wrap:wrap}
 .detail-name{font-size:22px;font-weight:700;color:var(--text-white);letter-spacing:-.02em}
@@ -552,6 +562,19 @@ function fmtTime(ts){
 }
 function fmtTimeFull(ts){
   return new Date(ts).toLocaleString("en-US",{month:"short",day:"numeric",year:"numeric",hour:"numeric",minute:"2-digit",second:"2-digit",hour12:true});
+}
+function showWelcomePopup(){
+  const overlay = document.createElement("div");
+  overlay.className = "welcome-overlay";
+  overlay.innerHTML = `
+    <div class="welcome-box">
+      <div class="welcome-icon">🖥️</div>
+      <div class="welcome-title">Welcome to Applegate Monitor</div>
+      <div class="welcome-text">You're all set! Add your first server to start monitoring uptime, response times, and get instant alerts when something goes down.</div>
+      <button class="welcome-btn" onclick="this.closest('.welcome-overlay').remove(); window.location.href='/admin'">Add Your First Server</button>
+    </div>`;
+  overlay.addEventListener("click", e => { if (e.target === overlay) overlay.remove(); });
+  document.body.appendChild(overlay);
 }
 function showHbTip(el){
   hideHbTip();
@@ -987,6 +1010,10 @@ async function loadServers(){
     if (GROUP_SLUG && servers.length === 0) {
       document.getElementById("sidebarList").innerHTML = `<div style="padding:16px;color:var(--text-2);font-size:12px">No servers in this dashboard yet</div>`;
       document.getElementById("mainArea").innerHTML = `<div class="empty-main">No servers assigned to this dashboard</div>`;
+    }
+    // First-run welcome: no servers at all and user is admin
+    if (!GROUP_SLUG && servers.length === 0 && sidebarSession.loggedIn) {
+      showWelcomePopup();
     }
   } catch(e) {
     if (!cachedServers) {
