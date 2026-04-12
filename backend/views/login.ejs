@@ -46,11 +46,11 @@ body{font-family:var(--sans);background:var(--bg);color:var(--text);min-height:1
     <div class="brand-icon"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="color:var(--accent)"><polygon points="12 2 22 8.5 22 15.5 12 22 2 15.5 2 8.5"/></svg></div>
     <div class="brand-name">Applegate<span>Monitor</span></div>
   </div>
-  <div class="heading">Welcome back</div>
-  <div class="subhead">Sign in to access the admin panel</div>
+  <div class="heading" id="formHeading">Welcome back</div>
+  <div class="subhead" id="formSubhead">Sign in to access the admin panel</div>
   <div class="form-group">
     <label class="label">Username</label>
-    <input class="input" id="username" type="text" placeholder="admin" autocomplete="username">
+    <input class="input" id="username" type="text" placeholder="Choose a username" autocomplete="username">
   </div>
   <div class="form-group">
     <label class="label">Password</label>
@@ -61,6 +61,10 @@ body{font-family:var(--sans);background:var(--bg);color:var(--text);min-height:1
     </button>
   </div>
   </div>
+  <div class="form-group" id="confirmGroup" style="display:none">
+    <label class="label">Confirm Password</label>
+    <input class="input" id="confirmPassword" type="password" placeholder="Confirm password" autocomplete="new-password">
+  </div>
   <button class="btn-login" id="loginBtn" onclick="doLogin()">Sign In</button>
   <div class="error" id="errorMsg"></div>
 </div>
@@ -69,12 +73,41 @@ const html = document.documentElement;
 html.setAttribute("data-theme", localStorage.getItem("sm-theme") || "dark");
 function toggleTheme(){const n=html.getAttribute("data-theme")==="dark"?"light":"dark";html.setAttribute("data-theme",n);localStorage.setItem("sm-theme",n)}
 
-// Redirect if already logged in. The server picks the right landing page:
-// admins → "/" (master dashboard), viewers → "/dashboard/<their-assigned-slug>".
-fetch("/api/me").then(r=>r.json()).then(d=>{ if(d.loggedIn) window.location.href = d.login_redirect || "/"; });
+let setupMode = false;
 
-document.getElementById("password").addEventListener("keydown", e => { if(e.key==="Enter") doLogin(); });
+// Check if this is a fresh install (no users) or existing install
+(async () => {
+  // Redirect if already logged in
+  try {
+    const meRes = await fetch("/api/me");
+    const me = await meRes.json();
+    if (me.loggedIn) { window.location.href = me.login_redirect || "/"; return; }
+  } catch(e) {}
+
+  // Check if setup is needed
+  try {
+    const r = await fetch("/api/setup-status");
+    const d = await r.json();
+    if (d.needsSetup) {
+      setupMode = true;
+      document.getElementById("formHeading").textContent = "Create Admin Account";
+      document.getElementById("formSubhead").textContent = "Set up your first admin account to get started";
+      document.getElementById("confirmGroup").style.display = "flex";
+      document.getElementById("loginBtn").textContent = "Create Account";
+      document.getElementById("username").placeholder = "Choose a username";
+      document.getElementById("password").autocomplete = "new-password";
+    }
+  } catch(e) {}
+})();
+
+document.getElementById("password").addEventListener("keydown", e => {
+  if (e.key === "Enter") {
+    if (setupMode) document.getElementById("confirmPassword").focus();
+    else doLogin();
+  }
+});
 document.getElementById("username").addEventListener("keydown", e => { if(e.key==="Enter") document.getElementById("password").focus(); });
+document.getElementById("confirmPassword").addEventListener("keydown", e => { if(e.key==="Enter") doLogin(); });
 
 function togglePwd(){
   const input = document.getElementById("password");
@@ -94,6 +127,22 @@ async function doLogin(){
   const username=document.getElementById("username").value.trim();
   const password=document.getElementById("password").value;
   if(!username||!password){err.textContent="Please enter username and password.";err.classList.add("show");return}
+
+  if (setupMode) {
+    const confirm = document.getElementById("confirmPassword").value;
+    if (password !== confirm) { err.textContent="Passwords do not match.";err.classList.add("show");return; }
+    btn.disabled=true;btn.textContent="Creating account…";err.classList.remove("show");
+    try {
+      const r = await fetch("/api/setup", {method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({username,password})});
+      const data = await r.json();
+      if (!r.ok) { err.textContent=data.error||"Setup failed";err.classList.add("show");btn.disabled=false;btn.textContent="Create Account";return; }
+      window.location.href = data.redirect || "/";
+    } catch(e) {
+      err.textContent="Connection error — try again";err.classList.add("show");btn.disabled=false;btn.textContent="Create Account";
+    }
+    return;
+  }
+
   btn.disabled=true;btn.textContent="Signing in…";err.classList.remove("show");
   try{
     const r=await fetch("/api/login",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({username,password})});

@@ -343,13 +343,7 @@ async function initDB() {
     await db.query("ALTER TABLE status_webhooks ADD COLUMN group_id INT DEFAULT NULL");
   } catch(e) { /* column already exists */ }
 
-  // Create default admin user if no users exist
-  const [users] = await db.query("SELECT COUNT(*) as cnt FROM status_users");
-  if (users[0].cnt === 0) {
-    const hash = await bcrypt.hash(INIT_PASS, 10);
-    await db.query("INSERT INTO status_users (username, password_hash, role) VALUES (?, ?, 'admin')", [INIT_USER, hash]);
-    addLog({ level:"info", server:"system", message:`Created default admin user: ${INIT_USER}` });
-  }
+  // No longer auto-creates admin — first user signs up via /login
 
   // Migrate servers.json ? DB if DB is empty
   const [rows] = await db.query("SELECT COUNT(*) as cnt FROM status_servers");
@@ -1448,6 +1442,36 @@ app.post("/api/login", async (req, res) => {
     res.json({ ok:true, username: rows[0].username, role: rows[0].role, redirect });
   } catch(err) {
     res.status(500).json({ error:err.message });
+  }
+});
+
+// Check if setup is needed (no users exist yet)
+app.get("/api/setup-status", async (req, res) => {
+  try {
+    const [rows] = await db.query("SELECT COUNT(*) as cnt FROM status_users");
+    res.json({ needsSetup: rows[0].cnt === 0 });
+  } catch(e) { res.status(500).json({ error: e.message }); }
+});
+
+// First-time signup — only works when no users exist
+app.post("/api/setup", async (req, res) => {
+  const { username, password } = req.body;
+  if (!username || !password) return res.status(400).json({ error: "Username and password required" });
+  if (username.length < 3) return res.status(400).json({ error: "Username must be at least 3 characters" });
+  if (password.length < 6) return res.status(400).json({ error: "Password must be at least 6 characters" });
+  try {
+    const [users] = await db.query("SELECT COUNT(*) as cnt FROM status_users");
+    if (users[0].cnt > 0) return res.status(403).json({ error: "Setup already completed — use the login form" });
+    const hash = await bcrypt.hash(password, 10);
+    const [result] = await db.query("INSERT INTO status_users (username, password_hash, role) VALUES (?, ?, 'admin')", [username, hash]);
+    req.session.userId   = result.insertId;
+    req.session.username = username;
+    req.session.role     = "admin";
+    addLog({ level:"info", server:"system", message:`First admin account created: ${username}` });
+    res.json({ ok: true, redirect: "/admin?welcome=1" });
+  } catch(e) {
+    if (e.code === "ER_DUP_ENTRY") return res.status(409).json({ error: "Username already exists" });
+    res.status(500).json({ error: e.message });
   }
 });
 
