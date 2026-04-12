@@ -745,6 +745,9 @@ async function selectServer(id){
 
   // 1) Render from cache instantly if available, otherwise show skeleton
   const cached = cacheGet("detail-" + id);
+  // Use requestAnimationFrame to ensure layout is painted before rendering detail
+  // (the main area transitions from display:none to display:block)
+  await new Promise(r => requestAnimationFrame(r));
   if (cached) renderDetail(server, cached.uptime, cached.heartbeat, cached.incidents);
   else        renderDetailSkeleton(server);
 
@@ -797,7 +800,7 @@ function renderDetail(s, uptime, heartbeat, incidents){
     </div>`).join("");
 
   // Heartbeat dots
-  const hbPad = Math.max(0, 360 - heartbeat.length);
+  const hbPad = Math.max(0, 180 - heartbeat.length);
   const hbDots = [
     ...Array(hbPad).fill(null).map(() => `<div class="hb-dot pending"></div>`),
     ...heartbeat.map(h => {
@@ -900,12 +903,12 @@ function renderDetail(s, uptime, heartbeat, incidents){
     <div class="section">
       <div class="section-head">
         <div class="section-title">Heartbeat</div>
-        <span style="font-size:11px;color:var(--text-2)">Last 360 checks</span>
+        <span style="font-size:11px;color:var(--text-2)">Last 180 checks</span>
       </div>
       <div class="section-body">
         <div class="heartbeat">${hbDots}</div>
         <div class="hb-legend">
-          <span>${heartbeat.length >= 360 ? fmtTime(heartbeat[0].checked_at) : ""}</span>
+          <span>${heartbeat.length >= 180 ? fmtTime(heartbeat[0].checked_at) : ""}</span>
           <span style="display:flex;align-items:center;gap:10px">
             <span style="display:flex;align-items:center;gap:4px"><span style="width:8px;height:8px;border-radius:2px;background:var(--green);display:inline-block"></span> Up</span>
             <span style="display:flex;align-items:center;gap:4px"><span style="width:8px;height:8px;border-radius:2px;background:var(--red);display:inline-block"></span> Down</span>
@@ -939,9 +942,9 @@ function renderDetail(s, uptime, heartbeat, incidents){
     </div>
   `;
 
-  // Draw response time chart if we have data
+  // Draw response time chart if we have data (requestAnimationFrame ensures DOM is painted first)
   const chartData = heartbeat.filter(h => h.response_ms !== null);
-  if (chartData.length > 0) drawChart(chartData);
+  if (chartData.length > 0) requestAnimationFrame(() => drawChart(chartData));
 }
 
 // -- Simple canvas chart (no external libs)

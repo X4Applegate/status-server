@@ -1270,7 +1270,7 @@ function renderDetail(s, uptime, heartbeat, incidents){
       <div class="uptime-sub">${u.val >= 99 ? "Excellent" : u.val >= 95 ? "Good" : (u.val !== null && u.val !== undefined) ? "Needs attention" : "No data yet"}</div>
     </div>`).join("");
 
-  const hbPad  = Math.max(0, 360 - heartbeat.length);
+  const hbPad  = Math.max(0, 180 - heartbeat.length);
   const hbDots = [
     ...Array(hbPad).fill(null).map(() => `<div class="hb-dot pending"></div>`),
     ...heartbeat.map(h => {
@@ -1342,12 +1342,12 @@ function renderDetail(s, uptime, heartbeat, incidents){
     <div class="dv-section">
       <div class="dv-section-head">
         <div class="dv-section-title">Heartbeat</div>
-        <span style="font-size:11px;color:var(--text-2)">Last 360 checks</span>
+        <span style="font-size:11px;color:var(--text-2)">Last 180 checks</span>
       </div>
       <div class="dv-section-body">
         <div class="heartbeat">${hbDots}</div>
         <div class="hb-legend">
-          <span>${heartbeat.length >= 360 ? fmtTime(heartbeat[0].checked_at) : ""}</span>
+          <span>${heartbeat.length >= 180 ? fmtTime(heartbeat[0].checked_at) : ""}</span>
           <span style="display:flex;align-items:center;gap:10px">
             <span style="display:flex;align-items:center;gap:4px"><span style="width:8px;height:8px;border-radius:2px;background:var(--green);display:inline-block"></span> Up</span>
             <span style="display:flex;align-items:center;gap:4px"><span style="width:8px;height:8px;border-radius:2px;background:var(--red);display:inline-block"></span> Down</span>

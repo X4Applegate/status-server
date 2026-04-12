@@ -2441,7 +2441,7 @@ app.get("/api/public/heartbeat/:id", allowGroupedOrAuth, async (req, res) => {
        FROM status_history
        WHERE server_id=?
        GROUP BY checked_at
-       ORDER BY checked_at DESC LIMIT 360`,
+       ORDER BY checked_at DESC LIMIT 180`,
       [req.params.id]
     );
     // MIN(ok): if any check failed (0), the dot is "down"
