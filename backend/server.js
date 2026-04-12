@@ -415,6 +415,36 @@ async function loadConfig() {
       checks:            typeof r.checks === "string" ? JSON.parse(r.checks) : (r.checks || [])
     }));
 
+    // Seed uptimeHistory from database for servers that don't have it yet (e.g. after restart)
+    const needsHistory = serverConfig.filter(s => !serverStatus[s.id] || !serverStatus[s.id].uptimeHistory || !serverStatus[s.id].uptimeHistory.length);
+    if (needsHistory.length) {
+      try {
+        const [histRows] = await db.query(
+          `SELECT server_id, MIN(ok) AS ok, checked_at
+           FROM status_history
+           WHERE checked_at >= DATE_SUB(NOW(), INTERVAL 1 HOUR)
+           GROUP BY server_id, checked_at
+           ORDER BY checked_at DESC`
+        );
+        const histByServer = {};
+        for (const r of histRows) {
+          (histByServer[r.server_id] ||= []).push(!!r.ok);
+        }
+        for (const sid of Object.keys(histByServer)) {
+          histByServer[sid] = histByServer[sid].reverse().slice(-20);
+        }
+        for (const s of needsHistory) {
+          if (histByServer[s.id]) {
+            if (!serverStatus[s.id]) {
+              serverStatus[s.id] = { id:s.id, name:s.name, host:s.host, description:s.description, group_ids:s.group_ids, tags:s.tags, checks:[], overall:"pending", lastChecked:null, uptimeHistory: histByServer[s.id] };
+            } else {
+              serverStatus[s.id].uptimeHistory = histByServer[s.id];
+            }
+          }
+        }
+      } catch(e) { /* proceed without history */ }
+    }
+
     serverConfig.forEach(s => {
       if (!serverStatus[s.id]) {
         serverStatus[s.id] = { id:s.id, name:s.name, host:s.host, description:s.description, group_ids:s.group_ids, tags:s.tags, checks:[], overall:"pending", lastChecked:null, uptimeHistory:[] };
