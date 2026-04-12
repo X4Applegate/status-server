@@ -267,6 +267,10 @@ GET /api/badge/:id/cert-exp
 | `ADMIN_USERNAME` | No | `admin` | Initial admin username (first run only) |
 | `ADMIN_PASSWORD` | No | — | Initial admin password (first run only) |
 | `CHECK_INTERVAL` | No | `30000` | Global poll interval in ms |
+| `APP_OWNER` | No | `Richard Applegate` | Owner name shown on Privacy Policy and Terms pages |
+| `APP_CONTACT_EMAIL` | No | `admin@richardapplegate.io` | Contact email shown on legal pages |
+| `APP_HOME_URL` | No | `/` | URL the Home button in the admin panel links to |
+| `GITHUB_REPO` | No | `X4Applegate/status-server` | GitHub repo used for update notifications (set to your fork) |
 
 ---
 

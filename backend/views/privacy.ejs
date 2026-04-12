@@ -54,9 +54,9 @@ a:hover{text-decoration:underline}
   </div>
 
   <h1>Privacy Policy</h1>
-  <p class="meta">Effective date: April 11, 2026 &nbsp;·&nbsp; Operated by Richard Applegate</p>
+  <p class="meta">Effective date: April 11, 2026 &nbsp;·&nbsp; Operated by <%= APP_OWNER %></p>
 
-  <p>This Privacy Policy explains how Applegate Monitor ("the Service"), operated by Richard Applegate, collects, uses, and protects information when you access a status dashboard or log in to the platform.</p>
+  <p>This Privacy Policy explains how Applegate Monitor ("the Service"), operated by <%= APP_OWNER %>, collects, uses, and protects information when you access a status dashboard or log in to the platform.</p>
 
   <h2>1. Information We Collect</h2>
   <p>We collect minimal information necessary to operate the Service:</p>
@@ -88,8 +88,8 @@ a:hover{text-decoration:underline}
   <p>We do not sell, rent, share, or disclose your information to any third parties for commercial purposes.</p>
 
   <h2>4. Data Storage and Security</h2>
-  <p>All data is stored on self-hosted infrastructure controlled by Richard Applegate. We apply reasonable technical measures to protect stored data, including hashed passwords, HTTP-only session cookies, and network-level access controls.</p>
-  <p>No system is completely secure. If you become aware of a security concern, please contact us immediately at <a href="mailto:admin@richardapplegate.io">admin@richardapplegate.io</a>.</p>
+  <p>All data is stored on self-hosted infrastructure controlled by <%= APP_OWNER %>. We apply reasonable technical measures to protect stored data, including hashed passwords, HTTP-only session cookies, and network-level access controls.</p>
+  <p>No system is completely secure. If you become aware of a security concern, please contact us immediately at <a href="mailto:<%= APP_CONTACT %>"><%= APP_CONTACT %></a>.</p>
 
   <h2>5. Data Retention</h2>
   <p>Status check history and incident logs are retained for up to 30 days by default. Session data is cleared when you log out or when the session expires. Account data is retained for as long as the account exists. You may request deletion of your account and associated data at any time by contacting us.</p>
@@ -106,8 +106,8 @@ a:hover{text-decoration:underline}
   <h2>9. Contact</h2>
   <div class="contact-box">
     <p>For privacy questions, data requests, or concerns, contact:<br><br>
-    <strong>Richard Applegate</strong><br>
-    <a href="mailto:admin@richardapplegate.io">admin@richardapplegate.io</a></p>
+    <strong><%= APP_OWNER %></strong><br>
+    <a href="mailto:<%= APP_CONTACT %>"><%= APP_CONTACT %></a></p>
   </div>
 </div>
 

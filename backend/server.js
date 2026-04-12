@@ -11,8 +11,11 @@ const session      = require("express-session");
 
 const app  = express();
 const { version: APP_VERSION } = require("./package.json");
-const GITHUB_REPO   = "X4Applegate/status-server";
-const PORT          = process.env.PORT           || 3000;
+const APP_OWNER     = process.env.APP_OWNER         || "Richard Applegate";
+const APP_CONTACT   = process.env.APP_CONTACT_EMAIL || "admin@richardapplegate.io";
+const APP_HOME_URL  = process.env.APP_HOME_URL      || "/";
+const GITHUB_REPO   = process.env.GITHUB_REPO       || "X4Applegate/status-server";
+const PORT          = process.env.PORT              || 3000;
 const CONFIG_PATH   = process.env.CONFIG_PATH    || "/config/servers.json";
 const CHECK_INTERVAL= parseInt(process.env.CHECK_INTERVAL || "30000");
 const LOG_MAX       = 500;
@@ -50,6 +53,13 @@ let eventLog     = [];
 // -- View engine ---------------------------------------------------------------
 app.set("view engine", "ejs");
 app.set("views", path.join(__dirname, "views"));
+// Inject configurable vars into every EJS template automatically
+app.use((req, res, next) => {
+  res.locals.APP_OWNER    = APP_OWNER;
+  res.locals.APP_CONTACT  = APP_CONTACT;
+  res.locals.APP_HOME_URL = APP_HOME_URL;
+  next();
+});
 
 // -- Middleware ----------------------------------------------------------------
 // 1 MB limit lets group logo data URLs (max 256KB after our validation) fit comfortably

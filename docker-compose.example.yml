@@ -26,6 +26,12 @@ services:
       - ADMIN_USERNAME=admin
       - ADMIN_PASSWORD=CHANGE_ME
 
+      # Branding for legal pages and update notifications (optional)
+      - APP_OWNER=Your Name
+      - APP_CONTACT_EMAIL=you@example.com
+      - APP_HOME_URL=/
+      - GITHUB_REPO=YourUsername/your-fork
+
     # NET_RAW is required for ICMP ping checks
     cap_add:
       - NET_RAW
