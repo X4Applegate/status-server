@@ -4,6 +4,35 @@ All notable changes to this project are documented here.
 
 ---
 
+## [2.2.0] — 2026-04-12
+
+### Added
+- **Viewers can edit their own dashboards** — viewers assigned to a group can now modify its appearance (name, logo, colors, theme, custom domain, legal text) without admin access; server assignments remain admin-only
+- **Rich Slack webhook notifications** — Block Kit layout with structured fields (Service, Status, Target, Time), alert details in code blocks, dashboard link, and footer showing webhook name
+- **Rich Discord webhook notifications** — embed with inline fields, alert details code block, clickable dashboard link, and footer
+- **Dashboard links in webhook alerts** — uses the group's custom domain when set (e.g. `https://status.myanthemcoffee.com`), falls back to `EXTERNAL_URL/dashboard/{slug}`
+- **Custom domain links on topbar pills** — dashboard nav buttons now link to the custom domain when configured instead of the local `/dashboard/{slug}` path
+- **Custom heartbeat tooltip** — hovering over heartbeat dots shows a large styled popup with full date/time in 12-hour AM/PM format and status
+- **`EXTERNAL_URL` env var** — fallback base URL for webhook dashboard links when no custom domain is set
+- **`TZ` env var** — container timezone support for correct timestamp display
+
+### Changed
+- **Heartbeat bar expanded to 360 checks** — covers ~3 hours of history (up from 90); dots use `flex:1` to fill the full width on any screen without wrapping
+- **Brighter dark mode text** — `--text`, `--text-2`, and `--text-hi` CSS variables brightened for better readability on all labels, section headers, and legends
+- **Brighter response time chart** — Y-axis labels, grid lines, and chart line all more visible
+- **Omada devices poll every 10 seconds** — faster detection of router reboots and outages (down from 30s); minimum poll interval lowered to 5s
+- **Incident dots always red** — resolved incidents show dimmed red instead of green to avoid confusion
+- **Heartbeat start time hidden** — left-side timestamp only appears once the bar has a full 360 checks of data
+
+### Fixed
+- **Heartbeat bar only half full** — servers with multiple check types (ping + tcp + http) were inserting multiple rows per poll; heartbeat query now groups by `checked_at` so each poll = one dot
+- **Duplicate "Manage" button** — legacy `topbarManageBtn` div removed; only the dashboard pills Manage button remains
+- **Webhook test showed fake DOWN alert** — test webhooks now show `🧪 Test Alert` with blue color and "no actual issue detected" instead of misleading `🔴 is DOWN`
+- **Database timezone mismatch** — added `timezone: "local"` to MySQL connection pool so timestamps match the container's `TZ` setting
+- **Groups tab hidden from viewers** — viewers can now access the Groups tab (Users tab remains admin-only); Add/Remove buttons hidden for viewers
+
+---
+
 ## [2.1.0] — 2026-04-11
 
 ### Added

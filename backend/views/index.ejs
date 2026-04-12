@@ -25,9 +25,9 @@
   --surface2: #111f35;
   --border:   rgba(30,100,200,0.15);
   --border-hi:rgba(30,100,200,0.28);
-  --text:     #7a9cc0;
-  --text-2:   #3d6080;
-  --text-hi:  #c8dff0;
+  --text:     #94b8d8;
+  --text-2:   #5e8aad;
+  --text-hi:  #d4e8f8;
   --text-white:#e8f4ff;
   --blue:     #2a7fff;
   --blue-soft:rgba(42,127,255,0.12);
@@ -207,13 +207,17 @@ body::before{content:'';position:fixed;inset:0;pointer-events:none;background:ra
 /* -- HEARTBEAT TIMELINE -- */
 /* Bars use flex:1 so they stretch to fill the full section width on any screen,
    instead of staying at a fixed 10px and leaving empty space on wide monitors. */
-.heartbeat{display:flex;gap:3px;align-items:flex-end;width:100%}
-.hb-dot{flex:1 1 0;min-width:3px;height:28px;border-radius:3px;transition:opacity .2s;cursor:pointer;position:relative}
+.heartbeat{display:flex;gap:1px;align-items:flex-end;width:100%;flex-wrap:nowrap;overflow:hidden}
+.hb-dot{flex:1 1 0;min-width:0;height:28px;border-radius:2px;transition:opacity .2s;cursor:pointer;position:relative}
 .hb-dot.up     {background:var(--green);opacity:.7}
 .hb-dot.up:last-child{opacity:1}
-.hb-dot.down   {background:var(--red);opacity:.9}
+.hb-dot.down   {background:var(--red);opacity:1;min-width:3px;flex-shrink:0;box-shadow:0 0 6px var(--red)}
 .hb-dot.pending{background:var(--surface2)}
 .hb-dot:hover  {opacity:1!important}
+.hb-tooltip{position:fixed;z-index:9999;background:var(--surface2);border:1px solid var(--border-hi);border-radius:8px;padding:10px 16px;white-space:nowrap;pointer-events:none;text-align:center;box-shadow:0 4px 20px rgba(0,0,0,.5)}
+.hb-tooltip-time{font-size:16px;font-weight:600;color:var(--text-hi)}
+.hb-tooltip-status{font-size:14px;color:var(--text-2);margin-top:3px}
+.hb-tooltip::after{content:"";position:absolute;top:100%;left:50%;transform:translateX(-50%);border:6px solid transparent;border-top-color:var(--border-hi)}
 .hb-legend{display:flex;align-items:center;justify-content:space-between;font-size:11px;color:var(--text-2);margin-top:8px}
 
 /* -- RESPONSE TIME CHART -- */
@@ -243,7 +247,7 @@ canvas#responseChart{width:100%!important}
 .incident-row{display:grid;grid-template-columns:auto 1fr auto;align-items:center;gap:16px;padding:12px 0;border-bottom:1px solid var(--border)}
 .incident-row:last-child{border-bottom:none}
 .incident-dot{width:8px;height:8px;border-radius:50%;background:var(--red);flex-shrink:0}
-.incident-dot.resolved{background:var(--green)}
+.incident-dot.resolved{background:var(--red);opacity:.5}
 .incident-info{}
 .incident-cause{font-size:13px;color:var(--text-hi);font-weight:500}
 .incident-time{font-size:11px;color:var(--text-2);margin-top:2px;font-family:var(--mono)}
@@ -284,8 +288,8 @@ canvas#responseChart{width:100%!important}
   .section{margin-bottom:14px}
   .section-head{padding:11px 14px}
   .section-body{padding:14px}
-  .heartbeat{gap:2px}
-  .hb-dot{min-width:2px;height:24px}
+  .heartbeat{gap:1px}
+  .hb-dot{height:24px}
   .checks-row{gap:6px}
   .check-chip{padding:6px 10px;font-size:11px}
   .chip-detail{font-size:10px}
@@ -454,6 +458,11 @@ async function loadDashboardGroups(){
     }
   }
 
+  // Manage button is now rendered by renderTopbarDashboards() as a pill —
+  // clear the legacy topbarManageBtn container to avoid duplicates.
+  const manageEl = document.getElementById("topbarManageBtn");
+  if (manageEl) manageEl.innerHTML = "";
+
   // Re-render open detail panel to show/hide protected info now that auth is known
   if (selectedId) {
     const s = servers.find(x => x.id === selectedId);
@@ -485,7 +494,8 @@ function renderTopbarDashboards(){
   const pills = (dashboardGroups || []).map(g => {
     const dot = g.accent_color || "var(--blue)";
     const isCurrent = GROUP_SLUG === g.slug;
-    return `<a class="dash-nav ${isCurrent ? 'active' : ''}" href="/dashboard/${g.slug}" title="Open ${g.name}">
+    const href = g.custom_domain ? `https://${g.custom_domain}` : `/dashboard/${g.slug}`;
+    return `<a class="dash-nav ${isCurrent ? 'active' : ''}" href="${href}" title="Open ${g.name}">
       <span class="dash-nav-dot" style="background:${dot}"></span>
       ${g.name}
     </a>`;
@@ -539,6 +549,28 @@ function fmtDur(secs){
 
 function fmtTime(ts){
   return new Date(ts).toLocaleString("en-US",{month:"short",day:"numeric",hour:"2-digit",minute:"2-digit",hour12:false});
+}
+function fmtTimeFull(ts){
+  return new Date(ts).toLocaleString("en-US",{month:"short",day:"numeric",year:"numeric",hour:"numeric",minute:"2-digit",second:"2-digit",hour12:true});
+}
+function showHbTip(el){
+  hideHbTip();
+  const rect = el.getBoundingClientRect();
+  const tip = document.createElement("div");
+  tip.className = "hb-tooltip";
+  tip.id = "hbTip";
+  tip.innerHTML = `<div class="hb-tooltip-time">${el.dataset.time}</div><div class="hb-tooltip-status">${el.dataset.status}</div>`;
+  document.body.appendChild(tip);
+  const tipRect = tip.getBoundingClientRect();
+  let left = rect.left + rect.width/2 - tipRect.width/2;
+  if (left < 4) left = 4;
+  if (left + tipRect.width > window.innerWidth - 4) left = window.innerWidth - 4 - tipRect.width;
+  tip.style.left = left + "px";
+  tip.style.top  = (rect.top - tipRect.height - 10) + "px";
+}
+function hideHbTip(){
+  const t = document.getElementById("hbTip");
+  if (t) t.remove();
 }
 
 function uptimeCls(pct){
@@ -709,10 +741,14 @@ function renderDetail(s, uptime, heartbeat, incidents){
     </div>`).join("");
 
   // Heartbeat dots
-  const hbPad = Math.max(0, 90 - heartbeat.length);
+  const hbPad = Math.max(0, 360 - heartbeat.length);
   const hbDots = [
-    ...Array(hbPad).fill(null).map(() => `<div class="hb-dot pending" title="No data"></div>`),
-    ...heartbeat.map(h => `<div class="hb-dot ${h.ok?"up":"down"}" title="${fmtTime(h.checked_at)} · ${h.ok?"Up":"Down"}${h.response_ms?" ("+h.response_ms+"ms)":""}"></div>`)
+    ...Array(hbPad).fill(null).map(() => `<div class="hb-dot pending"></div>`),
+    ...heartbeat.map(h => {
+      const status = h.ok ? "Up" : "Down";
+      const ms = h.response_ms ? ` · ${h.response_ms}ms` : "";
+      return `<div class="hb-dot ${h.ok?"up":"down"}" data-time="${fmtTimeFull(h.checked_at)}" data-status="${status}${ms}" onmouseenter="showHbTip(this)" onmouseleave="hideHbTip(this)"></div>`;
+    })
   ].join("");
 
   // Strip IPv4/IPv6 addresses (and their preceding labels) from detail strings
@@ -807,12 +843,12 @@ function renderDetail(s, uptime, heartbeat, incidents){
     <div class="section">
       <div class="section-head">
         <div class="section-title">Heartbeat</div>
-        <span style="font-size:11px;color:var(--text-2)">Last 90 checks</span>
+        <span style="font-size:11px;color:var(--text-2)">Last 360 checks</span>
       </div>
       <div class="section-body">
         <div class="heartbeat">${hbDots}</div>
         <div class="hb-legend">
-          <span>${heartbeat.length > 0 ? fmtTime(heartbeat[0].checked_at) : ""}</span>
+          <span>${heartbeat.length >= 360 ? fmtTime(heartbeat[0].checked_at) : ""}</span>
           <span style="display:flex;align-items:center;gap:10px">
             <span style="display:flex;align-items:center;gap:4px"><span style="width:8px;height:8px;border-radius:2px;background:var(--green);display:inline-block"></span> Up</span>
             <span style="display:flex;align-items:center;gap:4px"><span style="width:8px;height:8px;border-radius:2px;background:var(--red);display:inline-block"></span> Down</span>
@@ -872,12 +908,12 @@ function drawChart(data){
   ctx.clearRect(0, 0, W, H);
 
   // Grid lines
-  ctx.strokeStyle = "rgba(30,100,200,0.1)";
+  ctx.strokeStyle = "rgba(30,100,200,0.18)";
   ctx.lineWidth   = 1;
   [0, 0.25, 0.5, 0.75, 1].forEach(f => {
     const y = PAD.top + cH * (1 - f);
     ctx.beginPath(); ctx.moveTo(PAD.left, y); ctx.lineTo(W - PAD.right, y); ctx.stroke();
-    ctx.fillStyle   = "rgba(61,96,128,0.8)";
+    ctx.fillStyle   = "rgba(140,180,210,0.9)";
     ctx.font        = "10px JetBrains Mono, monospace";
     ctx.textAlign   = "right";
     ctx.fillText(Math.round(maxV * f) + "ms", PAD.left - 4, y + 3);
@@ -885,8 +921,8 @@ function drawChart(data){
 
   // Fill gradient
   const grad = ctx.createLinearGradient(0, PAD.top, 0, PAD.top + cH);
-  grad.addColorStop(0, "rgba(42,127,255,0.3)");
-  grad.addColorStop(1, "rgba(42,127,255,0.0)");
+  grad.addColorStop(0, "rgba(42,127,255,0.4)");
+  grad.addColorStop(1, "rgba(42,127,255,0.02)");
   ctx.fillStyle = grad;
   ctx.beginPath();
   data.forEach((d, i) => {
@@ -899,7 +935,7 @@ function drawChart(data){
   ctx.closePath(); ctx.fill();
 
   // Line
-  ctx.strokeStyle = "rgba(42,127,255,0.9)";
+  ctx.strokeStyle = "rgba(60,150,255,1)";
   ctx.lineWidth   = 2;
   ctx.lineJoin    = "round";
   ctx.beginPath();

@@ -364,8 +364,8 @@ body{font-family:var(--sans);background:var(--bg);color:var(--text);min-height:1
   #mainArea .dv-section{margin-bottom:14px}
   #mainArea .dv-section-head{padding:11px 14px}
   #mainArea .dv-section-body{padding:14px}
-  #mainArea .heartbeat{gap:2px}
-  #mainArea .hb-dot{width:7px;height:24px}
+  #mainArea .heartbeat{gap:1px}
+  #mainArea .hb-dot{height:24px}
   #mainArea .checks-row{gap:6px}
   #mainArea .dv-chip{padding:6px 10px;font-size:11px}
   #mainArea .dv-chip-detail{font-size:10px}
@@ -420,13 +420,17 @@ body{font-family:var(--sans);background:var(--bg);color:var(--text);min-height:1
 #mainArea .dv-section-title{font-size:12px;font-weight:600;letter-spacing:.06em;text-transform:uppercase;color:var(--text-2)}
 #mainArea .dv-section-body{padding:20px}
 
-#mainArea .heartbeat{display:flex;gap:3px;align-items:flex-end;flex-wrap:wrap}
-#mainArea .hb-dot{width:10px;height:28px;border-radius:3px;flex-shrink:0;transition:opacity .2s;cursor:pointer}
+#mainArea .heartbeat{display:flex;gap:1px;align-items:flex-end;flex-wrap:nowrap;overflow:hidden;width:100%}
+#mainArea .hb-dot{flex:1 1 0;min-width:0;height:28px;border-radius:2px;transition:opacity .2s;cursor:pointer}
 #mainArea .hb-dot.up     {background:var(--green);opacity:.7}
 #mainArea .hb-dot.up:last-child{opacity:1}
-#mainArea .hb-dot.down   {background:var(--red);opacity:.9}
+#mainArea .hb-dot.down   {background:var(--red);opacity:1;min-width:3px;flex-shrink:0;box-shadow:0 0 6px var(--red)}
 #mainArea .hb-dot.pending{background:var(--surface2)}
 #mainArea .hb-dot:hover  {opacity:1!important}
+.hb-tooltip{position:fixed;z-index:9999;background:var(--surface2);border:1px solid var(--border-hi);border-radius:8px;padding:10px 16px;white-space:nowrap;pointer-events:none;text-align:center;box-shadow:0 4px 20px rgba(0,0,0,.5)}
+.hb-tooltip-time{font-size:16px;font-weight:600;color:var(--text-hi)}
+.hb-tooltip-status{font-size:14px;color:var(--text-2);margin-top:3px}
+.hb-tooltip::after{content:"";position:absolute;top:100%;left:50%;transform:translateX(-50%);border:6px solid transparent;border-top-color:var(--border-hi)}
 #mainArea .hb-legend{display:flex;align-items:center;justify-content:space-between;font-size:11px;color:var(--text-2);margin-top:8px}
 
 #mainArea .chart-wrap{position:relative;height:120px;width:100%}
@@ -653,7 +657,7 @@ body{font-family:var(--sans);background:var(--bg);color:var(--text);min-height:1
 }</pre>
           </div>
 
-          <div class="fg full"><label class="flabel">Servers in this Group <span style="font-weight:400;text-transform:none;letter-spacing:0" id="gPickCount">(0 selected)</span></label>
+          <div class="fg full" id="gServerPickerRow"><label class="flabel">Servers in this Group <span style="font-weight:400;text-transform:none;letter-spacing:0" id="gPickCount">(0 selected)</span></label>
             <div id="gServerPicker" style="background:var(--input-bg);border:1px solid var(--border-hi);border-radius:var(--r-sm);max-height:220px;overflow-y:auto;padding:8px"></div>
           </div>
 
@@ -801,6 +805,28 @@ function fmtDur(secs){
 function fmtTime(ts){
   return new Date(ts).toLocaleString("en-US",{month:"short",day:"numeric",hour:"2-digit",minute:"2-digit",hour12:false});
 }
+function fmtTimeFull(ts){
+  return new Date(ts).toLocaleString("en-US",{month:"short",day:"numeric",year:"numeric",hour:"numeric",minute:"2-digit",second:"2-digit",hour12:true});
+}
+function showHbTip(el){
+  hideHbTip();
+  const rect = el.getBoundingClientRect();
+  const tip = document.createElement("div");
+  tip.className = "hb-tooltip";
+  tip.id = "hbTip";
+  tip.innerHTML = `<div class="hb-tooltip-time">${el.dataset.time}</div><div class="hb-tooltip-status">${el.dataset.status}</div>`;
+  document.body.appendChild(tip);
+  const tipRect = tip.getBoundingClientRect();
+  let left = rect.left + rect.width/2 - tipRect.width/2;
+  if (left < 4) left = 4;
+  if (left + tipRect.width > window.innerWidth - 4) left = window.innerWidth - 4 - tipRect.width;
+  tip.style.left = left + "px";
+  tip.style.top  = (rect.top - tipRect.height - 10) + "px";
+}
+function hideHbTip(){
+  const t = document.getElementById("hbTip");
+  if (t) t.remove();
+}
 function uptimeCls(pct){
   if (pct === null || pct === undefined) return "";
   if (pct >= 99) return "great";
@@ -855,15 +881,15 @@ function isViewer(){ return sessionRole === "viewer"; }
       renderTopbarDashboards();
       // If the page was opened with ?edit=<server_id>, auto-open the admin drawer + server form.
       // This powers the inline Edit buttons on the status page sidebar.
-      const editId = new URLSearchParams(window.location.search).get("edit");
+      const editId  = new URLSearchParams(window.location.search).get("edit");
+      const newGroup = new URLSearchParams(window.location.search).get("newGroup");
       if (editId) {
         setTimeout(() => autoOpenServerEdit(editId), 0);
-      }
-      // If opened with ?newGroup=1 (from the sidebar "+ New Dashboard" shortcut on /),
-      // auto-open the Groups tab with a blank Add Group form.
-      const newGroup = new URLSearchParams(window.location.search).get("newGroup");
-      if (newGroup) {
+      } else if (newGroup) {
         setTimeout(() => autoOpenNewGroup(), 0);
+      } else if (isViewer()) {
+        // Viewers come here specifically to manage servers — open the drawer immediately
+        setTimeout(() => openAdmin(), 0);
       }
       // Version update check (admin only — non-blocking)
       if (isAdmin()) {
@@ -891,11 +917,11 @@ function isViewer(){ return sessionRole === "viewer"; }
 })();
 
 // Hide admin-only tabs from viewers. Called once when session is established.
-// Viewers can use Servers, Omada, and Webhooks (scoped to their groups).
-// Groups + Users tabs stay admin-only.
+// Viewers can use Servers, Omada, Webhooks, and Groups (scoped to their own dashboards).
+// Users tab stays admin-only.
 function applyRoleVisibility(){
   if (isAdmin()) return;  // admins see everything; nothing to hide
-  ["tabGroups","tabUsers"].forEach(id => {
+  ["tabUsers"].forEach(id => {
     const el = document.getElementById(id);
     if (el) el.style.display = "none";
   });
@@ -914,7 +940,8 @@ async function renderTopbarDashboards(){
     const groups = await r.json();
     const pills = groups.map(g => {
       const dot = g.accent_color || "var(--blue)";
-      return `<a class="dash-nav" href="/dashboard/${g.slug}" title="Open ${g.name}">
+      const href = g.custom_domain ? `https://${g.custom_domain}` : `/dashboard/${g.slug}`;
+      return `<a class="dash-nav" href="${href}" title="Open ${g.name}">
         <span class="dash-nav-dot" style="background:${dot}"></span>
         ${g.name}
       </a>`;
@@ -1219,10 +1246,14 @@ function renderDetail(s, uptime, heartbeat, incidents){
       <div class="uptime-sub">${u.val >= 99 ? "Excellent" : u.val >= 95 ? "Good" : (u.val !== null && u.val !== undefined) ? "Needs attention" : "No data yet"}</div>
     </div>`).join("");
 
-  const hbPad  = Math.max(0, 90 - heartbeat.length);
+  const hbPad  = Math.max(0, 360 - heartbeat.length);
   const hbDots = [
-    ...Array(hbPad).fill(null).map(() => `<div class="hb-dot pending" title="No data"></div>`),
-    ...heartbeat.map(h => `<div class="hb-dot ${h.ok?"up":"down"}" title="${fmtTime(h.checked_at)} — ${h.ok?"Up":"Down"}${h.response_ms?" ("+h.response_ms+"ms)":""}"></div>`)
+    ...Array(hbPad).fill(null).map(() => `<div class="hb-dot pending"></div>`),
+    ...heartbeat.map(h => {
+      const status = h.ok ? "Up" : "Down";
+      const ms = h.response_ms ? ` · ${h.response_ms}ms` : "";
+      return `<div class="hb-dot ${h.ok?"up":"down"}" data-time="${fmtTimeFull(h.checked_at)}" data-status="${status}${ms}" onmouseenter="showHbTip(this)" onmouseleave="hideHbTip(this)"></div>`;
+    })
   ].join("");
 
   const checkChips = (s.checks||[]).map(c => {
@@ -1287,12 +1318,12 @@ function renderDetail(s, uptime, heartbeat, incidents){
     <div class="dv-section">
       <div class="dv-section-head">
         <div class="dv-section-title">Heartbeat</div>
-        <span style="font-size:11px;color:var(--text-2)">Last 90 checks</span>
+        <span style="font-size:11px;color:var(--text-2)">Last 360 checks</span>
       </div>
       <div class="dv-section-body">
         <div class="heartbeat">${hbDots}</div>
         <div class="hb-legend">
-          <span>${heartbeat.length > 0 ? fmtTime(heartbeat[0].checked_at) : ""}</span>
+          <span>${heartbeat.length >= 360 ? fmtTime(heartbeat[0].checked_at) : ""}</span>
           <span style="display:flex;align-items:center;gap:10px">
             <span style="display:flex;align-items:center;gap:4px"><span style="width:8px;height:8px;border-radius:2px;background:var(--green);display:inline-block"></span> Up</span>
             <span style="display:flex;align-items:center;gap:4px"><span style="width:8px;height:8px;border-radius:2px;background:var(--red);display:inline-block"></span> Down</span>
@@ -1447,8 +1478,8 @@ function closeAdmin(){
 }
 
 async function switchTab(tab){
-  // Viewers can access Servers, Omada, and Webhooks. Anything else (Groups/Users) bounces back.
-  if (!isAdmin() && !["servers","omada","webhooks"].includes(tab)) tab = "servers";
+  // Viewers can access Servers, Omada, Webhooks, and Groups. Users tab bounces back.
+  if (!isAdmin() && !["servers","omada","webhooks","groups"].includes(tab)) tab = "servers";
   currentTab = tab;
   serverFormReturn = null;  // switching tabs clears any pending return target
   document.getElementById("tabServers").classList.toggle("active",  tab === "servers");
@@ -1458,6 +1489,9 @@ async function switchTab(tab){
   document.getElementById("tabWebhooks").classList.toggle("active", tab === "webhooks");
   const labels = { servers: "Add Server", groups: "Add Group", omada: "Add Controller", users: "Add User", webhooks: "Add Webhook" };
   document.getElementById("addBtnLabel").textContent  = labels[tab];
+  // Hide Add button for viewers on admin-only-create tabs (groups, users)
+  const hideAdd = !isAdmin() && (tab === "groups" || tab === "users");
+  document.getElementById("addBtn").style.display = hideAdd ? "none" : "";
   document.getElementById("addBtn").onclick           =
     tab === "servers"  ? () => showServerForm(null) :
     tab === "groups"   ? () => showGroupForm(null)  :
@@ -2227,7 +2261,7 @@ function renderAdminGroupList(list){
       <div class="admin-row-actions" onclick="event.stopPropagation()">
         <a class="btn btn-sm" href="/dashboard/${g.slug}" target="_blank" style="text-decoration:none">View</a>
         <button class="btn btn-sm" onclick="showGroupForm(adminGroups[${idx}])">Edit</button>
-        <button class="btn btn-sm btn-danger" onclick="askDelGroup(${g.id},'${g.name.replace(/'/g,"\\'")}')">Remove</button>
+        ${isAdmin() ? `<button class="btn btn-sm btn-danger" onclick="askDelGroup(${g.id},'${g.name.replace(/'/g,"\\'")}')">Remove</button>` : ``}
       </div>
     </div>
   `).join("");
@@ -2271,6 +2305,8 @@ function togglePickedServer(id, on){
 }
 
 async function showGroupForm(g){
+  // Viewers can only edit existing groups, not create new ones
+  if (!isAdmin() && !g) return;
   document.getElementById("aListView").style.display        = "none";
   document.getElementById("aFormView").style.display        = "none";
   document.getElementById("aUserFormView").style.display    = "none";
@@ -2311,6 +2347,8 @@ async function showGroupForm(g){
     try { const r = await fetch("/api/admin/servers"); if (r.ok) adminServers = await r.json(); } catch(e){}
   }
   renderGroupServerPicker();
+  // Hide server picker for viewers — they can only change appearance, not server assignments
+  document.getElementById("gServerPickerRow").style.display = isAdmin() ? "" : "none";
   // Mark slug field as dirty if user edits manually
   document.getElementById("gSlug").oninput = () => { _slugDirty = true; };
 }

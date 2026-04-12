@@ -14,6 +14,7 @@ const { version: APP_VERSION } = require("./package.json");
 const APP_OWNER     = process.env.APP_OWNER         || "Richard Applegate";
 const APP_CONTACT   = process.env.APP_CONTACT_EMAIL || "admin@richardapplegate.io";
 const APP_HOME_URL  = process.env.APP_HOME_URL      || "/";
+const EXTERNAL_URL  = (process.env.EXTERNAL_URL || "").replace(/\/+$/, "");  // optional fallback when no custom_domain
 const GITHUB_REPO   = "X4Applegate/status-server";
 const PORT          = process.env.PORT              || 3000;
 const CONFIG_PATH   = process.env.CONFIG_PATH    || "/config/servers.json";
@@ -119,7 +120,8 @@ async function initDB() {
         user: DB_USER, password: DB_PASS,
         database: DB_NAME,
         waitForConnections: true,
-        connectionLimit: 10
+        connectionLimit: 10,
+        timezone: "local"
       });
       await db.query("SELECT 1"); // test connection
       addLog({ level:"info", server:"system", message:`Database connected (${DB_HOST}:${DB_PORT}/${DB_NAME})` });
@@ -1084,41 +1086,108 @@ async function recordHistory(def, checks, overall) {
 }
 
 // -- Webhooks ------------------------------------------------------------------
+function fmtWebhookTime(iso) {
+  const d = new Date(iso);
+  return d.toLocaleString("en-US", { year:"numeric", month:"short", day:"2-digit", hour:"numeric", minute:"2-digit", second:"2-digit", hour12:true, timeZoneName:"short" });
+}
+
 function buildWebhookPayload(format, evt) {
-  // evt: { server, host, status, previous, cause, time, isRecovery }
-  const emoji = evt.isRecovery ? "✅" : (evt.status === "down" ? "🔴" : "🟠");
-  const verb  = evt.isRecovery ? "recovered" : (evt.status === "down" ? "is DOWN" : "is DEGRADED");
-  const title = `${emoji} ${evt.server} ${verb}`;
+  // evt: { server, host, status, previous, cause, checks, time, isRecovery, isTest, dashboardUrl, webhookName }
+  const displayTime = fmtWebhookTime(evt.time);
+  const emoji = evt.isTest ? "🧪" : evt.isRecovery ? "✅" : (evt.status === "down" ? "🚨" : "🟠");
+  const statusLabel = evt.isTest ? "Test" : evt.isRecovery ? "Recovered" : (evt.status === "down" ? "Down" : "Degraded");
+  const statusEmoji = evt.isTest ? "🧪" : evt.isRecovery ? "🟢" : (evt.status === "down" ? "🔴" : "🟠");
+  const verb  = evt.isTest ? "— Test Alert" : evt.isRecovery ? "Recovered" : (evt.status === "down" ? "is DOWN" : "is DEGRADED");
+  const title = `${emoji} Service ${verb}`;
+
+  if (format === "discord") {
+    const fields = [
+      { name: "Service:", value: evt.server, inline: true },
+      { name: "Status:", value: `${statusEmoji} ${statusLabel}`, inline: true },
+      { name: "Target:", value: evt.host, inline: true },
+      { name: "Time:", value: displayTime, inline: true }
+    ];
+    // Alert details from individual checks
+    const checkDetails = Array.isArray(evt.checks) && evt.checks.length
+      ? evt.checks.filter(c => !c.ok || evt.isRecovery || evt.isTest).map(c => {
+          const label = c.type === "ping" ? "PING" : c.type === "tcp" ? `TCP :${c.port}` : c.type === "udp" ? `UDP :${c.port}` : c.type.toUpperCase();
+          return `${c.ok ? "✅" : "❌"} ${label}: ${c.detail}`;
+        }).join("\n")
+      : null;
+    if (checkDetails || evt.cause) {
+      fields.push({ name: "⚠️ Alert Details:", value: "```\n" + (checkDetails || evt.cause) + "\n```", inline: false });
+    }
+    if (evt.dashboardUrl) {
+      fields.push({ name: "Dashboard:", value: `[${evt.dashboardUrl}](${evt.dashboardUrl})`, inline: false });
+    }
+    const embed = {
+      title,
+      color: evt.isTest ? 0x5865f2 : evt.isRecovery ? 0x10e88a : (evt.status === "down" ? 0xff3d5a : 0xff8c2a),
+      fields,
+      timestamp: evt.time
+    };
+    if (evt.dashboardUrl) embed.url = evt.dashboardUrl;
+    if (evt.webhookName) embed.footer = { text: `Added by ${evt.webhookName}` };
+    return { embeds: [embed] };
+  }
+
+  // Slack + generic use simpler text format
   const lines = [
     `**Server:** ${evt.server}`,
     `**Host:** ${evt.host}`,
-    `**Status:** ${evt.previous.toUpperCase()} → ${evt.status.toUpperCase()}`,
+    `**Status:** ${statusEmoji} ${statusLabel}`,
     evt.cause ? `**Cause:** ${evt.cause}` : null,
-    `**Time:** ${evt.time}`
+    `**Time:** ${displayTime}`,
+    evt.dashboardUrl ? `**Dashboard:** ${evt.dashboardUrl}` : null
   ].filter(Boolean).join("\n");
 
-  if (format === "discord") {
-    return {
-      embeds: [{
-        title,
-        description: lines,
-        color: evt.isRecovery ? 0x10e88a : (evt.status === "down" ? 0xff3d5a : 0xff8c2a),
-        timestamp: evt.time
-      }]
-    };
-  }
   if (format === "slack") {
-    return { text: `${title}\n${lines.replace(/\*\*/g, "*")}` };
+    const color = evt.isTest ? "#5865f2" : evt.isRecovery ? "#10e88a" : (evt.status === "down" ? "#ff3d5a" : "#ff8c2a");
+    // Build check details for the alert details block
+    const checkDetails = Array.isArray(evt.checks) && evt.checks.length
+      ? evt.checks.filter(c => !c.ok || evt.isRecovery || evt.isTest).map(c => {
+          const label = c.type === "ping" ? "PING" : c.type === "tcp" ? `TCP :${c.port}` : c.type === "udp" ? `UDP :${c.port}` : c.type.toUpperCase();
+          return `${label}: ${c.detail}`;
+        }).join("\n")
+      : null;
+    const blocks = [
+      { type: "header", text: { type: "plain_text", text: `${emoji} Service ${verb}`, emoji: true } },
+      { type: "section", fields: [
+        { type: "mrkdwn", text: `*Service:*\n${evt.server}` },
+        { type: "mrkdwn", text: `*Status:*\n${statusEmoji} ${statusLabel}` }
+      ]},
+      { type: "section", fields: [
+        { type: "mrkdwn", text: `*Target:*\n${evt.host}` },
+        { type: "mrkdwn", text: `*Time:*\n${displayTime}` }
+      ]}
+    ];
+    if (checkDetails || evt.cause) {
+      blocks.push(
+        { type: "section", text: { type: "mrkdwn", text: ":warning: *Alert Details:*" } },
+        { type: "section", text: { type: "mrkdwn", text: "```" + (checkDetails || evt.cause) + "```" } }
+      );
+    }
+    if (evt.dashboardUrl) {
+      blocks.push({ type: "section", text: { type: "mrkdwn", text: `*Dashboard:*\n<${evt.dashboardUrl}>` } });
+    }
+    if (evt.webhookName) {
+      blocks.push({ type: "context", elements: [{ type: "mrkdwn", text: `Added by ${evt.webhookName}` }] });
+    }
+    return {
+      text: `${emoji} Service ${verb}: ${evt.server} (${evt.host})`,
+      attachments: [{ color, blocks }]
+    };
   }
   // generic
   return {
-    event: evt.isRecovery ? "server.recovered" : "server.down",
+    event: evt.isTest ? "webhook.test" : evt.isRecovery ? "server.recovered" : "server.down",
     server: evt.server,
     host: evt.host,
     status: evt.status,
     previous: evt.previous,
     cause: evt.cause || null,
-    time: evt.time
+    time: evt.time,
+    dashboard_url: evt.dashboardUrl || null
   };
 }
 
@@ -1181,11 +1250,38 @@ async function fireWebhooks(evt) {
     addLog({ level:"warn", server:"webhook", message:`Failed to load webhooks: ${e.message}` });
     return;
   }
+  // Look up group info (slug + custom_domain) for dashboard links
+  {
+    // Collect group IDs to look up slugs for
+    const groupIdSet = new Set();
+    for (const h of hooks) { if (h.group_id) groupIdSet.add(h.group_id); }
+    if (evt.serverGroupIds) evt.serverGroupIds.forEach(gid => groupIdSet.add(gid));
+    let groupInfoMap = {};
+    if (groupIdSet.size) {
+      try {
+        const [slugRows] = await db.query("SELECT id, slug, custom_domain FROM status_groups WHERE id IN (?)", [Array.from(groupIdSet)]);
+        for (const r of slugRows) groupInfoMap[r.id] = { slug: r.slug, custom_domain: r.custom_domain };
+      } catch(e) { /* proceed without links */ }
+    }
+    evt._groupInfoMap = groupInfoMap;
+  }
+
   for (const h of hooks) {
     if (evt.isRecovery && !h.fire_on_recovery) continue;
     if (!evt.isRecovery && !h.fire_on_down)    continue;
+    // Resolve dashboard link: use custom_domain if set, otherwise EXTERNAL_URL + slug as fallback
+    let hookDashboardUrl = null;
+    if (evt._groupInfoMap) {
+      const gid = h.group_id || (evt.serverGroupIds && evt.serverGroupIds.length ? evt.serverGroupIds[0] : null);
+      const info = gid ? evt._groupInfoMap[gid] : null;
+      if (info && info.custom_domain) {
+        hookDashboardUrl = `https://${info.custom_domain}`;
+      } else if (info && EXTERNAL_URL) {
+        hookDashboardUrl = `${EXTERNAL_URL}/dashboard/${info.slug}`;
+      }
+    }
     const fmt  = h.format === "auto" ? detectFormat(h.url) : h.format;
-    const body = buildWebhookPayload(fmt, evt);
+    const body = buildWebhookPayload(fmt, { ...evt, dashboardUrl: hookDashboardUrl, webhookName: h.name });
     // Fire-and-forget with one retry
     (async () => {
       try {
@@ -1217,7 +1313,7 @@ async function pollAll(force = false) {
   const due = force
     ? serverConfig
     : serverConfig.filter(def => {
-        const interval = Math.max(10, def.poll_interval_sec || 30) * 1000;
+        const interval = Math.max(5, def.poll_interval_sec || 30) * 1000;
         const last = _lastPolled[def.id] || 0;
         return (nowMs - last) >= interval;
       });
@@ -1254,6 +1350,7 @@ async function pollAll(force = false) {
           status:          overall,
           previous:        prev.overall,
           cause:           checks.filter(c => !c.ok).map(c => c.detail).join(", ") || null,
+          checks:          checks.map(c => ({ type: c.type, port: c.port, ok: c.ok, detail: c.detail, response_ms: c.response_ms })),
           time:            now,
           isRecovery,
           serverGroupIds:  def.group_ids || []
@@ -1814,15 +1911,29 @@ app.post("/api/admin/webhooks/:id/test", requireAuth, async (req, res) => {
       return res.status(403).json({ error:"You don't have access to this webhook" });
     }
     const h = rows[0];
+    // Resolve dashboard link: use custom_domain if set, otherwise EXTERNAL_URL + slug
+    let dashboardUrl = null;
+    if (h.group_id) {
+      try {
+        const [slugRows] = await db.query("SELECT slug, custom_domain FROM status_groups WHERE id=?", [h.group_id]);
+        if (slugRows.length && slugRows[0].custom_domain) {
+          dashboardUrl = `https://${slugRows[0].custom_domain}`;
+        } else if (slugRows.length && EXTERNAL_URL) {
+          dashboardUrl = `${EXTERNAL_URL}/dashboard/${slugRows[0].slug}`;
+        }
+      } catch(e) { /* proceed without link */ }
+    }
     const fmt = h.format === "auto" ? detectFormat(h.url) : h.format;
     const body = buildWebhookPayload(fmt, {
       server:   "Test Server",
       host:     "127.0.0.1",
-      status:   "down",
-      previous: "up",
-      cause:    "This is a test event from Status Monitor",
+      status:   "test",
+      previous: "test",
+      cause:    "This is a test event from Status Monitor — no actual issue detected",
       time:     new Date().toISOString(),
-      isRecovery: false
+      isRecovery: false,
+      isTest:   true,
+      dashboardUrl
     });
     try {
       const result = await postWebhook(h.url, body);
@@ -1931,12 +2042,20 @@ app.post("/api/admin/groups", requireAdmin, async (req, res) => {
   }
 });
 
-app.put("/api/admin/groups/:id", requireAdmin, async (req, res) => {
-  const { name, slug, description, logo_text, logo_image, logo_size, accent_color, bg_color, default_theme, custom_domain, server_ids, privacy_text, terms_text } = req.body;
+app.put("/api/admin/groups/:id", requireAuth, async (req, res) => {
+  const gid = parseInt(req.params.id);
+  // Viewers may only edit groups they are assigned to
+  if (req.session.role !== "admin") {
+    const allowed = await getUserAllowedGroupIds(req.session.userId, req.session.role);
+    if (!Array.isArray(allowed) || !allowed.includes(gid))
+      return res.status(403).json({ error: "Forbidden – you can only edit your own dashboards" });
+  }
+  const { name, slug, description, logo_text, logo_image, logo_size, accent_color, bg_color, default_theme, custom_domain, privacy_text, terms_text } = req.body;
+  // Only admins may change server assignments
+  const server_ids = req.session.role === "admin" ? req.body.server_ids : undefined;
   if (!name) return res.status(400).json({ error: "Name is required" });
   const finalSlug = slugify(slug || name);
   if (!finalSlug) return res.status(400).json({ error: "Slug is required" });
-  const gid = parseInt(req.params.id);
   // Empty string from form means "clear the logo"; null/undefined means "leave alone"
   const isClearing = logo_image === "";
   let cleanLogo = null;
@@ -2271,14 +2390,26 @@ app.get("/api/public/response/:id", allowGroupedOrAuth, async (req, res) => {
 // Heartbeat � last 90 check results (any check type)
 app.get("/api/public/heartbeat/:id", allowGroupedOrAuth, async (req, res) => {
   try {
+    // Group by poll cycle (checked_at) so servers with multiple check types
+    // (ping + tcp + http etc.) still produce one dot per poll, not one per check.
     const [rows] = await db.query(
-      `SELECT ok, checked_at, detail, response_ms
+      `SELECT MIN(ok) AS ok, checked_at,
+              GROUP_CONCAT(detail SEPARATOR ', ') AS detail,
+              AVG(response_ms) AS response_ms
        FROM status_history
        WHERE server_id=?
-       ORDER BY checked_at DESC LIMIT 90`,
+       GROUP BY checked_at
+       ORDER BY checked_at DESC LIMIT 360`,
       [req.params.id]
     );
-    res.json(rows.reverse());
+    // MIN(ok): if any check failed (0), the dot is "down"
+    // AVG(response_ms): average across check types for the tooltip
+    res.json(rows.reverse().map(r => ({
+      ok: !!r.ok,
+      checked_at: r.checked_at,
+      detail: r.detail,
+      response_ms: r.response_ms != null ? Math.round(r.response_ms) : null
+    })));
   } catch(e) { res.status(500).json({ error: e.message }); }
 });
 
