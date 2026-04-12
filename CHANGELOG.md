@@ -4,14 +4,33 @@ All notable changes to this project are documented here.
 
 ---
 
-## [Unreleased]
+## [2.1.0] — 2026-04-11
+
+### Added
+- **Home button** in admin panel topbar — links to your status dashboard (configurable via `APP_HOME_URL` env var)
+- **GitHub link** in the footer of every page — dashboard, admin, login, privacy, terms, and group legal pages
+- **Per-group Privacy Policy and Terms of Service** — admins can paste custom legal text per dashboard group; shown in the group's footer; falls back to global pages when blank
+- **Sign In / Sign Out button** on public dashboards — appears in the topbar next to the theme toggle; all protected features (host, IP, Edit button) reveal instantly on login without a page reload
+- **Version update notification banner** in admin panel — checks GitHub releases once per hour and shows a dismissible banner when a newer version is available
+- **Omada controllers: multi-group support** — controllers can now be assigned to multiple dashboard groups via a checkbox picker; replaces the old single `group_id` column with a many-to-many map table; existing data auto-migrated on boot
+- **Self-hosting env vars**: `APP_OWNER`, `APP_CONTACT_EMAIL`, `APP_HOME_URL` — configure owner name, contact email on legal pages, and home button URL without code changes
+- **Proprietary license** — source available for reference; modification, commercial use, distribution, and resale prohibited
+
+### Changed
+- **"Admin" renamed to "Manage"** everywhere — topbar button, nav pills, admin page title
+- **Rebranded to Applegate Monitor** — all page titles, brand marks, and documentation updated
+- **Manage pill** on group dashboards now correctly links to `/admin` (management panel) instead of `/` (master dashboard)
+- Admin page footer updated from old "Status.Monitor" text to "Applegate Monitor"
 
 ### Fixed
-- **Response time chart now works for all check types** — HTTP/HTTPS, TCP, and DNS checks were not recording response time, so the 24-hour response chart always appeared empty for domain-based servers. Each check type now captures wall-clock timing and stores it in `response_ms`.
+- **Response time chart now works for all check types** — HTTP/HTTPS, TCP, and DNS checks were not recording `response_ms`; all now capture wall-clock timing
+- **IP addresses hidden from public dashboard** — host/IP redacted on server list cards, detail view, check chip details (including Omada `WAN x.x.x.x`), and incident cause log for logged-out visitors
+- **Privacy/terms infinite redirect loop on custom domains** — when a group had no custom legal text, `/privacy` on a custom domain re-entered the middleware and looped; now renders the global page directly
+- **Privacy and terms pages bypassed by custom domain middleware** — `/privacy` and `/terms` routes were being intercepted and served as dashboards on custom domains
 
 ---
 
-## [2026-04-11]
+## [2.0.0] — 2026-04-11 (Initial Release)
 
 ### Added
 - **Omada LTE / Cellular backup WAN check type** (`omada_lte`) — monitors the cellular/LTE backup WAN on Omada-managed gateways. Tries multiple Omada API endpoints to retrieve cellular link status; falls back gracefully to reporting gateway health when the controller API does not expose cellular details. Optional **LTE probe IP** field allows direct ICMP pinging of the cellular WAN address as an additional liveness signal.
