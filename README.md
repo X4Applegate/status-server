@@ -270,7 +270,6 @@ GET /api/badge/:id/cert-exp
 | `APP_OWNER` | No | `Richard Applegate` | Owner name shown on Privacy Policy and Terms pages |
 | `APP_CONTACT_EMAIL` | No | `admin@richardapplegate.io` | Contact email shown on legal pages |
 | `APP_HOME_URL` | No | `/` | URL the Home button in the admin panel links to |
-| `GITHUB_REPO` | No | `X4Applegate/status-server` | GitHub repo used for update notifications (set to your fork) |
 
 ---
 

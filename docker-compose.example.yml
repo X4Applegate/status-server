@@ -30,7 +30,6 @@ services:
       - APP_OWNER=Your Name
       - APP_CONTACT_EMAIL=you@example.com
       - APP_HOME_URL=/
-      - GITHUB_REPO=YourUsername/your-fork
 
     # NET_RAW is required for ICMP ping checks
     cap_add:
