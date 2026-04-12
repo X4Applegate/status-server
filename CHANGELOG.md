@@ -4,6 +4,35 @@ All notable changes to this project are documented here.
 
 ---
 
+## [2.7.0] — 2026-04-12
+
+### Added
+- **PWA support** — per-group dashboards are now installable to iOS/Android home screens with branded icons, theme colors, and standalone display mode; new `/sw.js`, `/api/icon/:slug`, and `/dashboard/:slug/manifest.json` endpoints
+- **Dynamic group icons** — `/api/icon/:slug` serves the group's stored logo, or generates a branded SVG from the group's initials + accent color as a fallback
+- **`/healthz` endpoint** — lightweight liveness probe with DB ping (`SELECT 1`); returns `{ok, version, uptime, db}` on success, 503 on failure; used by the new Docker `HEALTHCHECK`
+- **Security headers (helmet)** — HSTS, X-Frame-Options, X-Content-Type-Options, Referrer-Policy, and other baseline headers on every response
+- **Rate limiting** — brute-force defense on `/api/login` (10 per 15 min), `/api/setup` (3 per hour), and `/api/change-password` (10 per 15 min), keyed on real client IP via `trust proxy`
+- **Graceful shutdown** — `SIGTERM`/`SIGINT` now drains SSE streams and closes the DB pool cleanly before exit; 10-second hard-kill fallback guards against hung drains
+- **Boot-time config validation** — refuses to start in `NODE_ENV=production` when `SESSION_SECRET` is still the default or `DB_PASSWORD` is unset; non-prod environments get warnings instead of a crash
+- **Global error handler** — catches unhandled errors and returns a generic message (JSON under `/api/*`, plain text otherwise) so stack traces never leak to the browser
+
+### Security
+- **nodemailer 6.10.1 → 8.0.5** — closes 4 high-severity advisories: SMTP command injection via `envelope.size`, CRLF injection in transport name (EHLO/HELO), `addressparser` recursive-call DoS, and `addressparser` interpretation conflict that could deliver mail to unintended recipients
+- **Session cookies** — `secure: "auto"` (Secure flag now set automatically on HTTPS via `X-Forwarded-Proto`), `sameSite: "lax"` added for CSRF defense
+- `npm audit` now reports **0 vulnerabilities**
+
+### Changed
+- **Dockerfile hardened**:
+  - Copies `package-lock.json` and uses `npm ci --omit=dev` for reproducible, deterministic builds
+  - Runs as the non-root `node` user via `USER node`
+  - Declares `HEALTHCHECK` polling `/healthz` every 30s
+  - Sets `NODE_ENV=production`
+  - Installs `wget` for the health probe; keeps `iputils` for ICMP checks
+- **`package-lock.json` committed** — `docker compose build` now always installs the exact dependency tree that passed `npm audit`
+- **`engines.node >= 18`** declared in `package.json` to make the minimum runtime explicit
+
+---
+
 ## [2.6.0] — 2026-04-12
 
 ### Added
