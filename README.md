@@ -88,8 +88,16 @@ Badge URLs are shown directly in the server edit form for easy copying.
 - Response time chart (last 24h bucketed by hour)
 - Incident log with timestamp and duration
 
+### Login Protection (Cloudflare Turnstile)
+- Optional **Cloudflare Turnstile** CAPTCHA on the login form — blocks bots and brute-force attacks without user friction
+- Privacy-friendly alternative to reCAPTCHA — no distorted text puzzles
+- Configured from the **Settings tab** in the admin panel (no env vars or redeploy needed)
+- Widget only loads when enabled; automatically skipped during first-time admin setup
+- Failed verification attempts are logged with the username and reason
+
 ### Admin Panel
-- Slide-in drawer with tabbed management: Servers, Groups, Omada, Users, Webhooks
+- Slide-in drawer with tabbed management: Servers, Groups, Omada, Users, Webhooks, Settings
+- **Settings tab** — configure SMTP email and Cloudflare Turnstile login protection from the web UI
 - Live system log stream with error/info filtering and badge counter
 - Per-server edit form accessible directly from the status dashboard via the **Edit Server** button
 - Deep-link edit: navigate to `/admin?edit=<serverId>` to open a server's edit form directly
