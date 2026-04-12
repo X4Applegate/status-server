@@ -2020,8 +2020,11 @@ async function showUserForm(u){
   document.getElementById("uErr").textContent = "";
   // Pre-select the user's existing allowed groups
   userPickedGroups = new Set(u?.allowed_group_ids || []);
-  // Make sure groups are loaded so the picker can render them
-  await ensureGroupsLoaded();
+  // Always fetch fresh groups so the picker reflects newly-created dashboards
+  try {
+    const r = await fetch("/api/admin/groups");
+    if (r.ok) { adminGroups = await r.json(); cacheSet("admin-groups", adminGroups); }
+  } catch(e) { /* fall back to cache */ }
   renderUserGroupsPicker();
   onUserRoleChange();
 }
