@@ -660,9 +660,37 @@ function renderSidebar(){
     </div>`;
   };
 
-  // On public dashboard pages OR when we don't have groups loaded yet → flat list
+  // On public dashboard pages OR when we don't have groups loaded yet
   if (GROUP_SLUG || !dashboardGroups.length) {
-    el.innerHTML = servers.map(renderRow).join("");
+    // If any servers have a category, render grouped sections; otherwise flat list.
+    const hasCategories = servers.some(s => (s.category || "").trim());
+    if (hasCategories) {
+      // Preserve insertion order of categories as they appear in the server list.
+      const order = [];
+      const byCat = {};
+      for (const s of servers) {
+        const cat = (s.category || "").trim() || "Other";
+        if (!byCat[cat]) { byCat[cat] = []; order.push(cat); }
+        byCat[cat].push(s);
+      }
+      el.innerHTML = order.map(cat => {
+        const items = byCat[cat];
+        const downCount = items.filter(s => s.overall === "down").length;
+        const degCount  = items.filter(s => s.overall === "degraded").length;
+        const dotColor  = downCount > 0 ? "var(--red)" : degCount > 0 ? "var(--orange)" : "var(--green)";
+        return `
+          <div class="srv-group">
+            <div class="srv-group-head">
+              <span class="srv-group-dot" style="background:${dotColor}"></span>
+              <span class="srv-group-name">${cat}</span>
+              <span class="srv-group-count">${items.length}</span>
+            </div>
+            <div class="srv-group-body">${items.map(renderRow).join("")}</div>
+          </div>`;
+      }).join("");
+    } else {
+      el.innerHTML = servers.map(renderRow).join("");
+    }
     return;
   }
 

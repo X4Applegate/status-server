@@ -538,6 +538,7 @@ body{font-family:var(--sans);background:var(--bg);color:var(--text);min-height:1
           <div class="fg"><label class="flabel">Server Name *</label><input class="finput" id="fName" placeholder="e.g. Web Server"></div>
           <div class="fg"><label class="flabel">Host / IP *</label><input class="finput" id="fHost" placeholder="e.g. 10.0.0.2"></div>
           <div class="fg full"><label class="flabel">Description</label><input class="finput" id="fDesc" placeholder="Short description"></div>
+          <div class="fg full"><label class="flabel">Section <span style="font-weight:400;text-transform:none;letter-spacing:0;color:var(--text-2)">(optional — groups servers under a heading on the dashboard)</span></label><input class="finput" id="fCategory" placeholder="e.g. Omada Network, DNS Servers" list="categoryHints"><datalist id="categoryHints"></datalist></div>
           <div class="fg full"><label class="flabel">Tags <span style="font-weight:400;text-transform:none;letter-spacing:0">(comma-separated)</span></label><input class="finput" id="fTags" placeholder="production, web, db"></div>
           <div class="fg"><label class="flabel">Poll Interval <span style="font-weight:400;text-transform:none;letter-spacing:0;color:var(--text-2)">(seconds, min 10)</span></label>
             <select class="fselect" id="fInterval">
@@ -1629,6 +1630,12 @@ async function showServerForm(s){
   document.getElementById("fName").value  = s?.name || "";
   document.getElementById("fHost").value  = s?.host || "";
   document.getElementById("fDesc").value  = s?.description || "";
+  document.getElementById("fCategory").value = s?.category || "";
+  // Populate category autocomplete with existing categories from other servers
+  try {
+    const cats = Array.from(new Set((adminServers||[]).map(x => x.category).filter(Boolean))).sort();
+    document.getElementById("categoryHints").innerHTML = cats.map(c => `<option value="${c}">`).join("");
+  } catch(e) {}
   document.getElementById("fTags").value  = (s?.tags||[]).join(", ");
   document.getElementById("fInterval").value = String(s?.poll_interval_sec || 30);
   document.getElementById("fErr").textContent = "";
@@ -1871,6 +1878,7 @@ async function submitForm(){
   const body = {
     name, host,
     description:       document.getElementById("fDesc").value.trim(),
+    category:          document.getElementById("fCategory").value.trim(),
     tags:              document.getElementById("fTags").value.split(",").map(t=>t.trim()).filter(Boolean),
     checks:            currentChecks.map(c => ({...c})),
     group_ids:         Array.from(serverPickedGroups),
