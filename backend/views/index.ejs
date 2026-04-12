@@ -481,6 +481,8 @@ async function loadDashboardGroups(){
       if (cached) renderDetail(s, cached.uptime, cached.heartbeat, cached.incidents);
     }
   }
+  // Check if welcome popup should show (session is now confirmed)
+  if (window._serversLoaded) checkWelcome();
   // Re-render server list to show/hide host under each card
   if (servers.length) renderSidebar();
 
@@ -563,7 +565,14 @@ function fmtTime(ts){
 function fmtTimeFull(ts){
   return new Date(ts).toLocaleString("en-US",{month:"short",day:"numeric",year:"numeric",hour:"numeric",minute:"2-digit",second:"2-digit",hour12:true});
 }
+function checkWelcome(){
+  // Show welcome popup when: logged in, no servers, on master view, not already dismissed
+  if (!sidebarSession.loggedIn || GROUP_SLUG || servers.length > 0) return;
+  if (sessionStorage.getItem("welcome-dismissed")) return;
+  showWelcomePopup();
+}
 function showWelcomePopup(){
+  sessionStorage.setItem("welcome-dismissed", "1");
   const overlay = document.createElement("div");
   overlay.className = "welcome-overlay";
   overlay.innerHTML = `
@@ -1011,10 +1020,9 @@ async function loadServers(){
       document.getElementById("sidebarList").innerHTML = `<div style="padding:16px;color:var(--text-2);font-size:12px">No servers in this dashboard yet</div>`;
       document.getElementById("mainArea").innerHTML = `<div class="empty-main">No servers assigned to this dashboard</div>`;
     }
-    // First-run welcome: no servers at all and user is admin
-    if (!GROUP_SLUG && servers.length === 0 && sidebarSession.loggedIn) {
-      showWelcomePopup();
-    }
+    // Flag that server list is loaded (used by welcome popup check)
+    window._serversLoaded = true;
+    if (!GROUP_SLUG && servers.length === 0) checkWelcome();
   } catch(e) {
     if (!cachedServers) {
       document.getElementById("sidebarList").innerHTML = `<div style="padding:16px;color:var(--text-2);font-size:12px">Failed to load servers</div>`;
