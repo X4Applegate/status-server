@@ -4,6 +4,21 @@ All notable changes to this project are documented here.
 
 ---
 
+## [2.3.0] — 2026-04-12
+
+### Added
+- **Full-screen server grid layout** — server list now displays as a responsive card grid instead of a narrow sidebar; cards show status dot, name, host, badge, and a mini heartbeat bar
+- **Mini heartbeat bar on each card** — last 20 checks shown as colored dots under every server card (green = up, red = down, gray = pending); updates in real-time
+- **Detail view with back button** — clicking a server opens a full-width detail view; "← All Servers" button returns to the grid
+- **Welcome popup on admin page** — fresh installs redirect admin to `/admin?welcome=1` with a popup and auto-opened management drawer
+- **Caddy example cleaned up** — removed TLS cert paths from the custom domain setup instructions
+
+### Changed
+- **Layout redesign** — replaced sidebar + main split with full-screen grid → detail toggle; mobile-friendly single-column on small screens
+- **Server cards are clickable panels** — rounded corners, hover elevation, status badge, and heartbeat mini-bar
+
+---
+
 ## [2.2.0] — 2026-04-12
 
 ### Added
