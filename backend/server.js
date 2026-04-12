@@ -9,8 +9,42 @@ const mysql        = require("mysql2/promise");
 const bcrypt       = require("bcryptjs");
 const session      = require("express-session");
 const nodemailer   = require("nodemailer");
+const helmet       = require("helmet");
+const rateLimit    = require("express-rate-limit");
 
 const app  = express();
+
+// Trust the first reverse-proxy hop (Caddy/nginx). Required for correct
+// req.ip (rate limiting) and req.secure (HTTPS-aware session cookies).
+app.set("trust proxy", 1);
+
+// Security headers. CSP is disabled intentionally: the EJS templates rely
+// on inline scripts/styles that would break without a major refactor. All
+// other helmet defaults (X-Content-Type-Options, Referrer-Policy,
+// Strict-Transport-Security, X-Frame-Options, etc.) are kept on.
+app.use(helmet({
+  contentSecurityPolicy:    false,
+  crossOriginEmbedderPolicy: false,  // would block Cloudflare Turnstile script
+  crossOriginResourcePolicy: { policy: "cross-origin" }  // allow badge SVGs to be embedded
+}));
+
+// Rate limiters — brute-force defense on auth endpoints.
+// Keyed on req.ip (correct thanks to trust proxy above).
+const loginLimiter = rateLimit({
+  windowMs:        15 * 60 * 1000,
+  max:             10,
+  standardHeaders: true,
+  legacyHeaders:   false,
+  message:         { error: "Too many login attempts — try again in 15 minutes." }
+});
+const setupLimiter = rateLimit({
+  windowMs:        60 * 60 * 1000,
+  max:             3,
+  standardHeaders: true,
+  legacyHeaders:   false,
+  message:         { error: "Too many setup attempts." }
+});
+
 const { version: APP_VERSION } = require("./package.json");
 const APP_OWNER     = process.env.APP_OWNER         || "Richard Applegate";
 const APP_CONTACT   = process.env.APP_CONTACT_EMAIL || "admin@richardapplegate.io";
@@ -30,6 +64,28 @@ const DB_PASS = process.env.DB_PASSWORD || "";
 const DB_NAME = process.env.DB_NAME     || "status_monitor";
 
 const SESSION_SECRET = process.env.SESSION_SECRET || "change-this-secret-in-production";
+const IS_PROD        = process.env.NODE_ENV === "production";
+
+// -- Config validation (fail fast on broken prod deploys) --------------------
+(function validateEnv() {
+  const warnings = [], errors = [];
+  if (SESSION_SECRET === "change-this-secret-in-production") {
+    (IS_PROD ? errors : warnings).push(
+      "SESSION_SECRET is still the default — set a unique random value (48+ chars) in docker-compose.yml"
+    );
+  } else if (SESSION_SECRET.length < 32) {
+    warnings.push("SESSION_SECRET is shorter than 32 characters; 48+ random chars recommended");
+  }
+  if (IS_PROD && !process.env.DB_PASSWORD) {
+    errors.push("DB_PASSWORD must be set in production");
+  }
+  warnings.forEach(w => console.warn(`[warn] config: ${w}`));
+  if (errors.length) {
+    errors.forEach(e => console.error(`[error] config: ${e}`));
+    console.error("Refusing to start with invalid configuration.");
+    process.exit(1);
+  }
+})();
 
 // -- SMTP config (for email webhook notifications) ----------------------------
 // Loaded from DB settings table (web UI); env vars are fallback for first-run setups.
@@ -164,7 +220,12 @@ app.use(session({
   secret: SESSION_SECRET,
   resave: false,
   saveUninitialized: false,
-  cookie: { secure: false, httpOnly: true, maxAge: 24 * 60 * 60 * 1000 } // 24h
+  cookie: {
+    secure:   "auto",       // Secure flag set automatically when req is HTTPS (via X-Forwarded-Proto)
+    httpOnly: true,
+    sameSite: "lax",
+    maxAge:   24 * 60 * 60 * 1000 // 24h
+  }
 }));
 
 // -- Health check (Docker HEALTHCHECK / reverse proxy probe) -----------------
@@ -1603,7 +1664,7 @@ async function computeLoginRedirect(userId, role) {
   return "/";
 }
 
-app.post("/api/login", async (req, res) => {
+app.post("/api/login", loginLimiter, async (req, res) => {
   const { username, password, turnstile_token } = req.body;
   if (!username || !password) return res.status(400).json({ error:"Username and password required" });
   try {
@@ -1639,7 +1700,7 @@ app.get("/api/setup-status", async (req, res) => {
 });
 
 // First-time signup — only works when no users exist
-app.post("/api/setup", async (req, res) => {
+app.post("/api/setup", setupLimiter, async (req, res) => {
   const { username, password } = req.body;
   if (!username || !password) return res.status(400).json({ error: "Username and password required" });
   if (username.length < 3) return res.status(400).json({ error: "Username must be at least 3 characters" });
@@ -2651,7 +2712,7 @@ app.get("/api/admin/omada-controllers/:id/sites", requireAuth, async (req, res) 
 });
 
 // Viewer change-password (viewers can change their own password)
-app.post("/api/change-password", requireAuth, async (req, res) => {
+app.post("/api/change-password", requireAuth, loginLimiter, async (req, res) => {
   const { currentPassword, newPassword } = req.body;
   if (!currentPassword || !newPassword) return res.status(400).json({ error:"Both fields required" });
   if (newPassword.length < 8) return res.status(400).json({ error:"Password must be at least 8 characters" });
@@ -3159,6 +3220,21 @@ app.get("*", (req, res) => {
   res.redirect("/login");
 });
 
+// -- Error handler (last resort) ---------------------------------------------
+// Express 4: the 4-arg signature is what marks this as an error handler.
+// Any `next(err)` or thrown error that bubbles out of a route lands here.
+// We log server-side and return a generic message so stack traces never
+// leak to the browser.
+app.use((err, req, res, next) => {
+  const msg = (err && err.message) || String(err);
+  addLog({ level:"error", server:"system", message:`Unhandled error on ${req.method} ${req.path}: ${msg}` });
+  if (res.headersSent) return next(err);
+  if (req.path && req.path.startsWith("/api/")) {
+    return res.status(500).json({ error: "Internal server error" });
+  }
+  res.status(500).send("Internal server error");
+});
+
 // -- Boot ----------------------------------------------------------------------
 (async () => {
   await initDB();
@@ -3171,7 +3247,28 @@ app.get("*", (req, res) => {
   // Listen on dual-stack (::) so both IPv4 and IPv6 clients connect with no fallback delay.
   // Without this, "localhost" resolves to ::1, the connection attempt fails, and the client
   // waits ~200ms before retrying on 127.0.0.1 — adding 200ms latency to every request.
-  app.listen(PORT, "::", () => {
+  const httpServer = app.listen(PORT, "::", () => {
     addLog({ level:"info", server:"system", message:`Server started on :${PORT} (dual-stack), interval ${CHECK_INTERVAL/1000}s` });
   });
+
+  // Graceful shutdown. Container orchestrators send SIGTERM; Ctrl-C sends
+  // SIGINT. We stop accepting new connections, end SSE streams, close the
+  // DB pool, then exit. A 10s hard-kill guards against hung drains.
+  let shuttingDown = false;
+  function shutdown(signal) {
+    if (shuttingDown) return;
+    shuttingDown = true;
+    addLog({ level:"info", server:"system", message:`Shutdown requested (${signal}); draining...` });
+    httpServer.close(() => {
+      [...sseClients, ...logClients].forEach(r => { try { r.end(); } catch(_) {} });
+      const dbClose = db ? db.end().catch(() => {}) : Promise.resolve();
+      dbClose.finally(() => process.exit(0));
+    });
+    setTimeout(() => {
+      console.error("Shutdown timeout reached — forcing exit");
+      process.exit(1);
+    }, 10_000).unref();
+  }
+  process.on("SIGTERM", () => shutdown("SIGTERM"));
+  process.on("SIGINT",  () => shutdown("SIGINT"));
 })();
