@@ -2851,6 +2851,87 @@ function sendBadge(res, label, value, color) {
   res.send(makeBadge(label, value, color));
 }
 
+// ── PWA support ──────────────────────────────────────────────────────────────
+
+// Minimal service worker — satisfies Chrome/Android installability requirement.
+// Does not cache anything; all requests pass through to the network so live
+// status data is never stale. The SW exists purely to unlock the browser's
+// "Add to Home Screen" / install prompt.
+app.get("/sw.js", (req, res) => {
+  res.setHeader("Content-Type", "application/javascript");
+  res.setHeader("Cache-Control", "no-cache");
+  res.send(`self.addEventListener("install",  e => self.skipWaiting());
+self.addEventListener("activate", e => e.waitUntil(clients.claim()));
+self.addEventListener("fetch",    e => e.respondWith(fetch(e.request)));`);
+});
+
+// Group icon — used by manifest.json and as apple-touch-icon.
+// Returns the group's stored logo_image (decoded from its base64 data URL)
+// or a generated SVG icon built from the group's initials + accent color.
+app.get("/api/icon/:slug", async (req, res) => {
+  try {
+    const [rows] = await db.query(
+      "SELECT logo_image, logo_text, name, accent_color, bg_color FROM status_groups WHERE slug=?",
+      [req.params.slug]
+    );
+    if (!rows.length) return res.status(404).send("Not found");
+    const g = rows[0];
+    if (g.logo_image && g.logo_image.startsWith("data:")) {
+      const m = g.logo_image.match(/^data:(image\/[^;]+);base64,(.+)$/s);
+      if (m) {
+        res.setHeader("Content-Type", m[1]);
+        res.setHeader("Cache-Control", "public, max-age=3600");
+        return res.end(Buffer.from(m[2], "base64"));
+      }
+    }
+    // Fallback: generate SVG from initials
+    const initials = (g.logo_text || g.name || "?").substring(0, 2).toUpperCase();
+    const accent   = g.accent_color || "#2a7fff";
+    const bg       = g.bg_color     || "#060c18";
+    const svg = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512">
+  <rect width="512" height="512" rx="96" fill="${bg}"/>
+  <rect x="24" y="24" width="464" height="464" rx="72" fill="${accent}" opacity="0.18"/>
+  <text x="256" y="348" font-family="-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif" font-size="240" font-weight="700" fill="${accent}" text-anchor="middle">${initials}</text>
+</svg>`;
+    res.setHeader("Content-Type", "image/svg+xml");
+    res.setHeader("Cache-Control", "public, max-age=3600");
+    res.end(svg);
+  } catch(e) { res.status(500).send("Error"); }
+});
+
+// Per-group Web App Manifest — powers the "Add to Home Screen" / install prompt
+// on both Android (Chrome) and iOS (Safari). Branding matches the group's theme.
+app.get("/dashboard/:slug/manifest.json", async (req, res) => {
+  try {
+    const [rows] = await db.query("SELECT * FROM status_groups WHERE slug=?", [req.params.slug]);
+    if (!rows.length) return res.status(404).json({ error: "Not found" });
+    const g = rows[0];
+    let iconType = "image/svg+xml";
+    if (g.logo_image) {
+      const m = g.logo_image.match(/^data:(image\/[^;]+);base64,/);
+      if (m) iconType = m[1];
+    }
+    const shortName = g.name.length > 14 ? g.name.substring(0, 14).trimEnd() + "…" : g.name;
+    res.setHeader("Content-Type", "application/manifest+json");
+    res.setHeader("Cache-Control", "public, max-age=300");
+    res.json({
+      name:             g.name,
+      short_name:       shortName,
+      description:      g.description || `${g.name} status dashboard`,
+      start_url:        `/dashboard/${g.slug}`,
+      scope:            `/dashboard/${g.slug}`,
+      display:          "standalone",
+      orientation:      "portrait-primary",
+      theme_color:      g.accent_color || "#2a7fff",
+      background_color: g.bg_color     || "#060c18",
+      icons: [
+        { src: `/api/icon/${g.slug}`, sizes: "any", type: iconType, purpose: "any"      },
+        { src: `/api/icon/${g.slug}`, sizes: "any", type: iconType, purpose: "maskable" }
+      ]
+    });
+  } catch(e) { res.status(500).json({ error: e.message }); }
+});
+
 // Status badge: up / down / degraded
 app.get("/api/badge/:id/status", allowGroupedOrAuth, (req, res) => {
   const s = serverStatus[req.params.id];

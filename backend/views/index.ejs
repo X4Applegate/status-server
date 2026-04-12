@@ -2,6 +2,15 @@
 <html lang="en" data-theme="<%= defaultTheme %>">
 <head>
 <%- include('partials/head', { title: pageTitle }) %>
+<% if (groupSlug) { %>
+<link rel="manifest" href="/dashboard/<%= groupSlug %>/manifest.json">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="<%= groupName %>">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<link rel="apple-touch-icon" href="/api/icon/<%= groupSlug %>">
+<meta name="theme-color" content="<%= accentColor || '#2a7fff' %>">
+<% } %>
 <script>
 // Pre-paint theme apply: read per-dashboard preference from localStorage if set,
 // otherwise use the server-rendered defaultTheme. Runs before any CSS so no flash.
@@ -1181,6 +1190,11 @@ setInterval(() => {
 
 loadServers();
 loadDashboardGroups();  // master view: paints sidebar groups; public dashboards: paints topbar quick-nav pills
+
+// Register service worker for PWA installability (group dashboards only)
+if (<%- JSON.stringify(!!groupSlug) %> && "serviceWorker" in navigator) {
+  navigator.serviceWorker.register("/sw.js").catch(() => {});
+}
 </script>
 <footer style="text-align:center;padding:28px 16px 20px;font-size:12px;color:var(--text-2)">
   <a href="<%- privacyUrl || '/privacy' %>" style="color:var(--text-2);text-decoration:none;margin:0 10px" onmouseover="this.style.color='var(--text-hi)'" onmouseout="this.style.color='var(--text-2)'">Privacy Policy</a>
