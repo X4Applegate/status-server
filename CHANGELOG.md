@@ -4,6 +4,25 @@ All notable changes to this project are documented here.
 
 ---
 
+## [2.4.0] — 2026-04-12
+
+### Added
+- **Mini heartbeat bars on server cards** — last 20 checks shown as colored dots under each card; persists across container restarts by seeding from database
+- **Welcome popup on fresh install** — admin is redirected to `/admin?welcome=1` with a guided onboarding popup to add their first server
+- **Omada gateway WAN IP display** — gateway detail shows the public/WAN IP alongside model and uptime
+
+### Changed
+- **Heartbeat bar reduced to 180 checks** — fits on mobile screens without wrapping (~90 minutes at 30s intervals)
+- **Omada gateway ping uses LAN IP** — WAN IPs often block ICMP; LAN IP is reachable over VPN/local network for accurate response time
+
+### Fixed
+- **Heartbeat not rendering on detail view** — added `requestAnimationFrame` delay so the DOM is painted before chart/heartbeat renders
+- **Mini heartbeat bars reset on container restart** — now seeded from `status_history` table on startup
+- **Omada false down alerts** — reverted WAN IP ping that caused false "unreachable" alerts when routers block ICMP
+- **Removed TLS cert paths** from Caddy setup example in group form
+
+---
+
 ## [2.3.0] — 2026-04-12
 
 ### Added
