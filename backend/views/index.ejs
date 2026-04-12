@@ -947,7 +947,9 @@ function renderDetail(s, uptime, heartbeat, incidents){
   if (chartData.length > 0) requestAnimationFrame(() => drawChart(chartData));
 }
 
-// -- Simple canvas chart (no external libs)
+// -- Simple canvas chart with hover crosshair (no external libs)
+let _chartState = null;
+
 function drawChart(data){
   const canvas = document.getElementById("responseChart");
   if (!canvas) return;
@@ -965,17 +967,34 @@ function drawChart(data){
   const vals = data.map(d => d.response_ms);
   const maxV = Math.max(...vals, 10);
   const minV = 0;
+
+  const xOf = i => PAD.left + (i / (data.length - 1 || 1)) * cW;
+  const yOf = v => PAD.top  + cH * (1 - (v - minV) / (maxV - minV));
+
+  // Save state for hover handler
+  _chartState = { canvas, ctx, dpr, W, H, PAD, cW, cH, data, maxV, minV, xOf, yOf };
+
+  drawChartBase();
+
+  // Wire up hover (idempotent — replace previous handlers)
+  canvas.onmousemove = onChartMove;
+  canvas.onmouseleave = () => { drawChartBase(); hideChartTip(); };
+}
+
+function drawChartBase(){
+  if (!_chartState) return;
+  const { ctx, W, H, PAD, cW, cH, data, maxV, xOf, yOf } = _chartState;
   ctx.clearRect(0, 0, W, H);
 
-  // Grid lines
+  // Grid lines + Y labels
   ctx.strokeStyle = "rgba(30,100,200,0.18)";
   ctx.lineWidth   = 1;
   [0, 0.25, 0.5, 0.75, 1].forEach(f => {
     const y = PAD.top + cH * (1 - f);
     ctx.beginPath(); ctx.moveTo(PAD.left, y); ctx.lineTo(W - PAD.right, y); ctx.stroke();
-    ctx.fillStyle   = "rgba(140,180,210,0.9)";
-    ctx.font        = "10px JetBrains Mono, monospace";
-    ctx.textAlign   = "right";
+    ctx.fillStyle = "rgba(140,180,210,0.9)";
+    ctx.font      = "10px JetBrains Mono, monospace";
+    ctx.textAlign = "right";
     ctx.fillText(Math.round(maxV * f) + "ms", PAD.left - 4, y + 3);
   });
 
@@ -985,11 +1004,7 @@ function drawChart(data){
   grad.addColorStop(1, "rgba(42,127,255,0.02)");
   ctx.fillStyle = grad;
   ctx.beginPath();
-  data.forEach((d, i) => {
-    const x = PAD.left + (i / (data.length - 1 || 1)) * cW;
-    const y = PAD.top  + cH * (1 - (d.response_ms - minV) / (maxV - minV));
-    i === 0 ? ctx.moveTo(x, y) : ctx.lineTo(x, y);
-  });
+  data.forEach((d, i) => { const x = xOf(i), y = yOf(d.response_ms); i === 0 ? ctx.moveTo(x, y) : ctx.lineTo(x, y); });
   ctx.lineTo(PAD.left + cW, PAD.top + cH);
   ctx.lineTo(PAD.left, PAD.top + cH);
   ctx.closePath(); ctx.fill();
@@ -999,22 +1014,70 @@ function drawChart(data){
   ctx.lineWidth   = 2;
   ctx.lineJoin    = "round";
   ctx.beginPath();
-  data.forEach((d, i) => {
-    const x = PAD.left + (i / (data.length - 1 || 1)) * cW;
-    const y = PAD.top  + cH * (1 - (d.response_ms - minV) / (maxV - minV));
-    i === 0 ? ctx.moveTo(x, y) : ctx.lineTo(x, y);
-  });
+  data.forEach((d, i) => { const x = xOf(i), y = yOf(d.response_ms); i === 0 ? ctx.moveTo(x, y) : ctx.lineTo(x, y); });
   ctx.stroke();
 
-  // Dots
-  ctx.fillStyle = "rgba(42,127,255,1)";
+  // Dots (sparse data only)
   if (data.length <= 30) {
-    data.forEach((d, i) => {
-      const x = PAD.left + (i / (data.length - 1 || 1)) * cW;
-      const y = PAD.top  + cH * (1 - (d.response_ms - minV) / (maxV - minV));
-      ctx.beginPath(); ctx.arc(x, y, 3, 0, Math.PI * 2); ctx.fill();
-    });
+    ctx.fillStyle = "rgba(42,127,255,1)";
+    data.forEach((d, i) => { ctx.beginPath(); ctx.arc(xOf(i), yOf(d.response_ms), 3, 0, Math.PI * 2); ctx.fill(); });
   }
+}
+
+function onChartMove(e){
+  if (!_chartState) return;
+  const { canvas, ctx, PAD, cW, cH, data, xOf, yOf } = _chartState;
+  const rect = canvas.getBoundingClientRect();
+  const mx = e.clientX - rect.left;
+  // Find nearest data point by X
+  let nearest = 0, bestDist = Infinity;
+  for (let i = 0; i < data.length; i++) {
+    const d = Math.abs(xOf(i) - mx);
+    if (d < bestDist) { bestDist = d; nearest = i; }
+  }
+  const d = data[nearest];
+  const x = xOf(nearest), y = yOf(d.response_ms);
+
+  // Redraw base, then overlay
+  drawChartBase();
+
+  // Vertical crosshair line
+  ctx.strokeStyle = "rgba(140,180,210,0.4)";
+  ctx.lineWidth = 1;
+  ctx.setLineDash([4, 4]);
+  ctx.beginPath(); ctx.moveTo(x, PAD.top); ctx.lineTo(x, PAD.top + cH); ctx.stroke();
+  ctx.setLineDash([]);
+
+  // Dot
+  ctx.fillStyle = "rgba(60,150,255,1)";
+  ctx.strokeStyle = "#fff";
+  ctx.lineWidth = 2;
+  ctx.beginPath(); ctx.arc(x, y, 5, 0, Math.PI * 2); ctx.fill(); ctx.stroke();
+
+  // Tooltip
+  showChartTip(canvas, e.clientX, rect.top + y, d.response_ms, d.checked_at);
+}
+
+function showChartTip(canvas, clientX, dotClientY, ms, ts){
+  let tip = document.getElementById("chartTip");
+  if (!tip) {
+    tip = document.createElement("div");
+    tip.id = "chartTip";
+    tip.style.cssText = "position:fixed;z-index:9999;background:var(--surface2);border:1px solid var(--border-hi);border-radius:8px;padding:8px 12px;font-size:12px;color:var(--text-hi);pointer-events:none;white-space:nowrap;box-shadow:0 4px 16px rgba(0,0,0,.4);text-align:center";
+    document.body.appendChild(tip);
+  }
+  tip.innerHTML = `<div style="font-size:14px;font-weight:600">${ms}ms</div><div style="font-size:11px;color:var(--text-2);margin-top:2px">${fmtTimeFull(ts)}</div>`;
+  const tw = tip.offsetWidth, th = tip.offsetHeight;
+  let left = clientX - tw/2;
+  if (left < 4) left = 4;
+  if (left + tw > window.innerWidth - 4) left = window.innerWidth - 4 - tw;
+  tip.style.left = left + "px";
+  tip.style.top  = (dotClientY - th - 12) + "px";
+}
+
+function hideChartTip(){
+  const t = document.getElementById("chartTip");
+  if (t) t.remove();
 }
 
 // -- Cache key (per-group so dashboards don't share cache)
