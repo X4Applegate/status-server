@@ -4,6 +4,30 @@ All notable changes to this project are documented here.
 
 ---
 
+## [2.9.0] — 2026-04-12
+
+### Added
+- **Microsoft Teams webhook** — MessageCard format compatible with classic Incoming Webhook connectors; color-coded theme bar, facts table, and "View Dashboard" action button. Auto-detected from `webhook.office.com` URLs.
+- **Telegram webhook** — HTML-formatted bot messages with bold labels, `<pre>` alert details, and a dashboard link. URL format: `https://api.telegram.org/bot{TOKEN}/sendMessage?chat_id={CHAT_ID}`. Auto-detected automatically.
+- **Pushover webhook** — title + HTML message with priority levels: high (1) for down alerts, normal (0) for degraded/test, low (−1) for recovery. Dashboard link attached when available. URL format: `https://api.pushover.net/1/messages.json?token={APP_TOKEN}&user={USER_KEY}`. Auto-detected automatically.
+- **Admin audit log** — new **Audit** tab in the admin panel tracks 17 event types: logins (success + failure), logouts, server create/update/delete, user create/update/delete, group create/update/delete, password changes, and initial admin setup. Filterable by category, paginated, admin-only.
+- **CI via GitHub Actions** — runs on every push and pull request; tests Node 18 and Node 20, `npm audit`, syntax check, and Docker build. Green badge on README.
+- **Dependabot** — weekly npm, Docker base-image, and monthly GitHub Actions pin updates. Patch/minor bumps grouped into one PR to keep noise low.
+- **MariaDB backup script** (`backup.sh`) — timestamped `.sql.gz` dumps via `docker exec mysqldump --single-transaction`. Reads credentials from `.backup.env`, auto-prunes files older than `KEEP_DAYS` (default 7). Cron-ready.
+- **Restore script** (`restore.sh`) — confirms before DROP + recreate, then pipes decompressed dump into the MariaDB container.
+- **`SECURITY.md`** — responsible disclosure policy, 48h ack / 7-day fix-goal for critical issues, scope, and a summary of existing security controls. Surfaced automatically by GitHub's Security tab.
+
+### Changed
+- **Webhook `postWebhook`** migrated from raw `http/https` callbacks to native `fetch` + `AbortSignal.timeout(8000)` — properly aborts the full request on timeout, not just the socket.
+- **Webhook format dropdown** updated: auto-detect label now mentions Teams, Telegram, and Pushover; each format shows its own URL placeholder in the form.
+- **`buildWebhookPayload`** — removed a dead `lines` variable that was defined but never used.
+- **DB ENUM** for webhook format extended to include `teams`, `telegram`, `pushover` (upgrade-safe migration).
+
+### Security
+- **Removed unauthenticated `/api/debug/raw-status` endpoint** — exposed full live server status (hosts, response times, cert data) to any caller without authentication.
+
+---
+
 ## [2.8.0] — 2026-04-12
 
 ### Added
