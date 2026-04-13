@@ -1,0 +1,41 @@
+version: 2
+updates:
+  # npm dependencies — group patch/minor bumps into one weekly PR so the
+  # inbox stays readable. Major bumps still open individually so they can
+  # be reviewed carefully (they sometimes have breaking changes).
+  - package-ecosystem: npm
+    directory: /backend
+    schedule:
+      interval: weekly
+      day: monday
+      time: "06:00"
+      timezone: America/Los_Angeles
+    open-pull-requests-limit: 5
+    groups:
+      npm-minor-and-patch:
+        patterns: ["*"]
+        update-types: ["patch", "minor"]
+    commit-message:
+      prefix: deps
+      include: scope
+
+  # Docker base image updates — keeps node:20-alpine fresh with security fixes.
+  - package-ecosystem: docker
+    directory: /backend
+    schedule:
+      interval: weekly
+      day: monday
+      time: "06:00"
+      timezone: America/Los_Angeles
+    commit-message:
+      prefix: docker
+      include: scope
+
+  # GitHub Actions pin freshness — keeps the CI workflow itself secure.
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: monthly
+    commit-message:
+      prefix: ci
+      include: scope

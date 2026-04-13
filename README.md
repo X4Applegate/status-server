@@ -1,6 +1,13 @@
 # Applegate Monitor
 
+[![CI](https://github.com/X4Applegate/status-server/actions/workflows/ci.yml/badge.svg)](https://github.com/X4Applegate/status-server/actions/workflows/ci.yml)
+[![Release](https://img.shields.io/github/v/release/X4Applegate/status-server?color=39d98a)](https://github.com/X4Applegate/status-server/releases)
+[![Node](https://img.shields.io/badge/node-%E2%89%A518-green)](https://nodejs.org)
+[![License](https://img.shields.io/badge/license-source--available-blue)](./LICENSE)
+
 A self-hosted, multi-tenant server and network status monitoring platform built with Node.js, Express, and MariaDB. Designed for operators who need separate branded dashboards for different teams or clients — each with their own login, branding, and server visibility — from a single deployment.
+
+🌐 **Live demo:** [uptime.richardapplegate.io](https://uptime.richardapplegate.io) · 📄 **Landing page:** [applegatemonitor.richardapplegate.io](https://applegatemonitor.richardapplegate.io)
 
 ---
 
