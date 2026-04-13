@@ -164,6 +164,9 @@ body::before{content:'';position:fixed;inset:0;pointer-events:none;background:ra
 .srv-badge.down    {color:var(--red);background:var(--red-soft)}
 .srv-badge.degraded{color:var(--orange);background:var(--orange-soft)}
 .srv-badge.pending {color:var(--text-2);background:var(--surface2)}
+.srv-cert-days{font-size:10px;font-weight:500;color:var(--text-2);letter-spacing:.02em;flex-shrink:0;white-space:nowrap}
+.srv-cert-days.warn{color:var(--orange)}
+.srv-cert-days.expired{color:var(--red)}
 
 /* -- MAIN AREA (detail view — hidden until a server is selected) -- */
 .main{width:100%;height:100%;overflow-y:auto;padding:28px 32px;display:none}
@@ -655,6 +658,11 @@ function renderSidebar(){
     const dots = [...Array(pad).fill(null).map(() => `<div class="srv-hb-dot pending"></div>`),
       ...hb.map(ok => `<div class="srv-hb-dot ${ok ? "up" : "down"}"></div>`)
     ].join("");
+    const certChk = (s.checks || []).find(c => c.cert && typeof c.cert.days_left === 'number');
+    const certDays = certChk ? certChk.cert.days_left : null;
+    const certHtml = certDays !== null
+      ? `<span class="srv-cert-days ${certDays < 0 ? 'expired' : certDays < 14 ? 'warn' : ''}">🔒 ${certDays}d</span>`
+      : "";
     return `
     <div class="srv-row ${s.id===selectedId?"active":""}" onclick="selectServer('${s.id}')">
       <div style="display:flex;align-items:center;gap:12px;width:100%">
@@ -663,6 +671,7 @@ function renderSidebar(){
           <div class="srv-name">${s.name}</div>
           ${sidebarSession.loggedIn ? `<div class="srv-host">${s.host}</div>` : ""}
         </div>
+        ${certHtml}
         <div class="srv-badge ${s.overall||'pending'}">${(s.overall||"pending").toUpperCase()}</div>
       </div>
       <div class="srv-hb-bar">${dots}</div>
