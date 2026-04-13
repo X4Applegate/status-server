@@ -593,9 +593,9 @@ async function initDB() {
   try {
     await db.query("ALTER TABLE status_webhooks ADD COLUMN group_id INT DEFAULT NULL");
   } catch(e) { /* column already exists */ }
-  // Upgrade-safe: add 'email' to format enum for existing installs
+  // Upgrade-safe: extend format enum as new integrations are added
   try {
-    await db.query("ALTER TABLE status_webhooks MODIFY COLUMN format ENUM('auto','generic','discord','slack','email') NOT NULL DEFAULT 'auto'");
+    await db.query("ALTER TABLE status_webhooks MODIFY COLUMN format ENUM('auto','generic','discord','slack','email','teams') NOT NULL DEFAULT 'auto'");
   } catch(e) { /* already updated */ }
 
   // Settings table — key-value store for app-wide config (SMTP, etc.)
@@ -1440,16 +1440,6 @@ function buildWebhookPayload(format, evt) {
     return { embeds: [embed] };
   }
 
-  // Slack + generic use simpler text format
-  const lines = [
-    `**Server:** ${evt.server}`,
-    `**Host:** ${evt.host}`,
-    `**Status:** ${statusEmoji} ${statusLabel}`,
-    evt.cause ? `**Cause:** ${evt.cause}` : null,
-    `**Time:** ${displayTime}`,
-    evt.dashboardUrl ? `**Dashboard:** ${evt.dashboardUrl}` : null
-  ].filter(Boolean).join("\n");
-
   if (format === "slack") {
     const color = evt.isTest ? "#5865f2" : evt.isRecovery ? "#10e88a" : (evt.status === "down" ? "#ff3d5a" : "#ff8c2a");
     // Build check details for the alert details block
@@ -1522,6 +1512,49 @@ function buildWebhookPayload(format, evt) {
     const text = `${emoji} ${evt.server} ${verb}\n\nService: ${evt.server}\nStatus: ${statusLabel}\nTarget: ${evt.host}\nTime: ${displayTime}\n${checkDetails || evt.cause ? "\nAlert Details:\n" + (checkDetails || evt.cause) : ""}${evt.dashboardUrl ? "\n\nDashboard: " + evt.dashboardUrl : ""}`;
     return { _email: true, subject, html, text };
   }
+
+  if (format === "teams") {
+    // Microsoft Teams Incoming Webhook — legacy MessageCard format.
+    // Works with the classic "Incoming Webhook" connector on any Teams channel.
+    // For Adaptive Cards via Power Automate, use Generic JSON + build your own flow.
+    const themeColor = evt.isTest ? "5865F2" : evt.isRecovery ? "10E88A" : (evt.status === "down" ? "FF3D5A" : "FF8C2A");
+    const checkDetails = Array.isArray(evt.checks) && evt.checks.length
+      ? evt.checks.filter(c => !c.ok || evt.isRecovery || evt.isTest).map(c => {
+          const label = c.type === "ping" ? "PING" : c.type === "tcp" ? `TCP :${c.port}` : c.type === "udp" ? `UDP :${c.port}` : c.type.toUpperCase();
+          return `${c.ok ? "✅" : "❌"} ${label}: ${c.detail}`;
+        }).join("\n\n")
+      : null;
+    const facts = [
+      { name: "Service",  value: evt.server },
+      { name: "Status",   value: `${statusEmoji} ${statusLabel}` },
+      { name: "Target",   value: evt.host },
+      { name: "Time",     value: displayTime }
+    ];
+    if (checkDetails || evt.cause) {
+      facts.push({ name: "Alert Details", value: checkDetails || evt.cause });
+    }
+    const card = {
+      "@type":       "MessageCard",
+      "@context":    "http://schema.org/extensions",
+      themeColor,
+      summary:       `${statusEmoji} ${evt.server} ${verb}`,
+      sections: [{
+        activityTitle:    `${emoji} Service ${verb}`,
+        activitySubtitle: evt.webhookName ? `Applegate Monitor · ${evt.webhookName}` : "Applegate Monitor",
+        facts,
+        markdown: true
+      }]
+    };
+    if (evt.dashboardUrl) {
+      card.potentialAction = [{
+        "@type": "OpenUri",
+        name:    "View Dashboard",
+        targets: [{ os: "default", uri: evt.dashboardUrl }]
+      }];
+    }
+    return card;
+  }
+
   // generic
   return {
     event: evt.isTest ? "webhook.test" : evt.isRecovery ? "server.recovered" : "server.down",
@@ -1539,39 +1572,27 @@ function detectFormat(url) {
   if (/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(url)) return "email";
   if (/discord(app)?\.com\/api\/webhooks/i.test(url)) return "discord";
   if (/hooks\.slack\.com/i.test(url)) return "slack";
+  if (/webhook\.office\.com|outlook\.office\.com\/webhook/i.test(url)) return "teams";
   return "generic";
 }
 
-function postWebhook(url, body) {
-  return new Promise((resolve, reject) => {
-    let parsed;
-    try { parsed = new URL(url); } catch(e) { return reject(new Error("Invalid URL")); }
-    const lib = parsed.protocol === "https:" ? https : http;
-    const data = Buffer.from(JSON.stringify(body));
-    const req = lib.request({
-      method: "POST",
-      hostname: parsed.hostname,
-      port: parsed.port || (parsed.protocol === "https:" ? 443 : 80),
-      path: parsed.pathname + parsed.search,
-      headers: {
-        "Content-Type": "application/json",
-        "Content-Length": data.length,
-        "User-Agent": "status-monitor-webhook/1.0"
-      },
-      timeout: 8000
-    }, res => {
-      let chunks = "";
-      res.on("data", c => { if (chunks.length < 500) chunks += c.toString(); });
-      res.on("end", () => {
-        if (res.statusCode >= 200 && res.statusCode < 300) resolve({ status: res.statusCode });
-        else reject(new Error(`HTTP ${res.statusCode}${chunks ? ": " + chunks.slice(0, 200) : ""}`));
-      });
-    });
-    req.on("error",   e => reject(e));
-    req.on("timeout", () => { req.destroy(); reject(new Error("timeout")); });
-    req.write(data);
-    req.end();
+async function postWebhook(url, body) {
+  // Validate the URL before attempting a network call
+  try { new URL(url); } catch(e) { throw new Error("Invalid webhook URL"); }
+  const r = await fetch(url, {
+    method:  "POST",
+    headers: {
+      "Content-Type": "application/json",
+      "User-Agent":   "applegate-monitor-webhook/1.0"
+    },
+    body:   JSON.stringify(body),
+    signal: AbortSignal.timeout(8000)
   });
+  if (!r.ok) {
+    const text = await r.text().catch(() => "");
+    throw new Error(`HTTP ${r.status}${text ? ": " + text.slice(0, 200) : ""}`);
+  }
+  return { status: r.status };
 }
 
 async function sendEmailAlert(to, payload) {

@@ -703,9 +703,10 @@ body{font-family:var(--sans);background:var(--bg);color:var(--text);min-height:1
           <div class="fg full"><label class="flabel">Name *</label><input class="finput" id="wName" placeholder="e.g. Discord Alerts"></div>
           <div class="fg full"><label class="flabel" id="wUrlLabel">URL *</label><input class="finput" id="wUrl" placeholder="https://discord.com/api/webhooks/..."></div>
           <div class="fg full"><label class="flabel">Format</label><select class="fselect" id="wFormat" onchange="updateWebhookUrlHint()">
-            <option value="auto">Auto-detect (Discord / Slack / Email)</option>
+            <option value="auto">Auto-detect (Discord / Slack / Teams / Email)</option>
             <option value="discord">Discord</option>
             <option value="slack">Slack</option>
+            <option value="teams">Microsoft Teams</option>
             <option value="email">Email</option>
             <option value="generic">Generic JSON</option>
           </select></div>
@@ -2291,15 +2292,22 @@ function updateWebhookUrlHint(){
   const fmt = document.getElementById("wFormat").value;
   const label = document.getElementById("wUrlLabel");
   const input = document.getElementById("wUrl");
+  const placeholders = {
+    discord: "https://discord.com/api/webhooks/...",
+    slack:   "https://hooks.slack.com/services/...",
+    teams:   "https://xxxx.webhook.office.com/webhookb2/...",
+    email:   "alerts@example.com",
+    generic: "https://your-endpoint.example.com/webhook",
+    auto:    "https://discord.com/api/webhooks/..."
+  };
   if (fmt === "email") {
     label.textContent = "Email Address *";
-    input.placeholder = "alerts@example.com";
     input.type = "email";
   } else {
     label.textContent = "URL *";
-    input.placeholder = "https://discord.com/api/webhooks/...";
     input.type = "text";
   }
+  input.placeholder = placeholders[fmt] || placeholders.auto;
 }
 async function showWebhookForm(h){
   document.getElementById("aListView").style.display        = "none";
