@@ -703,10 +703,12 @@ body{font-family:var(--sans);background:var(--bg);color:var(--text);min-height:1
           <div class="fg full"><label class="flabel">Name *</label><input class="finput" id="wName" placeholder="e.g. Discord Alerts"></div>
           <div class="fg full"><label class="flabel" id="wUrlLabel">URL *</label><input class="finput" id="wUrl" placeholder="https://discord.com/api/webhooks/..."></div>
           <div class="fg full"><label class="flabel">Format</label><select class="fselect" id="wFormat" onchange="updateWebhookUrlHint()">
-            <option value="auto">Auto-detect (Discord / Slack / Teams / Email)</option>
+            <option value="auto">Auto-detect (Discord / Slack / Teams / Telegram / Pushover / Email)</option>
             <option value="discord">Discord</option>
             <option value="slack">Slack</option>
             <option value="teams">Microsoft Teams</option>
+            <option value="telegram">Telegram</option>
+            <option value="pushover">Pushover</option>
             <option value="email">Email</option>
             <option value="generic">Generic JSON</option>
           </select></div>
@@ -2293,12 +2295,14 @@ function updateWebhookUrlHint(){
   const label = document.getElementById("wUrlLabel");
   const input = document.getElementById("wUrl");
   const placeholders = {
-    discord: "https://discord.com/api/webhooks/...",
-    slack:   "https://hooks.slack.com/services/...",
-    teams:   "https://xxxx.webhook.office.com/webhookb2/...",
-    email:   "alerts@example.com",
-    generic: "https://your-endpoint.example.com/webhook",
-    auto:    "https://discord.com/api/webhooks/..."
+    discord:  "https://discord.com/api/webhooks/...",
+    slack:    "https://hooks.slack.com/services/...",
+    teams:    "https://xxxx.webhook.office.com/webhookb2/...",
+    telegram: "https://api.telegram.org/bot{TOKEN}/sendMessage?chat_id={CHAT_ID}",
+    pushover: "https://api.pushover.net/1/messages.json?token={APP_TOKEN}&user={USER_KEY}",
+    email:    "alerts@example.com",
+    generic:  "https://your-endpoint.example.com/webhook",
+    auto:     "https://discord.com/api/webhooks/..."
   };
   if (fmt === "email") {
     label.textContent = "Email Address *";

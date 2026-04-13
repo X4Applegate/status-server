@@ -595,7 +595,7 @@ async function initDB() {
   } catch(e) { /* column already exists */ }
   // Upgrade-safe: extend format enum as new integrations are added
   try {
-    await db.query("ALTER TABLE status_webhooks MODIFY COLUMN format ENUM('auto','generic','discord','slack','email','teams') NOT NULL DEFAULT 'auto'");
+    await db.query("ALTER TABLE status_webhooks MODIFY COLUMN format ENUM('auto','generic','discord','slack','email','teams','telegram','pushover') NOT NULL DEFAULT 'auto'");
   } catch(e) { /* already updated */ }
 
   // Settings table — key-value store for app-wide config (SMTP, etc.)
@@ -1555,6 +1555,84 @@ function buildWebhookPayload(format, evt) {
     return card;
   }
 
+  if (format === "telegram") {
+    // Telegram Bot API — sendMessage endpoint.
+    // Store the webhook URL as:
+    //   https://api.telegram.org/bot{TOKEN}/sendMessage?chat_id={CHAT_ID}
+    // The chat_id is extracted from the query string and included in the body.
+    let chatId = "";
+    try { chatId = new URL(evt.hookUrl || "").searchParams.get("chat_id") || ""; } catch(_) {}
+    const checkDetails = Array.isArray(evt.checks) && evt.checks.length
+      ? evt.checks.filter(c => !c.ok || evt.isRecovery || evt.isTest).map(c => {
+          const label = c.type === "ping" ? "PING" : c.type === "tcp" ? `TCP :${c.port}` : c.type === "udp" ? `UDP :${c.port}` : c.type.toUpperCase();
+          return `${c.ok ? "✅" : "❌"} ${label}: ${c.detail}`;
+        }).join("\n")
+      : null;
+    const lines = [
+      `${emoji} <b>Service ${verb}</b>`,
+      "",
+      `<b>Service:</b> ${evt.server}`,
+      `<b>Host:</b> ${evt.host}`,
+      `<b>Status:</b> ${statusEmoji} ${statusLabel}`,
+      `<b>Time:</b> ${displayTime}`
+    ];
+    if (checkDetails || evt.cause) {
+      lines.push("", `⚠️ <b>Alert Details</b>`, `<pre>${checkDetails || evt.cause}</pre>`);
+    }
+    if (evt.dashboardUrl) {
+      lines.push("", `📊 <a href="${evt.dashboardUrl}">View Dashboard</a>`);
+    }
+    if (evt.webhookName) lines.push(`\n<i>— ${evt.webhookName}</i>`);
+    return {
+      chat_id:                  chatId,
+      text:                     lines.join("\n"),
+      parse_mode:               "HTML",
+      disable_web_page_preview: true
+    };
+  }
+
+  if (format === "pushover") {
+    // Pushover — https://pushover.net/api
+    // Store the webhook URL as:
+    //   https://api.pushover.net/1/messages.json?token={APP_TOKEN}&user={USER_KEY}
+    // token and user are extracted from query params and included in the POST body.
+    let pushToken = "", pushUser = "";
+    try {
+      const u = new URL(evt.hookUrl || "");
+      pushToken = u.searchParams.get("token") || "";
+      pushUser  = u.searchParams.get("user")  || "";
+    } catch(_) {}
+    const checkDetails = Array.isArray(evt.checks) && evt.checks.length
+      ? evt.checks.filter(c => !c.ok || evt.isRecovery || evt.isTest).map(c => {
+          const label = c.type === "ping" ? "PING" : c.type === "tcp" ? `TCP :${c.port}` : c.type === "udp" ? `UDP :${c.port}` : c.type.toUpperCase();
+          return `${c.ok ? "✅" : "❌"} ${label}: ${c.detail}`;
+        }).join("\n")
+      : null;
+    // Priority: high (1) for down, normal (0) for degraded/test, low (-1) for recovery
+    const priority = evt.isRecovery ? -1 : (evt.status === "down" && !evt.isTest) ? 1 : 0;
+    const msgLines = [
+      `<b>Host:</b> ${evt.host}`,
+      `<b>Status:</b> ${statusEmoji} ${statusLabel}`,
+      `<b>Time:</b> ${displayTime}`
+    ];
+    if (checkDetails || evt.cause) {
+      msgLines.push(`\n⚠️ <b>Alert Details</b>\n${checkDetails || evt.cause}`);
+    }
+    const payload = {
+      token:    pushToken,
+      user:     pushUser,
+      title:    `${emoji} ${evt.server} ${verb}`,
+      message:  msgLines.join("\n"),
+      priority,
+      html:     1
+    };
+    if (evt.dashboardUrl) {
+      payload.url       = evt.dashboardUrl;
+      payload.url_title = "View Dashboard";
+    }
+    return payload;
+  }
+
   // generic
   return {
     event: evt.isTest ? "webhook.test" : evt.isRecovery ? "server.recovered" : "server.down",
@@ -1573,6 +1651,8 @@ function detectFormat(url) {
   if (/discord(app)?\.com\/api\/webhooks/i.test(url)) return "discord";
   if (/hooks\.slack\.com/i.test(url)) return "slack";
   if (/webhook\.office\.com|outlook\.office\.com\/webhook/i.test(url)) return "teams";
+  if (/api\.telegram\.org\/bot/i.test(url)) return "telegram";
+  if (/api\.pushover\.net/i.test(url)) return "pushover";
   return "generic";
 }
 
@@ -1658,7 +1738,7 @@ async function fireWebhooks(evt) {
       }
     }
     const fmt  = h.format === "auto" ? detectFormat(h.url) : h.format;
-    const body = buildWebhookPayload(fmt, { ...evt, dashboardUrl: hookDashboardUrl, webhookName: h.name });
+    const body = buildWebhookPayload(fmt, { ...evt, dashboardUrl: hookDashboardUrl, webhookName: h.name, hookUrl: h.url });
     // Fire-and-forget with one retry
     (async () => {
       try {
