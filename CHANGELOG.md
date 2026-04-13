@@ -4,6 +4,20 @@ All notable changes to this project are documented here.
 
 ---
 
+## [2.8.0] — 2026-04-12
+
+### Added
+- **Persistent sessions** — sessions are now stored in MariaDB (`sessions` table auto-created on first boot). Container restarts and redeploys no longer log users out. Uses a dedicated small pool (2 connections) separate from the main monitoring pool.
+- **Structured logging (pino)** — all app logs are now structured JSON in production, making them trivially ingestible by Loki, Grafana, Datadog, or any log aggregator. In development, pino-pretty outputs colorised human-readable lines automatically. Log level is overridable via `LOG_LEVEL` env var.
+- **HTTP request logging (pino-http)** — every request is logged with method, path, status code, and latency. Noisy endpoints (`/healthz`, SSE streams, badge fetches) are filtered out automatically.
+
+### Changed
+- **Dropped `node-fetch`** — the app now uses Node's built-in `fetch` (available since Node 18) for all outbound HTTP: Cloudflare Turnstile verification, GitHub release checks, and all Omada Open API calls.
+- **Omada TLS** — custom TLS handling for self-signed Omada controller certificates migrated from node-fetch's `agent:` option to native `fetch` with an undici `Agent` dispatcher (built into Node 18+). No functional change; one fewer third-party dependency.
+- **Timeouts** — all outbound fetch calls now use `AbortSignal.timeout(8000)` (native Node 17.3+) instead of the deprecated node-fetch `timeout` option.
+
+---
+
 ## [2.7.0] — 2026-04-12
 
 ### Added
