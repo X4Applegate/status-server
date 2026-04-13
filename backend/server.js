@@ -1971,12 +1971,6 @@ app.post("/api/refresh", async (req, res) => {
   res.json({ ok:true });
 });
 
-// Temporary debug endpoint — dumps raw serverStatus so we can see if cert info
-// is being stored correctly. Remove after debugging.
-app.get("/api/debug/raw-status", (req, res) => {
-  res.json(serverStatus);
-});
-
 // Audit log — admin-only, paginated, filterable by action prefix
 app.get("/api/audit-log", requireAdmin, async (req, res) => {
   try {
