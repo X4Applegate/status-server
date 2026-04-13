@@ -13,6 +13,7 @@ const helmet       = require("helmet");
 const rateLimit    = require("express-rate-limit");
 const pino         = require("pino");
 const pinoHttp     = require("pino-http");
+const { Agent: UndiciAgent } = require("undici"); // for Omada TLS dispatcher
 
 const app  = express();
 
@@ -197,7 +198,6 @@ async function verifyTurnstile(token, remoteIp) {
   if (!turnstileConfig.secret_key) return { ok: false, error: "Turnstile is enabled but not configured" };
   if (!token) return { ok: false, error: "Captcha verification required" };
   try {
-    const fetch = require("node-fetch");
     const params = new URLSearchParams();
     params.append("secret", turnstileConfig.secret_key);
     params.append("response", token);
@@ -205,8 +205,8 @@ async function verifyTurnstile(token, remoteIp) {
     const r = await fetch("https://challenges.cloudflare.com/turnstile/v0/siteverify", {
       method: "POST",
       headers: { "Content-Type": "application/x-www-form-urlencoded" },
-      body: params.toString(),
-      timeout: 8000
+      body:   params.toString(),
+      signal: AbortSignal.timeout(8000)
     });
     const data = await r.json();
     if (data.success) return { ok: true };
@@ -255,10 +255,29 @@ app.use("/api", (req, res, next) => {
   res.setHeader("Cache-Control", "no-store");
   next();
 });
+// Persist sessions in MariaDB so restarts/redeploys don't log everyone out.
+// Creates a `sessions` table automatically on first connect (createDatabaseTable: true).
+// Uses its own small connection (connectionLimit: 2) separate from the main pool
+// so session reads/writes never queue behind heavy monitoring queries.
+const MySQLStore  = require("express-mysql-session")(session);
+const sessionStore = new MySQLStore({
+  host:                    DB_HOST,
+  port:                    DB_PORT,
+  user:                    DB_USER,
+  password:                DB_PASS,
+  database:                DB_NAME,
+  clearExpired:            true,
+  checkExpirationInterval: 15 * 60 * 1000,  // prune expired rows every 15 min
+  expiration:              24 * 60 * 60 * 1000, // match cookie maxAge
+  createDatabaseTable:     true,
+  connectionLimit:         2,
+  endConnectionOnClose:    true
+});
 app.use(session({
   secret: SESSION_SECRET,
   resave: false,
   saveUninitialized: false,
+  store: sessionStore,
   cookie: {
     secure:   "auto",       // Secure flag set automatically when req is HTTPS (via X-Forwarded-Proto)
     httpOnly: true,
@@ -882,17 +901,18 @@ function dnsCheck(hostname, recordType = "A", expected = "", timeout = 5000) {
 }
 
 // -- Omada Open API client -----------------------------------------------------
-const fetch = require("node-fetch");
 const omadaTokens = {}; // { controllerId: { accessToken, expiresAt } }
 
-function omadaAgent(verifyTls) {
-  return verifyTls ? undefined : new https.Agent({ rejectUnauthorized: false });
+// Returns an undici dispatcher that skips TLS verification for self-signed
+// Omada controller certs, or undefined (default dispatcher = verify TLS).
+function omadaDispatcher(verifyTls) {
+  return verifyTls ? undefined : new UndiciAgent({ connect: { rejectUnauthorized: false } });
 }
 
 // Hit /api/info on a controller to discover its omadacId. No auth required.
 async function omadaGetInfo(baseUrl, verifyTls) {
   const url = `${baseUrl.replace(/\/$/, "")}/api/info`;
-  const r = await fetch(url, { agent: omadaAgent(verifyTls), timeout: 8000 });
+  const r = await fetch(url, { dispatcher: omadaDispatcher(verifyTls), signal: AbortSignal.timeout(8000) });
   if (!r.ok) throw new Error(`/api/info HTTP ${r.status}`);
   const data = await r.json();
   if (data.errorCode !== 0) throw new Error(data.msg || "info error");
@@ -913,7 +933,7 @@ async function omadaGetToken(controller) {
   const r = await fetch(url, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body, agent: omadaAgent(controller.verify_tls), timeout: 8000
+    body, dispatcher: omadaDispatcher(controller.verify_tls), signal: AbortSignal.timeout(8000)
   });
   if (!r.ok) throw new Error(`token HTTP ${r.status}`);
   const data = await r.json();
@@ -930,9 +950,9 @@ async function omadaApiGet(controller, path) {
   const token = await omadaGetToken(controller);
   const url   = `${controller.base_url.replace(/\/$/, "")}/openapi/v1/${controller.omadac_id}${path}`;
   const r = await fetch(url, {
-    headers: { Authorization: `AccessToken=${token}` },
-    agent:   omadaAgent(controller.verify_tls),
-    timeout: 8000
+    headers:    { Authorization: `AccessToken=${token}` },
+    dispatcher: omadaDispatcher(controller.verify_tls),
+    signal:     AbortSignal.timeout(8000)
   });
   if (!r.ok) throw new Error(`${path} HTTP ${r.status}`);
   const data = await r.json();
@@ -948,9 +968,9 @@ async function omadaMspApiGet(controller, path) {
   const mspId = controller.omadac_id;
   const url   = `${controller.base_url.replace(/\/$/, "")}/openapi/v1/msp/${mspId}${path}`;
   const r = await fetch(url, {
-    headers: { Authorization: `AccessToken=${token}` },
-    agent:   omadaAgent(controller.verify_tls),
-    timeout: 8000
+    headers:    { Authorization: `AccessToken=${token}` },
+    dispatcher: omadaDispatcher(controller.verify_tls),
+    signal:     AbortSignal.timeout(8000)
   });
   if (!r.ok) throw new Error(`MSP ${path} HTTP ${r.status}`);
   const data = await r.json();
@@ -1780,10 +1800,9 @@ async function fetchLatestVersion() {
     return _versionCache.latest;
   }
   try {
-    const fetch = require("node-fetch");
     const res = await fetch(`https://api.github.com/repos/${GITHUB_REPO}/releases/latest`, {
       headers: { "User-Agent": "applegate-monitor-version-check" },
-      timeout: 8000
+      signal:  AbortSignal.timeout(8000)
     });
     if (!res.ok) return _versionCache.latest;
     const data = await res.json();
