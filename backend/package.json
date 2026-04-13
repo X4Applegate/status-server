@@ -18,6 +18,9 @@
     "helmet": "^8.1.0",
     "mysql2": "^3.6.0",
     "node-fetch": "^2.7.0",
-    "nodemailer": "^8.0.5"
+    "nodemailer": "^8.0.5",
+    "pino": "^10.3.1",
+    "pino-http": "^11.0.0",
+    "pino-pretty": "^13.1.3"
   }
 }

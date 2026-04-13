@@ -11,12 +11,51 @@ const session      = require("express-session");
 const nodemailer   = require("nodemailer");
 const helmet       = require("helmet");
 const rateLimit    = require("express-rate-limit");
+const pino         = require("pino");
+const pinoHttp     = require("pino-http");
 
 const app  = express();
+
+// -- Structured logger (pino) ------------------------------------------------
+// JSON logs in production (easy to ship to Loki / Datadog / CloudWatch),
+// colorised pretty-printed lines in development. LOG_LEVEL env overrides.
+const logger = pino(
+  process.env.NODE_ENV === "production"
+    ? { level: process.env.LOG_LEVEL || "info" }
+    : {
+        level: process.env.LOG_LEVEL || "info",
+        transport: {
+          target: "pino-pretty",
+          options: { colorize: true, translateTime: "SYS:HH:MM:ss", ignore: "pid,hostname" }
+        }
+      }
+);
 
 // Trust the first reverse-proxy hop (Caddy/nginx). Required for correct
 // req.ip (rate limiting) and req.secure (HTTPS-aware session cookies).
 app.set("trust proxy", 1);
+
+// HTTP request logging. Noisy health/SSE endpoints are skipped so logs
+// stay useful; everything else gets method, path, status, latency.
+app.use(pinoHttp({
+  logger,
+  autoLogging: {
+    ignore: (req) =>
+      req.url === "/healthz" ||
+      req.url === "/api/events" ||
+      req.url === "/api/log-events" ||
+      req.url.startsWith("/api/badge/")
+  },
+  customLogLevel: (req, res, err) => {
+    if (err || res.statusCode >= 500) return "error";
+    if (res.statusCode >= 400) return "warn";
+    return "info";
+  },
+  serializers: {
+    req: (req) => ({ method: req.method, url: req.url, ip: req.remoteAddress }),
+    res: (res) => ({ status: res.statusCode })
+  }
+}));
 
 // Security headers. CSP is disabled intentionally: the EJS templates rely
 // on inline scripts/styles that would break without a major refactor. All
@@ -181,10 +220,10 @@ async function verifyTurnstile(token, remoteIp) {
 // Catch any unhandled promise rejection or exception so one bug can't kill the poll
 // loop. We log and keep running — much better UX than a crash-restart loop.
 process.on("unhandledRejection", (reason) => {
-  console.error("[unhandledRejection]", reason && reason.stack || reason);
+  logger.error({ err: reason }, "unhandledRejection");
 });
 process.on("uncaughtException", (err) => {
-  console.error("[uncaughtException]", err && err.stack || err);
+  logger.error({ err }, "uncaughtException");
 });
 
 // -- State ---------------------------------------------------------------------
@@ -266,7 +305,10 @@ function requireAdmin(req, res, next) {
   res.status(401).json({ error: "Unauthorized" });
 }
 
-// -- Logger --------------------------------------------------------------------
+// -- Event log ---------------------------------------------------------------
+// Dual-purpose: drives the admin UI live log stream (in-memory ring buffer +
+// SSE fanout) and also emits structured JSON via pino for container logs /
+// log aggregators.
 function addLog(entry) {
   const record = { id: Date.now() + Math.random(), ts: new Date().toISOString(), ...entry };
   eventLog.push(record);
@@ -274,8 +316,8 @@ function addLog(entry) {
   const payload = JSON.stringify(record);
   logClients = logClients.filter(r => !r.writableEnded);
   logClients.forEach(r => r.write(`data: ${payload}\n\n`));
-  const icon = entry.level === "error" ? "x" : entry.level === "warn" ? "!" : "+";
-  console.log(`[${entry.level||"info"}] ${icon} ${entry.server||""} - ${entry.message}`);
+  const level = entry.level === "error" ? "error" : entry.level === "warn" ? "warn" : "info";
+  logger[level]({ server: entry.server || undefined }, entry.message);
 }
 
 // -- Database setup ------------------------------------------------------------
@@ -754,7 +796,7 @@ function httpCheck(url, expectedStatus=200, timeout=5000, showCert=true) {
               result.detail = `HTTP ${res.statusCode} · SSL expires in ${days}d`;
             }
           }
-        } catch(e) { console.log("[httpCheck cert error]", url, e.message); }
+        } catch(e) { logger.warn({ url, err: e.message }, "httpCheck cert parse error"); }
       }
       resolve(result);
       res.resume();
@@ -3265,7 +3307,7 @@ app.use((err, req, res, next) => {
       dbClose.finally(() => process.exit(0));
     });
     setTimeout(() => {
-      console.error("Shutdown timeout reached — forcing exit");
+      logger.error("Shutdown timeout reached — forcing exit");
       process.exit(1);
     }, 10_000).unref();
   }
