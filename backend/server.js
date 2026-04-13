@@ -339,6 +339,25 @@ function addLog(entry) {
   logger[level]({ server: entry.server || undefined }, entry.message);
 }
 
+// -- Audit log -----------------------------------------------------------------
+// Fire-and-forget structured record of significant user actions. Never throws
+// — if the DB write fails we log a warning but don't interrupt the request.
+async function addAuditLog({ userId, username, action, resourceType, resourceId, resourceName, detail, ip }) {
+  try {
+    if (!db) return;
+    await db.query(
+      `INSERT INTO status_audit_log
+         (user_id, username, action, resource_type, resource_id, resource_name, detail, ip)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+      [userId || null, username || null, action,
+       resourceType || null, resourceId != null ? String(resourceId) : null,
+       resourceName || null, detail || null, ip || null]
+    );
+  } catch(e) {
+    logger.warn({ err: e.message }, "audit log write failed");
+  }
+}
+
 // -- Database setup ------------------------------------------------------------
 async function initDB() {
   // Retry loop � MariaDB may not be ready immediately on first boot
@@ -585,6 +604,24 @@ async function initDB() {
       key_name   VARCHAR(64) PRIMARY KEY,
       value      TEXT,
       updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+    )
+  `);
+
+  await db.query(`
+    CREATE TABLE IF NOT EXISTS status_audit_log (
+      id           BIGINT AUTO_INCREMENT PRIMARY KEY,
+      ts           DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
+      user_id      INT,
+      username     VARCHAR(128),
+      action       VARCHAR(64)  NOT NULL,
+      resource_type VARCHAR(64),
+      resource_id  VARCHAR(128),
+      resource_name VARCHAR(255),
+      detail       TEXT,
+      ip           VARCHAR(64),
+      INDEX idx_audit_ts     (ts),
+      INDEX idx_audit_user   (user_id),
+      INDEX idx_audit_action (action)
     )
   `);
 
@@ -1739,13 +1776,20 @@ app.post("/api/login", loginLimiter, async (req, res) => {
       }
     }
     const [rows] = await db.query("SELECT * FROM status_users WHERE username = ?", [username]);
-    if (!rows.length) return res.status(401).json({ error:"Invalid credentials" });
+    if (!rows.length) {
+      addAuditLog({ action:"login.failed", username, detail:"user not found", ip: req.ip });
+      return res.status(401).json({ error:"Invalid credentials" });
+    }
     const valid = await bcrypt.compare(password, rows[0].password_hash);
-    if (!valid) return res.status(401).json({ error:"Invalid credentials" });
+    if (!valid) {
+      addAuditLog({ userId: rows[0].id, username, action:"login.failed", detail:"wrong password", ip: req.ip });
+      return res.status(401).json({ error:"Invalid credentials" });
+    }
     req.session.userId   = rows[0].id;
     req.session.username = rows[0].username;
     req.session.role     = rows[0].role;
     addLog({ level:"info", server:"auth", message:`Login: ${username} (${rows[0].role})` });
+    addAuditLog({ userId: rows[0].id, username, action:"login", detail: rows[0].role, ip: req.ip });
     const redirect = await computeLoginRedirect(rows[0].id, rows[0].role);
     res.json({ ok:true, username: rows[0].username, role: rows[0].role, redirect });
   } catch(err) {
@@ -1776,6 +1820,7 @@ app.post("/api/setup", setupLimiter, async (req, res) => {
     req.session.username = username;
     req.session.role     = "admin";
     addLog({ level:"info", server:"system", message:`First admin account created: ${username}` });
+    addAuditLog({ userId: result.insertId, username, action:"user.setup", detail:"initial admin created", ip: req.ip });
     res.json({ ok: true, redirect: "/admin?welcome=1" });
   } catch(e) {
     if (e.code === "ER_DUP_ENTRY") return res.status(409).json({ error: "Username already exists" });
@@ -1784,9 +1829,12 @@ app.post("/api/setup", setupLimiter, async (req, res) => {
 });
 
 app.post("/api/logout", (req, res) => {
-  const user = req.session.username || "unknown";
+  const user   = req.session.username || "unknown";
+  const userId = req.session.userId;
+  const ip     = req.ip;
   req.session.destroy(() => {
     addLog({ level:"info", server:"auth", message:`Logout: ${user}` });
+    addAuditLog({ userId, username: user, action:"logout", ip });
     res.json({ ok:true });
   });
 });
@@ -1855,6 +1903,7 @@ app.post("/api/admin/change-password", requireAdmin, async (req, res) => {
     const hash = await bcrypt.hash(newPassword, 10);
     await db.query("UPDATE status_users SET password_hash = ? WHERE id = ?", [hash, req.session.userId]);
     addLog({ level:"info", server:"auth", message:`Password changed: ${rows[0].username}` });
+    addAuditLog({ userId: req.session.userId, username: req.session.username, action:"password.change", resourceType:"user", resourceId: req.session.userId, resourceName: rows[0].username, ip: req.ip });
     res.json({ ok:true });
   } catch(err) {
     res.status(500).json({ error:err.message });
@@ -1926,6 +1975,29 @@ app.post("/api/refresh", async (req, res) => {
 // is being stored correctly. Remove after debugging.
 app.get("/api/debug/raw-status", (req, res) => {
   res.json(serverStatus);
+});
+
+// Audit log — admin-only, paginated, filterable by action prefix
+app.get("/api/audit-log", requireAdmin, async (req, res) => {
+  try {
+    const limit  = Math.min(Math.max(1, parseInt(req.query.limit)  || 100), 500);
+    const offset = Math.max(0, parseInt(req.query.offset) || 0);
+    const action = req.query.action || "";   // e.g. "server" filters server.*
+    const userId = req.query.user_id ? parseInt(req.query.user_id) : null;
+    const where  = [];
+    const params = [];
+    if (action) { where.push("action LIKE ?"); params.push(action + "%"); }
+    if (userId) { where.push("user_id = ?");   params.push(userId); }
+    const clause = where.length ? "WHERE " + where.join(" AND ") : "";
+    const [[{ total }]] = await db.query(`SELECT COUNT(*) as total FROM status_audit_log ${clause}`, params);
+    const [rows] = await db.query(
+      `SELECT * FROM status_audit_log ${clause} ORDER BY ts DESC LIMIT ? OFFSET ?`,
+      [...params, limit, offset]
+    );
+    res.json({ entries: rows, total, limit, offset });
+  } catch(err) {
+    res.status(500).json({ error: err.message });
+  }
 });
 
 // -- Admin API (protected) -----------------------------------------------------
@@ -2003,6 +2075,7 @@ app.post("/api/admin/servers", requireAuth, async (req, res) => {
     await setServerGroupIds(id, wantGroups);
     await loadConfig();
     addLog({ level:"info", server:"admin", message:`Added: ${name} (${host}) by ${req.session.username}` });
+    addAuditLog({ userId: req.session.userId, username: req.session.username, action:"server.create", resourceType:"server", resourceId: id, resourceName: name, detail: host, ip: req.ip });
     res.json({ ok:true, id });
   } catch(err) {
     res.status(500).json({ error:err.message });
@@ -2054,6 +2127,7 @@ app.put("/api/admin/servers/:id", requireAuth, async (req, res) => {
     }
     await loadConfig();
     addLog({ level:"info", server:"admin", message:`Updated: ${name} (${host}) by ${req.session.username}` });
+    addAuditLog({ userId: req.session.userId, username: req.session.username, action:"server.update", resourceType:"server", resourceId: req.params.id, resourceName: name, detail: host, ip: req.ip });
     res.json({ ok:true });
   } catch(err) {
     res.status(500).json({ error:err.message });
@@ -2069,6 +2143,7 @@ app.delete("/api/admin/servers/:id", requireAdmin, async (req, res) => {
     delete serverStatus[req.params.id];
     await loadConfig();
     addLog({ level:"warn", server:"admin", message:`Removed: ${rows[0].name}` });
+    addAuditLog({ userId: req.session.userId, username: req.session.username, action:"server.delete", resourceType:"server", resourceId: req.params.id, resourceName: rows[0].name, ip: req.ip });
     // Each client gets their own filtered subset (same per-client filter as pollAll)
     const all = Object.values(serverStatus);
     sseClients.filter(r=>!r.writableEnded).forEach(r => {
@@ -2223,6 +2298,7 @@ app.post("/api/admin/users", requireAdmin, async (req, res) => {
       await setUserGroupGrants(result.insertId, allowed_group_ids);
     }
     addLog({ level:"info", server:"admin", message:`Created user: ${username} (${role})` });
+    addAuditLog({ userId: req.session.userId, username: req.session.username, action:"user.create", resourceType:"user", resourceId: result.insertId, resourceName: username, detail: role, ip: req.ip });
     res.json({ ok:true });
   } catch(err) {
     if (err.code === "ER_DUP_ENTRY") return res.status(409).json({ error:"Username already exists" });
@@ -2254,6 +2330,7 @@ app.put("/api/admin/users/:id", requireAdmin, async (req, res) => {
       await db.query("DELETE FROM status_user_groups WHERE user_id=?", [req.params.id]);
     }
     addLog({ level:"info", server:"admin", message:`Updated user: ${username} (${role})` });
+    addAuditLog({ userId: req.session.userId, username: req.session.username, action:"user.update", resourceType:"user", resourceId: req.params.id, resourceName: username, detail: role, ip: req.ip });
     res.json({ ok:true });
   } catch(err) {
     if (err.code === "ER_DUP_ENTRY") return res.status(409).json({ error:"Username already exists" });
@@ -2277,6 +2354,7 @@ app.delete("/api/admin/users/:id", requireAdmin, async (req, res) => {
     await db.query("DELETE FROM status_user_groups WHERE user_id=?", [req.params.id]);
     await db.query("DELETE FROM status_users WHERE id=?", [req.params.id]);
     addLog({ level:"warn", server:"admin", message:`Deleted user: ${rows[0].username}` });
+    addAuditLog({ userId: req.session.userId, username: req.session.username, action:"user.delete", resourceType:"user", resourceId: req.params.id, resourceName: rows[0].username, ip: req.ip });
     res.json({ ok:true });
   } catch(err) {
     res.status(500).json({ error:err.message });
@@ -2514,6 +2592,7 @@ app.post("/api/admin/groups", requireAdmin, async (req, res) => {
       await loadConfig();
     }
     addLog({ level:"info", server:"admin", message:`Group created: ${name} (/${finalSlug})` });
+    addAuditLog({ userId: req.session.userId, username: req.session.username, action:"group.create", resourceType:"group", resourceId: newId, resourceName: name, detail: `/${finalSlug}`, ip: req.ip });
     res.json({ ok:true, id: newId, slug: finalSlug });
   } catch(err) {
     if (err.code === "ER_DUP_ENTRY") return res.status(409).json({ error: "Slug already in use" });
@@ -2566,6 +2645,7 @@ app.put("/api/admin/groups/:id", requireAuth, async (req, res) => {
       await loadConfig();
     }
     addLog({ level:"info", server:"admin", message:`Group updated: ${name} (/${finalSlug})` });
+    addAuditLog({ userId: req.session.userId, username: req.session.username, action:"group.update", resourceType:"group", resourceId: gid, resourceName: name, detail: `/${finalSlug}`, ip: req.ip });
     res.json({ ok:true, slug: finalSlug });
   } catch(err) {
     if (err.code === "ER_DUP_ENTRY") return res.status(409).json({ error: "Slug already in use" });
@@ -2583,6 +2663,7 @@ app.delete("/api/admin/groups/:id", requireAdmin, async (req, res) => {
     await db.query("DELETE FROM status_groups WHERE id=?", [gid]);
     await loadConfig();
     addLog({ level:"warn", server:"admin", message:`Group deleted: ${rows[0].name}` });
+    addAuditLog({ userId: req.session.userId, username: req.session.username, action:"group.delete", resourceType:"group", resourceId: gid, resourceName: rows[0].name, ip: req.ip });
     res.json({ ok:true });
   } catch(err) {
     res.status(500).json({ error: err.message });
@@ -2785,6 +2866,7 @@ app.post("/api/change-password", requireAuth, loginLimiter, async (req, res) => 
     const hash = await bcrypt.hash(newPassword, 10);
     await db.query("UPDATE status_users SET password_hash = ? WHERE id = ?", [hash, req.session.userId]);
     addLog({ level:"info", server:"auth", message:`Password changed: ${rows[0].username}` });
+    addAuditLog({ userId: req.session.userId, username: req.session.username, action:"password.change", resourceType:"user", resourceId: req.session.userId, resourceName: rows[0].username, ip: req.ip });
     res.json({ ok:true });
   } catch(err) {
     res.status(500).json({ error:err.message });

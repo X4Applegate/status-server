@@ -521,7 +521,7 @@ body{font-family:var(--sans);background:var(--bg);color:var(--text);min-height:1
   </div>
   <div id="aListView" class="admin-section">
     <div class="drawer-toolbar">
-      <div class="admin-tabs"><button class="admin-tab active" id="tabServers" onclick="switchTab('servers')">Servers</button><button class="admin-tab" id="tabGroups" onclick="switchTab('groups')">Groups</button><button class="admin-tab" id="tabOmada" onclick="switchTab('omada')">Omada</button><button class="admin-tab" id="tabUsers" onclick="switchTab('users')">Users</button><button class="admin-tab" id="tabWebhooks" onclick="switchTab('webhooks')">Webhooks</button><button class="admin-tab" id="tabSettings" onclick="switchTab('settings')">Settings</button></div>
+      <div class="admin-tabs"><button class="admin-tab active" id="tabServers" onclick="switchTab('servers')">Servers</button><button class="admin-tab" id="tabGroups" onclick="switchTab('groups')">Groups</button><button class="admin-tab" id="tabOmada" onclick="switchTab('omada')">Omada</button><button class="admin-tab" id="tabUsers" onclick="switchTab('users')">Users</button><button class="admin-tab" id="tabWebhooks" onclick="switchTab('webhooks')">Webhooks</button><button class="admin-tab" id="tabSettings" onclick="switchTab('settings')">Settings</button><button class="admin-tab" id="tabAudit" onclick="switchTab('audit')">Audit</button></div>
       <span style="font-size:11px;color:var(--text-2)" id="aCount"></span>
       <div class="drawer-spacer"></div>
       <button class="btn btn-primary" id="addBtn" onclick="showServerForm(null)" style="font-size:11px;padding:5px 11px"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" style="width:12px;height:12px"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg><span id="addBtnLabel">Add Server</span></button>
@@ -947,7 +947,7 @@ function isViewer(){ return sessionRole === "viewer"; }
 // Users tab stays admin-only.
 function applyRoleVisibility(){
   if (isAdmin()) return;  // admins see everything; nothing to hide
-  ["tabUsers", "tabSettings"].forEach(id => {
+  ["tabUsers", "tabSettings", "tabAudit"].forEach(id => {
     const el = document.getElementById(id);
     if (el) el.style.display = "none";
   });
@@ -1504,7 +1504,7 @@ function closeAdmin(){
 }
 
 async function switchTab(tab){
-  // Viewers can access Servers, Omada, Webhooks, and Groups. Users + Settings tabs bounce back.
+  // Viewers can access Servers, Omada, Webhooks, and Groups. Users + Settings + Audit tabs bounce back.
   if (!isAdmin() && !["servers","omada","webhooks","groups"].includes(tab)) tab = "servers";
   currentTab = tab;
   serverFormReturn = null;  // switching tabs clears any pending return target
@@ -1514,10 +1514,11 @@ async function switchTab(tab){
   document.getElementById("tabUsers").classList.toggle("active",    tab === "users");
   document.getElementById("tabWebhooks").classList.toggle("active", tab === "webhooks");
   document.getElementById("tabSettings").classList.toggle("active", tab === "settings");
-  const labels = { servers: "Add Server", groups: "Add Group", omada: "Add Controller", users: "Add User", webhooks: "Add Webhook", settings: "" };
-  document.getElementById("addBtnLabel").textContent  = labels[tab];
-  // Hide Add button for viewers on admin-only-create tabs and on Settings
-  const hideAdd = (!isAdmin() && (tab === "groups" || tab === "users")) || tab === "settings";
+  document.getElementById("tabAudit").classList.toggle("active",    tab === "audit");
+  const labels = { servers: "Add Server", groups: "Add Group", omada: "Add Controller", users: "Add User", webhooks: "Add Webhook", settings: "", audit: "" };
+  document.getElementById("addBtnLabel").textContent  = labels[tab] || "";
+  // Hide Add button for viewers on admin-only-create tabs, Settings, and Audit
+  const hideAdd = (!isAdmin() && (tab === "groups" || tab === "users")) || tab === "settings" || tab === "audit";
   document.getElementById("addBtn").style.display = hideAdd ? "none" : "";
   document.getElementById("addBtn").onclick           =
     tab === "servers"  ? () => showServerForm(null) :
@@ -1525,6 +1526,7 @@ async function switchTab(tab){
     tab === "omada"    ? () => showOmadaForm(null)  :
     tab === "users"    ? () => showUserForm(null)   :
     tab === "settings" ? () => {} :
+    tab === "audit"    ? () => {} :
                          () => showWebhookForm(null);
   // Show list view, hide forms
   document.getElementById("aListView").style.display        = "flex";
@@ -1540,6 +1542,7 @@ async function switchTab(tab){
   else if (tab === "omada")    await loadOmadaList();
   else if (tab === "users")    await loadUserList();
   else if (tab === "settings") await loadSettings();
+  else if (tab === "audit")    await loadAuditLog();
   else                         await loadWebhookList();
 }
 
@@ -2870,6 +2873,105 @@ async function createServerFromSite(controllerId, siteId, siteName, customerId, 
   if (customerName) check.customer_name = customerName;
   currentChecks = [check];
   renderCrows();
+}
+
+// ── Audit log ────────────────────────────────────────────────────────────────
+const AUDIT_ACTION_COLOR = {
+  "login":           "var(--blue)",
+  "login.failed":    "var(--red)",
+  "logout":          "var(--text-2)",
+  "server.create":   "var(--green)",
+  "server.update":   "var(--warn)",
+  "server.delete":   "var(--red)",
+  "user.create":     "var(--green)",
+  "user.update":     "var(--warn)",
+  "user.delete":     "var(--red)",
+  "user.setup":      "var(--blue)",
+  "group.create":    "var(--green)",
+  "group.update":    "var(--warn)",
+  "group.delete":    "var(--red)",
+  "password.change": "var(--warn)",
+};
+
+let auditOffset = 0;
+const AUDIT_PAGE = 50;
+
+async function loadAuditLog(append = false){
+  const el = document.getElementById("adminPanelBody");
+  if (!append) {
+    auditOffset = 0;
+    document.getElementById("aCount").textContent = "Audit Log";
+    el.innerHTML = `<div style="padding:20px;color:var(--text-2);font-size:12px">Loading…</div>`;
+  }
+  try {
+    const filter = document.getElementById("auditFilter") ? document.getElementById("auditFilter").value : "";
+    const res  = await fetch(`/api/audit-log?limit=${AUDIT_PAGE}&offset=${auditOffset}${filter ? "&action="+encodeURIComponent(filter) : ""}`);
+    const data = await res.json();
+    if (!append) el.innerHTML = "";
+
+    if (!data.entries || !data.entries.length) {
+      if (!append) el.innerHTML = `<div class="empty-state">No audit entries yet.<br>Actions like logins, server changes, and user edits will appear here.</div>`;
+      return;
+    }
+
+    document.getElementById("aCount").textContent = `${data.total.toLocaleString()} event${data.total === 1 ? "" : "s"}`;
+
+    if (!append) {
+      el.innerHTML = `
+        <div style="padding:12px 18px 0;display:flex;align-items:center;gap:8px;flex-wrap:wrap">
+          <select id="auditFilter" style="font-family:var(--mono);font-size:11px;padding:4px 8px;border-radius:var(--r-sm);border:1px solid var(--border);background:var(--surface2);color:var(--text-hi);cursor:pointer" onchange="loadAuditLog(false)">
+            <option value="">All events</option>
+            <option value="login">Auth (login/logout)</option>
+            <option value="server">Servers</option>
+            <option value="user">Users</option>
+            <option value="group">Groups</option>
+            <option value="password">Passwords</option>
+          </select>
+        </div>
+        <table id="auditTable" style="width:100%;border-collapse:collapse;font-size:12px;margin-top:4px">
+          <thead>
+            <tr style="border-bottom:1px solid var(--border)">
+              <th style="padding:8px 14px;text-align:left;color:var(--text-2);font-weight:500;white-space:nowrap">Time</th>
+              <th style="padding:8px 14px;text-align:left;color:var(--text-2);font-weight:500">User</th>
+              <th style="padding:8px 14px;text-align:left;color:var(--text-2);font-weight:500">Action</th>
+              <th style="padding:8px 14px;text-align:left;color:var(--text-2);font-weight:500">Resource</th>
+              <th style="padding:8px 14px;text-align:left;color:var(--text-2);font-weight:500">Detail</th>
+              <th style="padding:8px 14px;text-align:left;color:var(--text-2);font-weight:500">IP</th>
+            </tr>
+          </thead>
+          <tbody id="auditTbody"></tbody>
+        </table>
+        <div id="auditLoadMore" style="padding:14px 18px;text-align:center;display:none">
+          <button class="btn" onclick="loadAuditLog(true)">Load more</button>
+        </div>`;
+    }
+
+    const tbody = document.getElementById("auditTbody");
+    data.entries.forEach(e => {
+      const color = AUDIT_ACTION_COLOR[e.action] || "var(--text)";
+      const ts    = new Date(e.ts);
+      const time  = ts.toLocaleString(undefined, { month:"short", day:"numeric", hour:"2-digit", minute:"2-digit", second:"2-digit" });
+      const tr    = document.createElement("tr");
+      tr.style.cssText = "border-bottom:1px solid var(--border);transition:background .1s";
+      tr.onmouseenter = () => tr.style.background = "var(--surface2)";
+      tr.onmouseleave = () => tr.style.background  = "";
+      tr.innerHTML = `
+        <td style="padding:8px 14px;color:var(--text-2);white-space:nowrap;font-family:var(--mono)">${time}</td>
+        <td style="padding:8px 14px;color:var(--text-hi);font-family:var(--mono)">${e.username || "—"}</td>
+        <td style="padding:8px 14px;white-space:nowrap"><span style="font-family:var(--mono);color:${color};background:${color}18;padding:2px 7px;border-radius:4px;font-size:11px">${e.action}</span></td>
+        <td style="padding:8px 14px;color:var(--text-hi)">${e.resource_name ? `<span style="color:var(--text-2);font-size:10px;margin-right:4px">${e.resource_type || ""}</span>${e.resource_name}` : "—"}</td>
+        <td style="padding:8px 14px;color:var(--text-2);max-width:180px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${e.detail || ""}">${e.detail || "—"}</td>
+        <td style="padding:8px 14px;color:var(--text-2);font-family:var(--mono);font-size:11px">${e.ip || "—"}</td>`;
+      tbody.appendChild(tr);
+    });
+
+    auditOffset += data.entries.length;
+    const loadMoreEl = document.getElementById("auditLoadMore");
+    if (loadMoreEl) loadMoreEl.style.display = auditOffset < data.total ? "" : "none";
+  } catch(err) {
+    if (!append) document.getElementById("adminPanelBody").innerHTML =
+      `<div class="empty-state">Failed to load audit log: ${err.message}</div>`;
+  }
 }
 
 // ── Toast ─────────────────────────────────────────────────────────────────────
