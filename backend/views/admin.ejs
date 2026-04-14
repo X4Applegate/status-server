@@ -207,7 +207,7 @@ body{font-family:var(--sans);background:var(--bg);color:var(--text);min-height:1
 .drawer-footer{padding:10px 18px;border-top:1px solid var(--border);font-size:11px;color:var(--text-2);display:flex;align-items:center;justify-content:space-between;flex-shrink:0}
 
 /* LOG DRAWER */
-#logDrawer{width:min(540px,100vw)}
+#logDrawer{width:min(760px,100vw)}
 .filter-tabs{display:flex;gap:3px}
 .filter-tab{padding:4px 11px;font-size:11px;font-weight:500;border-radius:5px;border:1px solid transparent;background:none;color:var(--text-2);cursor:pointer;font-family:var(--sans)}
 .filter-tab:hover{color:var(--text-hi);background:var(--surface)}
@@ -234,7 +234,7 @@ body{font-family:var(--sans);background:var(--bg);color:var(--text);min-height:1
 .log-entry.sys{background:rgba(42,127,255,.05)}
 
 /* ADMIN DRAWER */
-#adminDrawer{width:min(660px,100vw)}
+#adminDrawer{width:min(1080px,100vw)}
 /* flex:1 + min-height:0 is the classic flex scroll-container pattern.
    Using height:100% here overflowed the drawer by the drawer-header's height,
    pushing the sticky Save button below the visible viewport. */
@@ -549,7 +549,16 @@ body{font-family:var(--sans);background:var(--bg);color:var(--text);min-height:1
               <option value="600">10m</option>
             </select>
           </div>
-          <div class="fg"></div>
+          <div class="fg"><label class="flabel">Alert After <span style="font-weight:400;text-transform:none;letter-spacing:0;color:var(--text-2)">(consecutive failed polls before alerting)</span></label>
+            <select class="fselect" id="fThreshold">
+              <option value="1" selected>1 failure (immediate)</option>
+              <option value="2">2 failures</option>
+              <option value="3">3 failures</option>
+              <option value="4">4 failures</option>
+              <option value="6">6 failures</option>
+              <option value="10">10 failures</option>
+            </select>
+          </div>
           <div class="fg full"><label class="flabel">Dashboards <span style="font-weight:400;text-transform:none;letter-spacing:0;color:var(--text-2)" id="fGroupsHint">(pick one or more — this server appears in each)</span></label>
             <div id="fGroupsPicker" style="background:var(--input-bg);border:1px solid var(--border-hi);border-radius:var(--r-sm);max-height:220px;overflow-y:auto;padding:8px"></div>
           </div>
@@ -1600,6 +1609,10 @@ async function loadServerList(){
   if (cached) {
     adminServers = cached;
     renderAdminServerList(adminServers);
+    if (serverListScrollTop != null) {
+      void el.scrollHeight;
+      requestAnimationFrame(() => { el.scrollTop = serverListScrollTop; });
+    }
   } else {
     el.innerHTML = `<div style="padding:24px;text-align:center;color:var(--text-2)">Loading servers...</div>`;
   }
@@ -1615,6 +1628,14 @@ async function loadServerList(){
     adminServers = await r.json();
     cacheSet("admin-servers", adminServers);
     renderAdminServerList(adminServers);
+    if (serverListScrollTop != null) {
+      const target = serverListScrollTop;
+      serverListScrollTop = null;
+      // Force layout then restore scroll on next frame so the browser has
+      // measured the new list heights before we assign scrollTop.
+      void el.scrollHeight;
+      requestAnimationFrame(() => { el.scrollTop = target; });
+    }
     return;
   } catch(e) {
     if (!cached) el.innerHTML = `<div class="empty-state">Failed to load: ${e.message}</div>`;
@@ -1625,6 +1646,9 @@ async function loadServerList(){
 let serverPickedGroups = new Set();   // currently-checked group ids in the server form
 
 async function showServerForm(s){
+  // Capture scroll position so Save/Cancel can restore it.
+  const _body = document.getElementById("adminPanelBody");
+  serverListScrollTop = _body ? _body.scrollTop : null;
   document.getElementById("aListView").style.display       = "none";
   document.getElementById("aFormView").style.display       = "flex";
   document.getElementById("aUserFormView").style.display   = "none";
@@ -1644,6 +1668,7 @@ async function showServerForm(s){
   } catch(e) {}
   document.getElementById("fTags").value  = (s?.tags||[]).join(", ");
   document.getElementById("fInterval").value = String(s?.poll_interval_sec || 30);
+  document.getElementById("fThreshold").value = String(s?.failure_threshold || 1);
   document.getElementById("fErr").textContent = "";
   currentChecks = (s?.checks||[{type:"ping"}]).map(c => ({...c}));
   // Initialize group selection from the server's existing group_ids
@@ -1888,7 +1913,8 @@ async function submitForm(){
     tags:              document.getElementById("fTags").value.split(",").map(t=>t.trim()).filter(Boolean),
     checks:            currentChecks.map(c => ({...c})),
     group_ids:         Array.from(serverPickedGroups),
-    poll_interval_sec: parseInt(document.getElementById("fInterval").value) || 30
+    poll_interval_sec: parseInt(document.getElementById("fInterval").value) || 30,
+    failure_threshold: parseInt(document.getElementById("fThreshold").value) || 1
   };
   try {
     const r = await fetch(id ? `/api/admin/servers/${id}` : "/api/admin/servers", {
@@ -1898,7 +1924,21 @@ async function submitForm(){
     });
     const d = await r.json();
     if (!r.ok){ document.getElementById("fErr").textContent = d.error||"Failed"; return; }
-    cacheDel("admin-servers");
+    // Patch the local cache so the list re-renders instantly with fresh values —
+    // this lets the cached-render branch restore scroll immediately, and the
+    // background fetch in loadServerList will replace it with authoritative data.
+    try {
+      const saveId = id || d.id;
+      if (saveId && Array.isArray(adminServers)) {
+        const existingIdx = adminServers.findIndex(x => x.id === saveId);
+        const patched = { ...(existingIdx >= 0 ? adminServers[existingIdx] : { id: saveId }), ...body, id: saveId };
+        if (existingIdx >= 0) adminServers[existingIdx] = patched;
+        else adminServers.push(patched);
+        cacheSet("admin-servers", adminServers);
+      } else {
+        cacheDel("admin-servers");
+      }
+    } catch(e) { cacheDel("admin-servers"); }
     cacheDel("admin-groups");
     toast(id ? "Server updated" : "Server added", "success");
     // If we came from the Omada sites browser, return there instead of the Servers tab
@@ -2869,6 +2909,9 @@ async function showOmadaSites(c){
 // Where to bounce back to after the server form closes — used by createServerFromSite
 // to return the admin to the Omada sites browser instead of the Servers tab.
 let serverFormReturn = null;
+// Scroll position of the server list, captured when opening the edit form
+// so the admin returns to the same spot on Save / Cancel.
+let serverListScrollTop = null;
 
 // One-click: jump to the server form pre-filled with an omada_gateway check
 async function createServerFromSite(controllerId, siteId, siteName, customerId, customerName){
@@ -2908,15 +2951,20 @@ const AUDIT_ACTION_COLOR = {
 let auditOffset = 0;
 const AUDIT_PAGE = 50;
 
+let auditFilterValue = "";
 async function loadAuditLog(append = false){
   const el = document.getElementById("adminPanelBody");
+  // Capture the filter value BEFORE we wipe innerHTML, otherwise the <select>
+  // is destroyed and getElementById returns null (filter silently empty).
+  const selEl = document.getElementById("auditFilter");
+  if (selEl) auditFilterValue = selEl.value;
   if (!append) {
     auditOffset = 0;
     document.getElementById("aCount").textContent = "Audit Log";
     el.innerHTML = `<div style="padding:20px;color:var(--text-2);font-size:12px">Loading…</div>`;
   }
   try {
-    const filter = document.getElementById("auditFilter") ? document.getElementById("auditFilter").value : "";
+    const filter = auditFilterValue;
     const res  = await fetch(`/api/audit-log?limit=${AUDIT_PAGE}&offset=${auditOffset}${filter ? "&action="+encodeURIComponent(filter) : ""}`);
     const data = await res.json();
     if (!append) el.innerHTML = "";
@@ -2932,12 +2980,15 @@ async function loadAuditLog(append = false){
       el.innerHTML = `
         <div style="padding:12px 18px 0;display:flex;align-items:center;gap:8px;flex-wrap:wrap">
           <select id="auditFilter" style="font-family:var(--mono);font-size:11px;padding:4px 8px;border-radius:var(--r-sm);border:1px solid var(--border);background:var(--surface2);color:var(--text-hi);cursor:pointer" onchange="loadAuditLog(false)">
-            <option value="">All events</option>
-            <option value="login">Auth (login/logout)</option>
-            <option value="server">Servers</option>
-            <option value="user">Users</option>
-            <option value="group">Groups</option>
-            <option value="password">Passwords</option>
+            ${[
+              ["",         "All events"],
+              ["login",    "Auth (login)"],
+              ["logout",   "Logout"],
+              ["server",   "Servers"],
+              ["user",     "Users"],
+              ["group",    "Groups"],
+              ["password", "Passwords"]
+            ].map(([v,l]) => `<option value="${v}"${v===auditFilterValue?" selected":""}>${l}</option>`).join("")}
           </select>
         </div>
         <table id="auditTable" style="width:100%;border-collapse:collapse;font-size:12px;margin-top:4px">
@@ -2972,7 +3023,7 @@ async function loadAuditLog(append = false){
         <td style="padding:8px 14px;color:var(--text-hi);font-family:var(--mono)">${e.username || "—"}</td>
         <td style="padding:8px 14px;white-space:nowrap"><span style="font-family:var(--mono);color:${color};background:${color}18;padding:2px 7px;border-radius:4px;font-size:11px">${e.action}</span></td>
         <td style="padding:8px 14px;color:var(--text-hi)">${e.resource_name ? `<span style="color:var(--text-2);font-size:10px;margin-right:4px">${e.resource_type || ""}</span>${e.resource_name}` : "—"}</td>
-        <td style="padding:8px 14px;color:var(--text-2);max-width:180px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${e.detail || ""}">${e.detail || "—"}</td>
+        <td style="padding:8px 14px;color:var(--text-2);max-width:420px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${e.detail || ""}">${e.detail || "—"}</td>
         <td style="padding:8px 14px;color:var(--text-2);font-family:var(--mono);font-size:11px">${e.ip || "—"}</td>`;
       tbody.appendChild(tr);
     });

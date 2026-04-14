@@ -407,6 +407,7 @@ async function initDB() {
       checks            JSON,
       sort_order        INT DEFAULT 0,
       poll_interval_sec INT NOT NULL DEFAULT 30,
+      failure_threshold INT NOT NULL DEFAULT 1,
       created_at        TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
       updated_at        TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
     )
@@ -416,6 +417,9 @@ async function initDB() {
   } catch(e) { /* column already exists */ }
   try {
     await db.query("ALTER TABLE status_servers ADD COLUMN category VARCHAR(100) DEFAULT NULL");
+  } catch(e) { /* column already exists */ }
+  try {
+    await db.query("ALTER TABLE status_servers ADD COLUMN failure_threshold INT NOT NULL DEFAULT 1");
   } catch(e) { /* column already exists */ }
 
   await db.query(`
@@ -691,6 +695,7 @@ async function loadConfig() {
       description:       r.description || "",
       category:          r.category || "",
       poll_interval_sec: r.poll_interval_sec || 30,
+      failure_threshold: Math.max(1, Math.min(10, r.failure_threshold || 1)),
       group_ids:         groupsByServer[r.id] || [],
       tags:              typeof r.tags   === "string" ? JSON.parse(r.tags)   : (r.tags   || []),
       checks:            typeof r.checks === "string" ? JSON.parse(r.checks) : (r.checks || [])
@@ -1785,10 +1790,24 @@ async function pollAll(force = false) {
   if (!due.length) return;
   due.forEach(def => { _lastPolled[def.id] = nowMs; });
   await Promise.all(due.map(async def => {
-    const checks  = await runChecks(def);
-    const overall = checks.every(c=>c.ok) ? "up" : checks.some(c=>c.ok) ? "degraded" : "down";
-    const prev    = serverStatus[def.id] || {};
-    const history = [...(prev.uptimeHistory||[]), overall==="up"].slice(-20);
+    const checks     = await runChecks(def);
+    const rawOverall = checks.every(c=>c.ok) ? "up" : checks.some(c=>c.ok) ? "degraded" : "down";
+    const prev       = serverStatus[def.id] || {};
+    const history    = [...(prev.uptimeHistory||[]), rawOverall==="up"].slice(-20);
+
+    // Sticky status: suppress transitions to down/degraded until rawOverall has
+    // stayed non-up for `failure_threshold` consecutive polls. Recovery is immediate.
+    const threshold = Math.max(1, def.failure_threshold || 1);
+    const failStreak = rawOverall === "up" ? 0 : (prev.failStreak || 0) + 1;
+    let overall;
+    if (rawOverall === "up") {
+      overall = "up";
+    } else if (failStreak >= threshold) {
+      overall = rawOverall;
+    } else {
+      // Still within grace period — keep the last committed status (or "up" if first-ever).
+      overall = (prev.overall && prev.overall !== "pending") ? prev.overall : "up";
+    }
 
     checks.forEach(c => {
       const label =
@@ -1823,7 +1842,7 @@ async function pollAll(force = false) {
       }
     }
 
-    serverStatus[def.id] = { id:def.id, name:def.name, host:def.host, description:def.description||"", category:def.category||"", group_ids:def.group_ids||[], tags:def.tags||[], checks, overall, lastChecked:now, uptimeHistory:history };
+    serverStatus[def.id] = { id:def.id, name:def.name, host:def.host, description:def.description||"", category:def.category||"", group_ids:def.group_ids||[], tags:def.tags||[], checks, overall, lastChecked:now, uptimeHistory:history, failStreak };
     // Record to DB (non-blocking)
     recordHistory(def, checks, overall).catch(() => {});
   }));
@@ -2151,10 +2170,11 @@ app.get("/api/admin/servers", requireAuth, async (req, res) => {
 });
 
 app.post("/api/admin/servers", requireAuth, async (req, res) => {
-  const { name, host, description, category, tags, checks, group_ids, poll_interval_sec } = req.body;
+  const { name, host, description, category, tags, checks, group_ids, poll_interval_sec, failure_threshold } = req.body;
   if (!name || !host) return res.status(400).json({ error:"name and host are required" });
   const wantGroups = Array.isArray(group_ids) ? group_ids.map(g => parseInt(g)).filter(Number.isFinite) : [];
   const interval = Math.max(10, Math.min(3600, parseInt(poll_interval_sec) || 30));
+  const threshold = Math.max(1, Math.min(10, parseInt(failure_threshold) || 1));
   // Viewers must put new servers into at least one of their allowed groups
   if (req.session.role !== "admin") {
     const allowed = await getUserAllowedGroupIds(req.session.userId, req.session.role);
@@ -2164,8 +2184,8 @@ app.post("/api/admin/servers", requireAuth, async (req, res) => {
   const id = name.toLowerCase().replace(/[^a-z0-9]+/g,"-").replace(/^-|-$/g,"") + "-" + Date.now();
   try {
     await db.query(
-      "INSERT INTO status_servers (id, name, host, description, category, tags, checks, poll_interval_sec) VALUES (?,?,?,?,?,?,?,?)",
-      [id, name, host, description||"", (category||"").trim() || null, JSON.stringify(tags||[]), JSON.stringify(checks||[{type:"ping"}]), interval]
+      "INSERT INTO status_servers (id, name, host, description, category, tags, checks, poll_interval_sec, failure_threshold) VALUES (?,?,?,?,?,?,?,?,?)",
+      [id, name, host, description||"", (category||"").trim() || null, JSON.stringify(tags||[]), JSON.stringify(checks||[{type:"ping"}]), interval, threshold]
     );
     await setServerGroupIds(id, wantGroups);
     await loadConfig();
@@ -2178,10 +2198,11 @@ app.post("/api/admin/servers", requireAuth, async (req, res) => {
 });
 
 app.put("/api/admin/servers/:id", requireAuth, async (req, res) => {
-  const { name, host, description, category, tags, checks, group_ids, poll_interval_sec } = req.body;
+  const { name, host, description, category, tags, checks, group_ids, poll_interval_sec, failure_threshold } = req.body;
   if (!name || !host) return res.status(400).json({ error:"name and host are required" });
   const wantGroups = Array.isArray(group_ids) ? group_ids.map(g => parseInt(g)).filter(Number.isFinite) : [];
   const interval = Math.max(10, Math.min(3600, parseInt(poll_interval_sec) || 30));
+  const threshold = Math.max(1, Math.min(10, parseInt(failure_threshold) || 1));
   try {
     // Viewers: can only edit servers they currently share a group with, and they can only
     // add/remove groups THEY own. Groups on the server they don't own are preserved.
@@ -2212,8 +2233,8 @@ app.put("/api/admin/servers/:id", requireAuth, async (req, res) => {
       }
     }
     const [result] = await db.query(
-      "UPDATE status_servers SET name=?, host=?, description=?, category=?, tags=?, checks=?, poll_interval_sec=?, updated_at=NOW() WHERE id=?",
-      [name, host, description||"", (category||"").trim() || null, JSON.stringify(tags||[]), JSON.stringify(checks||[]), interval, req.params.id]
+      "UPDATE status_servers SET name=?, host=?, description=?, category=?, tags=?, checks=?, poll_interval_sec=?, failure_threshold=?, updated_at=NOW() WHERE id=?",
+      [name, host, description||"", (category||"").trim() || null, JSON.stringify(tags||[]), JSON.stringify(checks||[]), interval, threshold, req.params.id]
     );
     if (result.affectedRows === 0) return res.status(404).json({ error:"Server not found" });
     // Admins with undefined group_ids leave groups alone; otherwise replace the full set.
@@ -3451,7 +3472,7 @@ app.get("/admin.html",  (req, res) => res.redirect(301, "/admin"));
 app.get("/login.html",  (req, res) => res.redirect(301, "/login"));
 
 // Catch-all: redirect any non-API non-page route to /login (authed users will then bounce to /)
-app.get("*", (req, res) => {
+app.get("/{*path}", (req, res) => {
   if (req.path.startsWith("/api/")) {
     return res.status(404).json({ error: "Not found" });
   }
