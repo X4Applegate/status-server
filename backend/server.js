@@ -5,6 +5,7 @@ const http         = require("http");
 const https        = require("https");
 const fs           = require("fs");
 const path         = require("path");
+const crypto       = require("crypto");
 const mysql        = require("mysql2/promise");
 const bcrypt       = require("bcryptjs");
 const session      = require("express-session");
@@ -14,6 +15,7 @@ const rateLimit    = require("express-rate-limit");
 const pino         = require("pino");
 const pinoHttp     = require("pino-http");
 const { Agent: UndiciAgent } = require("undici"); // for Omada TLS dispatcher
+const { OAuth2Client } = require("google-auth-library");
 
 const app  = express();
 
@@ -91,6 +93,14 @@ const APP_CONTACT   = process.env.APP_CONTACT_EMAIL || "admin@richardapplegate.i
 const APP_HOME_URL  = process.env.APP_HOME_URL      || "/";
 const EXTERNAL_URL  = (process.env.EXTERNAL_URL || "").replace(/\/+$/, "");  // optional fallback when no custom_domain
 const GITHUB_REPO   = "X4Applegate/status-server";
+
+// Google OAuth — set GOOGLE_CLIENT_ID + GOOGLE_CLIENT_SECRET to enable
+const GOOGLE_CLIENT_ID     = process.env.GOOGLE_CLIENT_ID     || "";
+const GOOGLE_CLIENT_SECRET = process.env.GOOGLE_CLIENT_SECRET || "";
+const GOOGLE_CALLBACK_URL  = process.env.GOOGLE_CALLBACK_URL  || `${EXTERNAL_URL}/auth/google/callback`;
+const googleOAuth = (GOOGLE_CLIENT_ID && GOOGLE_CLIENT_SECRET)
+  ? new OAuth2Client(GOOGLE_CLIENT_ID, GOOGLE_CLIENT_SECRET, GOOGLE_CALLBACK_URL)
+  : null;
 const PORT          = process.env.PORT              || 3000;
 const CONFIG_PATH   = process.env.CONFIG_PATH    || "/config/servers.json";
 const CHECK_INTERVAL= parseInt(process.env.CHECK_INTERVAL || "30000");
@@ -386,11 +396,12 @@ async function initDB() {
     CREATE TABLE IF NOT EXISTS status_users (
       id            INT AUTO_INCREMENT PRIMARY KEY,
       username      VARCHAR(100) UNIQUE NOT NULL,
-      password_hash VARCHAR(255) NOT NULL,
+      password_hash VARCHAR(255) DEFAULT NULL,
       role          ENUM('admin','viewer') NOT NULL DEFAULT 'viewer',
       first_name    VARCHAR(100) DEFAULT NULL,
       last_name     VARCHAR(100) DEFAULT NULL,
       email         VARCHAR(255) DEFAULT NULL,
+      google_id     VARCHAR(100) DEFAULT NULL,
       created_at    TIMESTAMP DEFAULT CURRENT_TIMESTAMP
     )
   `);
@@ -408,6 +419,12 @@ async function initDB() {
   try {
     await db.query("ALTER TABLE status_users ADD COLUMN email VARCHAR(255) DEFAULT NULL");
   } catch(e) { /* column already exists */ }
+  try {
+    await db.query("ALTER TABLE status_users ADD COLUMN google_id VARCHAR(100) DEFAULT NULL");
+  } catch(e) { /* column already exists */ }
+  try {
+    await db.query("ALTER TABLE status_users MODIFY COLUMN password_hash VARCHAR(255) DEFAULT NULL");
+  } catch(e) { /* already nullable */ }
 
   await db.query(`
     CREATE TABLE IF NOT EXISTS status_servers (
@@ -1960,6 +1977,83 @@ app.post("/api/setup", setupLimiter, async (req, res) => {
   }
 });
 
+// Google OAuth — redirect to Google consent screen
+app.get("/auth/google", (req, res) => {
+  if (!googleOAuth) return res.redirect("/login");
+  const state = crypto.randomBytes(16).toString("hex");
+  req.session.oauthState = state;
+  const url = googleOAuth.generateAuthUrl({
+    access_type: "offline",
+    scope: ["openid", "email", "profile"],
+    state,
+    prompt: "select_account"
+  });
+  res.redirect(url);
+});
+
+// Google OAuth — callback after Google consent
+app.get("/auth/google/callback", async (req, res) => {
+  if (!googleOAuth) return res.redirect("/login");
+  const { code, state, error } = req.query;
+  if (error) return res.redirect("/login?error=google_denied");
+  if (!state || state !== req.session.oauthState) return res.redirect("/login?error=state_mismatch");
+  delete req.session.oauthState;
+  try {
+    const { tokens } = await googleOAuth.getToken(String(code));
+    const ticket = await googleOAuth.verifyIdToken({ idToken: tokens.id_token, audience: GOOGLE_CLIENT_ID });
+    const payload   = ticket.getPayload();
+    const googleId  = payload.sub;
+    const email     = payload.email     || null;
+    const firstName = payload.given_name  || null;
+    const lastName  = payload.family_name || null;
+
+    // 1. Existing account with this Google ID
+    let [rows] = await db.query("SELECT * FROM status_users WHERE google_id=?", [googleId]);
+
+    // 2. Link by matching email
+    if (!rows.length && email) {
+      [rows] = await db.query("SELECT * FROM status_users WHERE email=?", [email]);
+      if (rows.length) {
+        await db.query(
+          "UPDATE status_users SET google_id=?, first_name=COALESCE(NULLIF(first_name,''),?), last_name=COALESCE(NULLIF(last_name,''),?) WHERE id=?",
+          [googleId, firstName, lastName, rows[0].id]
+        );
+      }
+    }
+
+    let user;
+    if (rows.length) {
+      user = rows[0];
+    } else {
+      // 3. Auto-create as viewer
+      let base = (email || "user").split("@")[0].toLowerCase().replace(/[^a-z0-9._-]/g, "") || "user";
+      let username = base, suffix = 1;
+      while ((await db.query("SELECT id FROM status_users WHERE username=?", [username]))[0].length) {
+        username = `${base}${++suffix}`;
+      }
+      const [result] = await db.query(
+        "INSERT INTO status_users (username, password_hash, role, google_id, first_name, last_name, email) VALUES (?,?,?,?,?,?,?)",
+        [username, null, "viewer", googleId, firstName, lastName, email]
+      );
+      [rows] = await db.query("SELECT * FROM status_users WHERE id=?", [result.insertId]);
+      user = rows[0];
+      addLog({ level:"info", server:"auth", message:`Google OAuth: auto-created user ${username}` });
+      addAuditLog({ userId: user.id, username, action:"user.create", resourceType:"user", resourceId: user.id, resourceName: username, detail:"google-oauth auto-created", ip: req.ip });
+    }
+
+    req.session.userId   = user.id;
+    req.session.username = user.username;
+    req.session.role     = user.role;
+    addLog({ level:"info", server:"auth", message:`Google OAuth login: ${user.username} (${user.role})` });
+    addAuditLog({ userId: user.id, username: user.username, action:"login", detail:`google-oauth / ${user.role}`, ip: req.ip });
+    const redirect = await computeLoginRedirect(user.id, user.role);
+    res.redirect(redirect);
+  } catch(e) {
+    addLog({ level:"error", server:"auth", message:`Google OAuth error: ${e.message}` });
+    res.redirect("/login?error=google_failed");
+  }
+});
+
 app.post("/api/logout", (req, res) => {
   const user   = req.session.username || "unknown";
   const userId = req.session.userId;
@@ -3456,7 +3550,7 @@ app.use(async (req, res, next) => {
 app.get("/",       requireAuthPage, (req, res) => res.render("index", { adminHref: "/admin", ...DEFAULT_BRANDING }));
 app.get("/status", requireAuthPage, (req, res) => res.render("index", { adminHref: "/", ...DEFAULT_BRANDING }));
 app.get("/admin",  requireAuthPage, (req, res) => res.render("admin"));
-app.get("/login",   (req, res) => res.render("login"));
+app.get("/login",   (req, res) => res.render("login", { googleEnabled: !!googleOAuth }));
 app.get("/privacy", (req, res) => res.render("privacy"));
 app.get("/terms",   (req, res) => res.render("terms"));
 
