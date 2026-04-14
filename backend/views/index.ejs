@@ -183,6 +183,7 @@ body::before{content:'';position:fixed;inset:0;pointer-events:none;background:ra
 .srv-info{min-width:0;flex:1}
 .srv-name{font-size:12px;font-weight:500;color:var(--text-hi);word-break:break-word}
 .srv-host{font-family:var(--mono);font-size:10px;color:var(--text-2);margin-top:2px}
+.srv-desc{font-size:10px;color:var(--text-2);margin-top:2px;opacity:.75;font-style:italic}
 .srv-badge{font-size:10px;font-weight:600;padding:3px 9px;border-radius:10px;flex-shrink:0;letter-spacing:.04em}
 .srv-badge.up      {color:var(--green);background:var(--green-soft)}
 .srv-badge.down    {color:var(--red);background:var(--red-soft)}
@@ -769,6 +770,7 @@ function renderSidebar(){
         <div class="srv-dot ${s.overall||'pending'}"></div>
         <div class="srv-info">
           <div class="srv-name">${s.name}</div>
+          ${s.description ? `<div class="srv-desc">${s.description}</div>` : ""}
           ${sidebarSession.loggedIn ? `<div class="srv-host">${s.host}</div>` : ""}
         </div>
         ${certHtml}

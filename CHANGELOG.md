@@ -4,6 +4,13 @@ All notable changes to this project are documented here.
 
 ---
 
+## [3.1.2] — 2026-04-14
+
+### Added
+- **Server descriptions on dashboard cards** — server cards on the main dashboard now show the description (italic, muted) below the name when one is set, matching the admin sidebar display
+
+---
+
 ## [3.1.1] — 2026-04-14
 
 ### Fixed
