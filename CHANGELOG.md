@@ -4,6 +4,14 @@ All notable changes to this project are documented here.
 
 ---
 
+## [3.1.1] — 2026-04-14
+
+### Fixed
+- **Server card names no longer truncated** — removed `text-overflow:ellipsis` so full names wrap instead of cutting off with `…`
+- **Server cards widened** — minimum card width raised from 160 px to 210 px so long names like "Omada Controller - Puyallup" wrap onto fewer lines
+
+---
+
 ## [3.1.0] — 2026-04-14
 
 ### Added

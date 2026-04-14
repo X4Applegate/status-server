@@ -148,7 +148,7 @@ body::before{content:'';position:fixed;inset:0;pointer-events:none;background:ra
 .srv-group-count{font-size:10px;font-weight:600;color:var(--text-2);padding:2px 7px;border-radius:10px;background:var(--surface);border:1px solid var(--border)}
 .srv-group-chevron{display:flex;align-items:center;justify-content:center;color:var(--text-2);transition:transform .2s}
 .srv-group.collapsed .srv-group-chevron{transform:rotate(-90deg)}
-.srv-group-body{display:grid;grid-template-columns:repeat(auto-fill, minmax(160px, 1fr));gap:8px;max-height:5000px;overflow:hidden;overflow-x:hidden;transition:max-height .25s ease}
+.srv-group-body{display:grid;grid-template-columns:repeat(auto-fill, minmax(210px, 1fr));gap:8px;max-height:5000px;overflow:hidden;overflow-x:hidden;transition:max-height .25s ease}
 .srv-group.collapsed .srv-group-body{max-height:0}
 
 /* Sub-group sections (nested inside a srv-group) */
@@ -181,7 +181,7 @@ body::before{content:'';position:fixed;inset:0;pointer-events:none;background:ra
 .srv-dot.pending {background:var(--text-2)}
 @keyframes blink{0%,100%{opacity:1}50%{opacity:.3}}
 .srv-info{min-width:0;flex:1}
-.srv-name{font-size:12px;font-weight:500;color:var(--text-hi);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.srv-name{font-size:12px;font-weight:500;color:var(--text-hi);word-break:break-word}
 .srv-host{font-family:var(--mono);font-size:10px;color:var(--text-2);margin-top:2px}
 .srv-badge{font-size:10px;font-weight:600;padding:3px 9px;border-radius:10px;flex-shrink:0;letter-spacing:.04em}
 .srv-badge.up      {color:var(--green);background:var(--green-soft)}
