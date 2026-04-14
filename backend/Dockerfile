@@ -1,4 +1,4 @@
-FROM node:20-alpine
+FROM node:25-alpine
 
 # Networking tools for ICMP ping checks, and wget for HEALTHCHECK probe.
 RUN apk add --no-cache iputils wget
