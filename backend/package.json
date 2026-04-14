@@ -1,6 +1,6 @@
 {
   "name": "status-server-backend",
-  "version": "3.0.1",
+  "version": "3.0.2",
   "description": "Self-hosted server status monitor",
   "main": "server.js",
   "engines": {

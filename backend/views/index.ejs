@@ -742,12 +742,15 @@ function renderSidebar(){
         } else {
           bodyHtml = allItems.map(renderRow).join("");
         }
+        const catId = "cat-" + cat.replace(/\W/g,"_");
+        const isCollapsed = collapsedGroups.has(catId);
         return `
-          <div class="srv-group">
-            <div class="srv-group-head">
+          <div class="srv-group ${isCollapsed ? 'collapsed' : ''}">
+            <div class="srv-group-head" onclick="toggleGroup('${catId}')">
               <span class="srv-group-dot" style="background:${dotColor}"></span>
               <span class="srv-group-name">${cat}</span>
               <span class="srv-group-count">${allItems.length}</span>
+              <span class="srv-group-chevron"><svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"/></svg></span>
             </div>
             <div class="srv-group-body">${bodyHtml}</div>
           </div>`;

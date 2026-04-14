@@ -4,6 +4,13 @@ All notable changes to this project are documented here.
 
 ---
 
+## [3.0.2] — 2026-04-14
+
+### Changed
+- **Collapsible group headers** — clicking a category group header (name, dot, count row) on the main dashboard now collapses or expands the group body with a smooth animation and chevron rotation. State is persisted in localStorage so groups stay collapsed across page reloads.
+
+---
+
 ## [2.9.0] — 2026-04-12
 
 ### Added
