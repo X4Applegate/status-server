@@ -2252,13 +2252,15 @@ async function loadSettings(){
   document.getElementById("aCount").textContent = "Settings";
   el.innerHTML = `<div style="padding:20px;color:var(--text-2);font-size:12px">Loading…</div>`;
   try {
-    const [smtpRes, tsRes] = await Promise.all([
+    const [smtpRes, tsRes, goRes] = await Promise.all([
       fetch("/api/admin/settings/smtp"),
-      fetch("/api/admin/settings/turnstile")
+      fetch("/api/admin/settings/turnstile"),
+      fetch("/api/admin/settings/google-oauth")
     ]);
     if (!smtpRes.ok) { el.innerHTML = `<div class="empty-state">Admin role required.</div>`; return; }
-    const s = await smtpRes.json();
-    const t = tsRes.ok ? await tsRes.json() : { enabled:false, site_key:"", secret_key:"" };
+    const s  = await smtpRes.json();
+    const t  = tsRes.ok ? await tsRes.json() : { enabled:false, site_key:"", secret_key:"" };
+    const go = goRes.ok ? await goRes.json() : { enabled:false, client_id:"", client_secret:"", callback_url:"" };
     el.innerHTML = `
       <div style="padding:24px;max-width:640px">
         <div style="margin-bottom:20px">
@@ -2294,9 +2296,49 @@ async function loadSettings(){
           <button class="btn btn-primary" onclick="saveTurnstileSettings()">Save Turnstile Settings</button>
         </div>
         <div id="setTsMsg" style="margin-top:14px;font-size:12px"></div>
+
+        <div style="height:1px;background:var(--border);margin:32px 0"></div>
+
+        <div style="margin-bottom:20px">
+          <div style="font-size:14px;font-weight:600;color:var(--text-hi);margin-bottom:4px">Google OAuth</div>
+          <div style="font-size:12px;color:var(--text-2);line-height:1.6">Let users sign in with their Google account. Create OAuth credentials at <a href="https://console.cloud.google.com/apis/credentials" target="_blank" rel="noopener" style="color:var(--accent)">Google Cloud Console → APIs &amp; Services → Credentials</a>. ${go.enabled ? '<span style="color:var(--green)">● Enabled</span>' : '<span style="color:var(--orange)">● Disabled</span>'}</div>
+        </div>
+        <div class="form-grid">
+          <div class="fg full"><label class="flabel"><input type="checkbox" id="setGoEnabled" ${go.enabled ? 'checked' : ''} style="vertical-align:middle;margin-right:6px">Enable Sign in with Google</label></div>
+          <div class="fg full"><label class="flabel">Client ID</label><input class="finput" id="setGoClientId" placeholder="123456789.apps.googleusercontent.com" value="${go.client_id || ''}"></div>
+          <div class="fg full"><label class="flabel">Client Secret</label><input class="finput" id="setGoClientSecret" type="password" placeholder="${go.client_secret ? '(leave blank to keep current)' : 'GOCSPX-...'}" value=""></div>
+          <div class="fg full"><label class="flabel">Authorized Redirect URI <span style="font-weight:400;text-transform:none;letter-spacing:0;color:var(--text-2)">(add this to your Google OAuth app)</span></label><input class="finput" value="${go.callback_url || ''}" readonly onclick="this.select()" style="cursor:pointer;color:var(--text-2)"></div>
+        </div>
+        <div style="display:flex;gap:10px;margin-top:20px;flex-wrap:wrap">
+          <button class="btn btn-primary" onclick="saveGoogleOAuthSettings()">Save Google OAuth Settings</button>
+        </div>
+        <div id="setGoMsg" style="margin-top:14px;font-size:12px"></div>
       </div>`;
   } catch(e) {
     el.innerHTML = `<div class="empty-state">Failed to load settings: ${e.message}</div>`;
+  }
+}
+
+async function saveGoogleOAuthSettings(){
+  const msg = document.getElementById("setGoMsg");
+  msg.textContent = "Saving…"; msg.style.color = "var(--text-2)";
+  const body = {
+    enabled:       document.getElementById("setGoEnabled").checked,
+    client_id:     document.getElementById("setGoClientId").value.trim(),
+    client_secret: document.getElementById("setGoClientSecret").value
+  };
+  try {
+    const r = await fetch("/api/admin/settings/google-oauth", {
+      method: "POST", headers: {"Content-Type":"application/json"}, body: JSON.stringify(body)
+    });
+    const d = await r.json();
+    if (!r.ok) { msg.textContent = "Error: " + (d.error || "Failed"); msg.style.color = "var(--red)"; return; }
+    msg.textContent = d.enabled ? "Saved — Google OAuth is now active on the login page" : "Saved — Google OAuth disabled";
+    msg.style.color = "var(--green)";
+    toast("Google OAuth settings saved", "success");
+    document.getElementById("setGoClientSecret").value = "";
+  } catch(e) {
+    msg.textContent = "Error: " + e.message; msg.style.color = "var(--red)";
   }
 }
 

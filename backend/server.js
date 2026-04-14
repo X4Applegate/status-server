@@ -94,13 +94,31 @@ const APP_HOME_URL  = process.env.APP_HOME_URL      || "/";
 const EXTERNAL_URL  = (process.env.EXTERNAL_URL || "").replace(/\/+$/, "");  // optional fallback when no custom_domain
 const GITHUB_REPO   = "X4Applegate/status-server";
 
-// Google OAuth — set GOOGLE_CLIENT_ID + GOOGLE_CLIENT_SECRET to enable
-const GOOGLE_CLIENT_ID     = process.env.GOOGLE_CLIENT_ID     || "";
-const GOOGLE_CLIENT_SECRET = process.env.GOOGLE_CLIENT_SECRET || "";
-const GOOGLE_CALLBACK_URL  = process.env.GOOGLE_CALLBACK_URL  || `${EXTERNAL_URL}/auth/google/callback`;
-const googleOAuth = (GOOGLE_CLIENT_ID && GOOGLE_CLIENT_SECRET)
-  ? new OAuth2Client(GOOGLE_CLIENT_ID, GOOGLE_CLIENT_SECRET, GOOGLE_CALLBACK_URL)
-  : null;
+// Google OAuth — configured via Admin → Settings (stored in DB)
+const GOOGLE_CALLBACK_URL = process.env.GOOGLE_CALLBACK_URL || `${EXTERNAL_URL}/auth/google/callback`;
+let googleOAuthConfig = { enabled: false, client_id: "", client_secret: "" };
+let googleOAuth = null;
+
+function rebuildGoogleOAuthClient() {
+  googleOAuth = (googleOAuthConfig.enabled && googleOAuthConfig.client_id && googleOAuthConfig.client_secret)
+    ? new OAuth2Client(googleOAuthConfig.client_id, googleOAuthConfig.client_secret, GOOGLE_CALLBACK_URL)
+    : null;
+}
+
+async function loadGoogleOAuthFromDb() {
+  if (!db) return;
+  try {
+    const [rows] = await db.query("SELECT key_name, value FROM status_settings WHERE key_name LIKE 'google_oauth_%'");
+    const m = {};
+    rows.forEach(r => { m[r.key_name] = r.value; });
+    googleOAuthConfig = {
+      enabled:       m.google_oauth_enabled === "true",
+      client_id:     m.google_oauth_client_id     || "",
+      client_secret: m.google_oauth_client_secret || ""
+    };
+    rebuildGoogleOAuthClient();
+  } catch(e) { /* settings table may not exist yet */ }
+}
 const PORT          = process.env.PORT              || 3000;
 const CONFIG_PATH   = process.env.CONFIG_PATH    || "/config/servers.json";
 const CHECK_INTERVAL= parseInt(process.env.CHECK_INTERVAL || "30000");
@@ -661,6 +679,7 @@ async function initDB() {
   // Load SMTP config from DB (overrides env vars if set)
   await loadSmtpFromDb();
   await loadTurnstileFromDb();
+  await loadGoogleOAuthFromDb();
 
   // No longer auto-creates admin — first user signs up via /login
 
@@ -2000,7 +2019,7 @@ app.get("/auth/google/callback", async (req, res) => {
   delete req.session.oauthState;
   try {
     const { tokens } = await googleOAuth.getToken(String(code));
-    const ticket = await googleOAuth.verifyIdToken({ idToken: tokens.id_token, audience: GOOGLE_CLIENT_ID });
+    const ticket = await googleOAuth.verifyIdToken({ idToken: tokens.id_token, audience: googleOAuthConfig.client_id });
     const payload   = ticket.getPayload();
     const googleId  = payload.sub;
     const email     = payload.email     || null;
@@ -2471,6 +2490,39 @@ app.post("/api/admin/settings/turnstile", requireAdmin, async (req, res) => {
     turnstileConfig = { enabled: newEnabled, site_key: newSiteKey, secret_key: finalSecret || "" };
     addLog({ level:"info", server:"admin", message:`Turnstile ${newEnabled ? "enabled" : "disabled"} by ${req.session.username}` });
     res.json({ ok: true, enabled: turnstileConfig.enabled });
+  } catch(e) { res.status(500).json({ error: e.message }); }
+});
+
+app.get("/api/admin/settings/google-oauth", requireAdmin, async (req, res) => {
+  res.json({
+    enabled:       googleOAuthConfig.enabled,
+    client_id:     googleOAuthConfig.client_id,
+    client_secret: googleOAuthConfig.client_secret ? "********" : "",
+    callback_url:  GOOGLE_CALLBACK_URL
+  });
+});
+
+app.post("/api/admin/settings/google-oauth", requireAdmin, async (req, res) => {
+  const { enabled, client_id, client_secret } = req.body;
+  try {
+    const newEnabled  = !!enabled;
+    const newClientId = (client_id || "").trim();
+    const finalSecret = (client_secret && client_secret !== "********") ? client_secret.trim() : googleOAuthConfig.client_secret;
+    if (newEnabled && (!newClientId || !finalSecret)) {
+      return res.status(400).json({ error: "Client ID and Client Secret are both required to enable Google OAuth" });
+    }
+    const settings = [
+      ["google_oauth_enabled",       newEnabled ? "true" : "false"],
+      ["google_oauth_client_id",     newClientId],
+      ["google_oauth_client_secret", finalSecret || ""]
+    ];
+    for (const [k, v] of settings) {
+      await db.query("INSERT INTO status_settings (key_name, value) VALUES (?, ?) ON DUPLICATE KEY UPDATE value=VALUES(value)", [k, v]);
+    }
+    googleOAuthConfig = { enabled: newEnabled, client_id: newClientId, client_secret: finalSecret || "" };
+    rebuildGoogleOAuthClient();
+    addLog({ level:"info", server:"admin", message:`Google OAuth ${newEnabled ? "enabled" : "disabled"} by ${req.session.username}` });
+    res.json({ ok: true, enabled: newEnabled });
   } catch(e) { res.status(500).json({ error: e.message }); }
 });
 
