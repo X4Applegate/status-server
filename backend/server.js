@@ -450,6 +450,8 @@ async function initDB() {
       name              VARCHAR(255) NOT NULL,
       host              VARCHAR(255) NOT NULL,
       description       TEXT,
+      category          VARCHAR(100) DEFAULT NULL,
+      sub_category      VARCHAR(100) DEFAULT NULL,
       tags              JSON,
       checks            JSON,
       sort_order        INT DEFAULT 0,
@@ -464,6 +466,9 @@ async function initDB() {
   } catch(e) { /* column already exists */ }
   try {
     await db.query("ALTER TABLE status_servers ADD COLUMN category VARCHAR(100) DEFAULT NULL");
+  } catch(e) { /* column already exists */ }
+  try {
+    await db.query("ALTER TABLE status_servers ADD COLUMN sub_category VARCHAR(100) DEFAULT NULL");
   } catch(e) { /* column already exists */ }
   try {
     await db.query("ALTER TABLE status_servers ADD COLUMN failure_threshold INT NOT NULL DEFAULT 1");
@@ -742,6 +747,7 @@ async function loadConfig() {
       host:              r.host,
       description:       r.description || "",
       category:          r.category || "",
+      sub_category:      r.sub_category || "",
       poll_interval_sec: r.poll_interval_sec || 30,
       failure_threshold: Math.max(1, Math.min(10, r.failure_threshold || 1)),
       group_ids:         groupsByServer[r.id] || [],
@@ -770,7 +776,7 @@ async function loadConfig() {
         for (const s of needsHistory) {
           if (histByServer[s.id]) {
             if (!serverStatus[s.id]) {
-              serverStatus[s.id] = { id:s.id, name:s.name, host:s.host, description:s.description, category:s.category, group_ids:s.group_ids, tags:s.tags, checks:[], overall:"pending", lastChecked:null, uptimeHistory: histByServer[s.id] };
+              serverStatus[s.id] = { id:s.id, name:s.name, host:s.host, description:s.description, category:s.category, sub_category:s.sub_category, group_ids:s.group_ids, tags:s.tags, checks:[], overall:"pending", lastChecked:null, uptimeHistory: histByServer[s.id] };
             } else {
               serverStatus[s.id].uptimeHistory = histByServer[s.id];
             }
@@ -781,7 +787,7 @@ async function loadConfig() {
 
     serverConfig.forEach(s => {
       if (!serverStatus[s.id]) {
-        serverStatus[s.id] = { id:s.id, name:s.name, host:s.host, description:s.description, category:s.category, group_ids:s.group_ids, tags:s.tags, checks:[], overall:"pending", lastChecked:null, uptimeHistory:[] };
+        serverStatus[s.id] = { id:s.id, name:s.name, host:s.host, description:s.description, category:s.category, sub_category:s.sub_category, group_ids:s.group_ids, tags:s.tags, checks:[], overall:"pending", lastChecked:null, uptimeHistory:[] };
       } else {
         // Keep group_ids in sync on existing entries
         serverStatus[s.id].group_ids = s.group_ids;
@@ -1924,7 +1930,7 @@ async function pollAll(force = false) {
       }
     }
 
-    serverStatus[def.id] = { id:def.id, name:def.name, host:def.host, description:def.description||"", category:def.category||"", group_ids:def.group_ids||[], tags:def.tags||[], checks, overall, lastChecked:now, uptimeHistory:history, failStreak };
+    serverStatus[def.id] = { id:def.id, name:def.name, host:def.host, description:def.description||"", category:def.category||"", sub_category:def.sub_category||"", group_ids:def.group_ids||[], tags:def.tags||[], checks, overall, lastChecked:now, uptimeHistory:history, failStreak };
     // Record to DB (non-blocking)
     recordHistory(def, checks, overall).catch(() => {});
   }));
@@ -2341,7 +2347,7 @@ app.get("/api/admin/servers", requireAuth, async (req, res) => {
 });
 
 app.post("/api/admin/servers", requireAuth, async (req, res) => {
-  const { name, host, description, category, tags, checks, group_ids, poll_interval_sec, failure_threshold } = req.body;
+  const { name, host, description, category, sub_category, tags, checks, group_ids, poll_interval_sec, failure_threshold } = req.body;
   if (!name || !host) return res.status(400).json({ error:"name and host are required" });
   const wantGroups = Array.isArray(group_ids) ? group_ids.map(g => parseInt(g)).filter(Number.isFinite) : [];
   const interval = Math.max(10, Math.min(3600, parseInt(poll_interval_sec) || 30));
@@ -2355,8 +2361,8 @@ app.post("/api/admin/servers", requireAuth, async (req, res) => {
   const id = name.toLowerCase().replace(/[^a-z0-9]+/g,"-").replace(/^-|-$/g,"") + "-" + Date.now();
   try {
     await db.query(
-      "INSERT INTO status_servers (id, name, host, description, category, tags, checks, poll_interval_sec, failure_threshold) VALUES (?,?,?,?,?,?,?,?,?)",
-      [id, name, host, description||"", (category||"").trim() || null, JSON.stringify(tags||[]), JSON.stringify(checks||[{type:"ping"}]), interval, threshold]
+      "INSERT INTO status_servers (id, name, host, description, category, sub_category, tags, checks, poll_interval_sec, failure_threshold) VALUES (?,?,?,?,?,?,?,?,?,?)",
+      [id, name, host, description||"", (category||"").trim() || null, (sub_category||"").trim() || null, JSON.stringify(tags||[]), JSON.stringify(checks||[{type:"ping"}]), interval, threshold]
     );
     await setServerGroupIds(id, wantGroups);
     await loadConfig();
@@ -2369,7 +2375,7 @@ app.post("/api/admin/servers", requireAuth, async (req, res) => {
 });
 
 app.put("/api/admin/servers/:id", requireAuth, async (req, res) => {
-  const { name, host, description, category, tags, checks, group_ids, poll_interval_sec, failure_threshold } = req.body;
+  const { name, host, description, category, sub_category, tags, checks, group_ids, poll_interval_sec, failure_threshold } = req.body;
   if (!name || !host) return res.status(400).json({ error:"name and host are required" });
   const wantGroups = Array.isArray(group_ids) ? group_ids.map(g => parseInt(g)).filter(Number.isFinite) : [];
   const interval = Math.max(10, Math.min(3600, parseInt(poll_interval_sec) || 30));
@@ -2404,8 +2410,8 @@ app.put("/api/admin/servers/:id", requireAuth, async (req, res) => {
       }
     }
     const [result] = await db.query(
-      "UPDATE status_servers SET name=?, host=?, description=?, category=?, tags=?, checks=?, poll_interval_sec=?, failure_threshold=?, updated_at=NOW() WHERE id=?",
-      [name, host, description||"", (category||"").trim() || null, JSON.stringify(tags||[]), JSON.stringify(checks||[]), interval, threshold, req.params.id]
+      "UPDATE status_servers SET name=?, host=?, description=?, category=?, sub_category=?, tags=?, checks=?, poll_interval_sec=?, failure_threshold=?, updated_at=NOW() WHERE id=?",
+      [name, host, description||"", (category||"").trim() || null, (sub_category||"").trim() || null, JSON.stringify(tags||[]), JSON.stringify(checks||[]), interval, threshold, req.params.id]
     );
     if (result.affectedRows === 0) return res.status(404).json({ error:"Server not found" });
     // Admins with undefined group_ids leave groups alone; otherwise replace the full set.
@@ -3379,7 +3385,7 @@ app.get("/api/public/servers", requireAuth, async (req, res) => {
     }
     const servers = list.map(s => ({
       id: s.id, name: s.name, host: s.host,
-      description: s.description, category: s.category || "", tags: s.tags, group_ids: s.group_ids || [],
+      description: s.description, category: s.category || "", sub_category: s.sub_category || "", tags: s.tags, group_ids: s.group_ids || [],
       checks: s.checks || [],                  // includes cert info for HTTPS checks
       overall: s.overall, lastChecked: s.lastChecked,
       uptimeHistory: s.uptimeHistory
@@ -3401,7 +3407,7 @@ app.get("/api/public/group/:slug", async (req, res) => {
       .filter(s => Array.isArray(s.group_ids) && s.group_ids.includes(g.id))
       .map(s => ({
         id: s.id, name: s.name, host: s.host,
-        description: s.description, category: s.category || "", tags: s.tags, group_ids: s.group_ids,
+        description: s.description, category: s.category || "", sub_category: s.sub_category || "", tags: s.tags, group_ids: s.group_ids,
         checks: s.checks || [],              // includes cert info for HTTPS checks
         overall: s.overall, lastChecked: s.lastChecked,
         uptimeHistory: s.uptimeHistory

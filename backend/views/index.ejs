@@ -145,6 +145,18 @@ body::before{content:'';position:fixed;inset:0;pointer-events:none;background:ra
 .srv-group-body{display:grid;grid-template-columns:repeat(auto-fill, minmax(280px, 1fr));gap:12px;grid-column:1/-1;max-height:5000px;overflow:hidden;transition:max-height .25s ease}
 .srv-group.collapsed .srv-group-body{max-height:0}
 
+/* Sub-group sections (nested inside a srv-group) */
+.srv-subgroup{grid-column:1/-1}
+.srv-subgroup-head{display:flex;align-items:center;gap:7px;padding:8px 4px 8px 16px;cursor:pointer;user-select:none;grid-column:1/-1}
+.srv-subgroup-head:hover{background:var(--surface);border-radius:6px}
+.srv-subgroup-bar{width:2px;height:14px;border-radius:1px;flex-shrink:0}
+.srv-subgroup-name{font-size:11px;font-weight:600;color:var(--text-2);letter-spacing:.05em;text-transform:uppercase;flex:1}
+.srv-subgroup-count{font-size:10px;font-weight:600;color:var(--text-2);padding:1px 6px;border-radius:8px;background:var(--surface);border:1px solid var(--border)}
+.srv-subgroup-chevron{display:flex;align-items:center;justify-content:center;color:var(--text-2);transition:transform .2s}
+.srv-subgroup.collapsed .srv-subgroup-chevron{transform:rotate(-90deg)}
+.srv-subgroup-body{display:grid;grid-template-columns:repeat(auto-fill, minmax(280px, 1fr));gap:12px;grid-column:1/-1;padding-left:16px;max-height:5000px;overflow:hidden;transition:max-height .25s ease}
+.srv-subgroup.collapsed .srv-subgroup-body{max-height:0}
+
 /* Quick create button */
 .srv-create-btn{display:flex;align-items:center;gap:8px;padding:14px 20px;font-size:11px;font-weight:600;color:var(--blue);text-decoration:none;border:1px dashed var(--border-hi);border-radius:12px;letter-spacing:.04em;text-transform:uppercase;transition:background .15s;grid-column:1/-1}
 .srv-create-btn:hover{background:var(--blue-soft)}
@@ -684,32 +696,129 @@ function renderSidebar(){
     const hasCategories = servers.some(s => (s.category || "").trim());
     if (hasCategories) {
       // Preserve insertion order of categories as they appear in the server list.
-      const order = [];
+      const catOrder = [];
       const byCat = {};
       for (const s of servers) {
         const cat = (s.category || "").trim() || "Other";
-        if (!byCat[cat]) { byCat[cat] = []; order.push(cat); }
-        byCat[cat].push(s);
+        if (!byCat[cat]) { byCat[cat] = { order: [], bySubCat: {} }; catOrder.push(cat); }
+        const subCat = (s.sub_category || "").trim();
+        const key = subCat || "\0";
+        if (!byCat[cat].bySubCat[key]) { byCat[cat].bySubCat[key] = []; byCat[cat].order.push(key); }
+        byCat[cat].bySubCat[key].push(s);
       }
-      el.innerHTML = order.map(cat => {
-        const items = byCat[cat];
-        const downCount = items.filter(s => s.overall === "down").length;
-        const degCount  = items.filter(s => s.overall === "degraded").length;
+      el.innerHTML = catOrder.map(cat => {
+        const { order: subOrder, bySubCat } = byCat[cat];
+        const allItems = subOrder.flatMap(k => bySubCat[k]);
+        const downCount = allItems.filter(s => s.overall === "down").length;
+        const degCount  = allItems.filter(s => s.overall === "degraded").length;
         const dotColor  = downCount > 0 ? "var(--red)" : degCount > 0 ? "var(--orange)" : "var(--green)";
+        // Check if any server in this section actually has a sub_category
+        const hasSubCats = subOrder.some(k => k !== "\0");
+        let bodyHtml;
+        if (hasSubCats) {
+          // Render sub-groups; servers with no sub_category go under an implicit unsorted block
+          bodyHtml = subOrder.map(key => {
+            const items = bySubCat[key];
+            const subDown = items.filter(s => s.overall === "down").length;
+            const subDeg  = items.filter(s => s.overall === "degraded").length;
+            const barColor = subDown > 0 ? "var(--red)" : subDeg > 0 ? "var(--orange)" : "var(--green)";
+            const subId = "sub-" + cat.replace(/\W/g,"_") + "-" + key.replace(/\W/g,"_");
+            const isCollapsed = collapsedGroups.has(subId);
+            if (key === "\0") {
+              // No sub_category — render inline without a sub-heading
+              return items.map(renderRow).join("");
+            }
+            return `
+              <div class="srv-subgroup ${isCollapsed ? 'collapsed' : ''}">
+                <div class="srv-subgroup-head" onclick="toggleGroup('${subId}')">
+                  <span class="srv-subgroup-bar" style="background:${barColor}"></span>
+                  <span class="srv-subgroup-name">${key}</span>
+                  <span class="srv-subgroup-count">${items.length}</span>
+                  <span class="srv-subgroup-chevron"><svg width="9" height="9" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"/></svg></span>
+                </div>
+                <div class="srv-subgroup-body">${items.map(renderRow).join("")}</div>
+              </div>`;
+          }).join("");
+        } else {
+          bodyHtml = allItems.map(renderRow).join("");
+        }
         return `
           <div class="srv-group">
             <div class="srv-group-head">
               <span class="srv-group-dot" style="background:${dotColor}"></span>
               <span class="srv-group-name">${cat}</span>
-              <span class="srv-group-count">${items.length}</span>
+              <span class="srv-group-count">${allItems.length}</span>
             </div>
-            <div class="srv-group-body">${items.map(renderRow).join("")}</div>
+            <div class="srv-group-body">${bodyHtml}</div>
           </div>`;
       }).join("");
     } else {
       el.innerHTML = servers.map(renderRow).join("");
     }
     return;
+  }
+
+  // Helper: render items with optional category → sub_category nesting.
+  // groupKeyPrefix is used to generate stable collapse IDs (e.g. "g42", "ungrouped").
+  function renderBodyWithSections(items, groupKeyPrefix) {
+    const hasCats = items.some(s => (s.category || "").trim());
+    if (!hasCats) return items.map(renderRow).join("");
+
+    const catOrder = [];
+    const byCat = {};
+    for (const s of items) {
+      const cat = (s.category || "").trim() || "Other";
+      if (!byCat[cat]) { byCat[cat] = { order: [], bySubCat: {} }; catOrder.push(cat); }
+      const subCat = (s.sub_category || "").trim();
+      const key = subCat || "\0";
+      if (!byCat[cat].bySubCat[key]) { byCat[cat].bySubCat[key] = []; byCat[cat].order.push(key); }
+      byCat[cat].bySubCat[key].push(s);
+    }
+
+    return catOrder.map(cat => {
+      const { order: subOrder, bySubCat } = byCat[cat];
+      const allItems = subOrder.flatMap(k => bySubCat[k]);
+      const downC = allItems.filter(s => s.overall === "down").length;
+      const degC  = allItems.filter(s => s.overall === "degraded").length;
+      const dotC  = downC > 0 ? "var(--red)" : degC > 0 ? "var(--orange)" : "var(--green)";
+      const hasSubCats = subOrder.some(k => k !== "\0");
+      let bodyHtml;
+      if (hasSubCats) {
+        bodyHtml = subOrder.map(key => {
+          const sitems = bySubCat[key];
+          const subDown = sitems.filter(s => s.overall === "down").length;
+          const subDeg  = sitems.filter(s => s.overall === "degraded").length;
+          const barColor = subDown > 0 ? "var(--red)" : subDeg > 0 ? "var(--orange)" : "var(--green)";
+          if (key === "\0") return sitems.map(renderRow).join("");
+          const subId = groupKeyPrefix + "-cat-" + cat.replace(/\W/g,"_") + "-sub-" + key.replace(/\W/g,"_");
+          const isC = collapsedGroups.has(subId);
+          return `
+            <div class="srv-subgroup ${isC ? 'collapsed' : ''}">
+              <div class="srv-subgroup-head" onclick="toggleGroup('${subId}')">
+                <span class="srv-subgroup-bar" style="background:${barColor}"></span>
+                <span class="srv-subgroup-name">${key}</span>
+                <span class="srv-subgroup-count">${sitems.length}</span>
+                <span class="srv-subgroup-chevron"><svg width="9" height="9" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"/></svg></span>
+              </div>
+              <div class="srv-subgroup-body">${sitems.map(renderRow).join("")}</div>
+            </div>`;
+        }).join("");
+      } else {
+        bodyHtml = allItems.map(renderRow).join("");
+      }
+      const catId = groupKeyPrefix + "-cat-" + cat.replace(/\W/g,"_");
+      const isCatC = collapsedGroups.has(catId);
+      return `
+        <div class="srv-subgroup ${isCatC ? 'collapsed' : ''}">
+          <div class="srv-subgroup-head" onclick="toggleGroup('${catId}')">
+            <span class="srv-subgroup-bar" style="background:${dotC}"></span>
+            <span class="srv-subgroup-name">${cat}</span>
+            <span class="srv-subgroup-count">${allItems.length}</span>
+            <span class="srv-subgroup-chevron"><svg width="9" height="9" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"/></svg></span>
+          </div>
+          <div class="srv-subgroup-body">${bodyHtml}</div>
+        </div>`;
+    }).join("");
   }
 
   // Master view → group servers by their dashboard group(s).
@@ -739,7 +848,7 @@ function renderSidebar(){
           <span class="srv-group-count">${groupServers.length}</span>
           <span class="srv-group-chevron"><svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"/></svg></span>
         </div>
-        <div class="srv-group-body">${groupServers.map(renderRow).join("")}</div>
+        <div class="srv-group-body">${renderBodyWithSections(groupServers, "g" + g.id)}</div>
       </div>`);
   }
 
@@ -758,7 +867,7 @@ function renderSidebar(){
           <span class="srv-group-count">${ungrouped.length}</span>
           <span class="srv-group-chevron"><svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"/></svg></span>
         </div>
-        <div class="srv-group-body">${ungrouped.map(renderRow).join("")}</div>
+        <div class="srv-group-body">${renderBodyWithSections(ungrouped, "ungrouped")}</div>
       </div>`);
   }
 
