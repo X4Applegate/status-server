@@ -200,6 +200,15 @@ body{font-family:var(--sans);background:var(--bg);color:var(--text);min-height:1
 .drawer-close{width:28px;height:28px;border-radius:6px;border:1px solid var(--border);background:var(--surface);color:var(--text);cursor:pointer;display:flex;align-items:center;justify-content:center;font-size:14px}
 .drawer-close:hover{background:var(--surface2);color:var(--text-white)}
 .drawer-toolbar{padding:10px 18px;border-bottom:1px solid var(--border);display:flex;align-items:center;gap:8px;flex-shrink:0;flex-wrap:wrap}
+.server-search-bar{padding:8px 18px;border-bottom:1px solid var(--border);flex-shrink:0;display:none}
+.server-search-bar.visible{display:block}
+.server-search-input{width:100%;background:var(--surface);border:1px solid var(--border);border-radius:7px;padding:7px 34px 7px 12px;font-size:12px;color:var(--text-hi);outline:none;box-sizing:border-box;transition:border-color .15s}
+.server-search-input:focus{border-color:var(--blue)}
+.server-search-wrap{position:relative}
+.server-search-wrap svg{position:absolute;right:10px;top:50%;transform:translateY(-50%);width:14px;height:14px;color:var(--text-2);pointer-events:none}
+.server-search-clear{position:absolute;right:10px;top:50%;transform:translateY(-50%);width:16px;height:16px;cursor:pointer;color:var(--text-2);display:none;align-items:center;justify-content:center;background:var(--surface2);border-radius:50%}
+.server-search-clear:hover{color:var(--text-hi)}
+.server-search-clear.visible{display:flex}
 .drawer-spacer{flex:1}
 .drawer-body{flex:1;min-height:0;overflow-y:auto;overflow-x:hidden}
 .drawer-body::-webkit-scrollbar{width:3px}
@@ -538,6 +547,13 @@ body{font-family:var(--sans);background:var(--bg);color:var(--text);min-height:1
       <span style="font-size:11px;color:var(--text-2)" id="aCount"></span>
       <div class="drawer-spacer"></div>
       <button class="btn btn-primary" id="addBtn" onclick="showServerForm(null)" style="font-size:11px;padding:5px 11px"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" style="width:12px;height:12px"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg><span id="addBtnLabel">Add Server</span></button>
+    </div>
+    <div class="server-search-bar" id="serverSearchBar">
+      <div class="server-search-wrap">
+        <input class="server-search-input" id="serverSearchInput" type="text" placeholder="Filter by name, host, section..." oninput="onServerSearch(this.value)">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" id="serverSearchIcon"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+        <span class="server-search-clear" id="serverSearchClear" onclick="clearServerSearch()" title="Clear">&#x2715;</span>
+      </div>
     </div>
     <div class="drawer-body" id="adminPanelBody"></div>
     <div class="drawer-footer"><span>Saves to MariaDB instantly</span><span style="color:var(--blue);font-size:10px">Click to edit</span></div>
@@ -1608,6 +1624,14 @@ async function switchTab(tab){
   document.getElementById("aGroupFormView").style.display   = "none";
   document.getElementById("aOmadaFormView").style.display   = "none";
   document.getElementById("aOmadaSitesView").style.display  = "none";
+  // Show search bar only on servers tab; reset it when switching away
+  const searchBar = document.getElementById("serverSearchBar");
+  if (tab === "servers") {
+    searchBar.classList.add("visible");
+  } else {
+    searchBar.classList.remove("visible");
+    clearServerSearch();
+  }
   // Load content
   if      (tab === "servers")  await loadServerList();
   else if (tab === "groups")   await loadGroupList();
@@ -1618,8 +1642,35 @@ async function switchTab(tab){
   else                         await loadWebhookList();
 }
 
+// ── Server search ─────────────────────────────────────────────────────────────
+function onServerSearch(q){
+  document.getElementById("serverSearchClear").classList.toggle("visible", q.length > 0);
+  document.getElementById("serverSearchIcon").style.display = q.length > 0 ? "none" : "";
+  renderAdminServerList(adminServers);
+}
+function clearServerSearch(){
+  const inp = document.getElementById("serverSearchInput");
+  if (!inp) return;
+  inp.value = "";
+  document.getElementById("serverSearchClear").classList.remove("visible");
+  document.getElementById("serverSearchIcon").style.display = "";
+  renderAdminServerList(adminServers);
+}
+
 // ── Server list ───────────────────────────────────────────────────────────────
 function renderAdminServerList(list){
+  // If a search is active, apply it to whatever list we receive
+  const q = (document.getElementById("serverSearchInput")?.value || "").trim().toLowerCase();
+  if (q) {
+    list = list.filter(s =>
+      (s.name        || "").toLowerCase().includes(q) ||
+      (s.host        || "").toLowerCase().includes(q) ||
+      (s.category    || "").toLowerCase().includes(q) ||
+      (s.sub_category|| "").toLowerCase().includes(q) ||
+      (s.description || "").toLowerCase().includes(q) ||
+      (s.tags        || []).some(t => t.toLowerCase().includes(q))
+    );
+  }
   const el = document.getElementById("adminPanelBody");
   document.getElementById("aCount").textContent = `${list.length} server${list.length===1?"":"s"}`;
   if (!list.length){
