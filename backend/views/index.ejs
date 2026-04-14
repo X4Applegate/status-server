@@ -116,46 +116,58 @@ body::before{content:'';position:fixed;inset:0;pointer-events:none;background:ra
 .layout{position:relative;z-index:1;flex:1;overflow:hidden;min-height:calc(100vh - 64px)}
 
 /* -- SERVER LIST (full-screen grid) -- */
-.sidebar{width:100%;height:100%;background:var(--bg);overflow-y:auto;padding:24px 32px}
-.sidebar::-webkit-scrollbar{width:4px}
-.sidebar::-webkit-scrollbar-thumb{background:var(--surface2);border-radius:2px}
+.sidebar{width:100%;height:100%;background:var(--bg);position:relative;overflow:hidden}
+.sidebar-scroll{width:100%;height:100%;overflow-y:auto;overflow-x:hidden;padding:16px 20px}
+.sidebar-scroll::-webkit-scrollbar{width:4px}
+.sidebar-scroll::-webkit-scrollbar-thumb{background:var(--surface2);border-radius:2px}
+.sb-scroll-btn{position:absolute;right:7px;width:22px;height:22px;border-radius:50%;background:var(--surface2);border:1px solid var(--border);color:var(--text-2);cursor:pointer;font-size:9px;display:flex;align-items:center;justify-content:center;z-index:10;opacity:0;pointer-events:none;transition:opacity .15s,background .1s;line-height:1;padding:0;font-family:var(--sans)}
+.sb-scroll-btn.visible{opacity:.75;pointer-events:auto}
+.sb-scroll-btn:hover{opacity:1!important;color:var(--text-hi);background:var(--border-hi)}
+.sb-scroll-up{top:7px}
+.sb-scroll-dn{bottom:7px}
 .sidebar-header{padding:0 0 16px;flex-shrink:0}
 .sidebar-title{font-size:11px;font-weight:600;letter-spacing:.08em;text-transform:uppercase;color:var(--text-2)}
-.sidebar-body{columns:320px;column-gap:20px;display:block}
+.sidebar-body{columns:640px;column-gap:24px;display:block;overflow-x:hidden}
 
 /* Server card */
-.srv-row{display:flex;flex-direction:column;gap:10px;padding:16px 20px;cursor:pointer;border:1px solid var(--border);border-radius:12px;background:var(--surface);transition:border-color .18s,box-shadow .18s,transform .1s}
+.srv-row{display:flex;flex-direction:column;gap:7px;padding:11px 14px;cursor:pointer;border:1px solid var(--border);border-radius:10px;background:var(--surface);transition:border-color .18s,box-shadow .18s,transform .1s}
 .srv-row:hover{border-color:var(--border-hi);box-shadow:0 4px 16px rgba(0,0,0,.2);transform:translateY(-1px)}
 .srv-row.active{border-color:var(--blue);box-shadow:0 0 0 1px var(--blue)}
 .srv-hb-bar{display:flex;gap:2px;width:100%;align-items:flex-end}
-.srv-hb-dot{flex:1;height:6px;border-radius:1px}
+.srv-hb-dot{flex:1;height:4px;border-radius:1px}
 .srv-hb-dot.up{background:var(--green);opacity:.6}
 .srv-hb-dot.down{background:var(--red);opacity:1;box-shadow:0 0 4px var(--red)}
 .srv-hb-dot.pending{background:var(--surface2)}
 
 /* Grouped sections — break-inside keeps each group whole within its column */
-.srv-group{break-inside:avoid;display:block;margin-bottom:20px}
-.srv-group-head{display:flex;align-items:center;gap:9px;padding:14px 4px;cursor:pointer;user-select:none;transition:background .15s}
+.srv-group{break-inside:avoid;display:block;margin-bottom:16px}
+.srv-group-head{display:flex;align-items:center;gap:7px;padding:9px 6px;cursor:pointer;user-select:none;transition:background .15s}
 .srv-group-head:hover{background:var(--surface);border-radius:8px}
 .srv-group-dot{width:8px;height:8px;border-radius:50%;flex-shrink:0;box-shadow:0 0 6px rgba(255,255,255,.08)}
 .srv-group-name{font-size:12px;font-weight:700;color:var(--text-hi);letter-spacing:.06em;text-transform:uppercase;flex:1;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .srv-group-count{font-size:10px;font-weight:600;color:var(--text-2);padding:2px 7px;border-radius:10px;background:var(--surface);border:1px solid var(--border)}
 .srv-group-chevron{display:flex;align-items:center;justify-content:center;color:var(--text-2);transition:transform .2s}
 .srv-group.collapsed .srv-group-chevron{transform:rotate(-90deg)}
-.srv-group-body{display:grid;grid-template-columns:repeat(auto-fill, minmax(300px, 1fr));gap:12px;max-height:5000px;overflow:hidden;transition:max-height .25s ease}
+.srv-group-body{display:grid;grid-template-columns:repeat(auto-fill, minmax(160px, 1fr));gap:8px;max-height:5000px;overflow:hidden;overflow-x:hidden;transition:max-height .25s ease}
 .srv-group.collapsed .srv-group-body{max-height:0}
 
 /* Sub-group sections (nested inside a srv-group) */
 .srv-subgroup{break-inside:avoid;display:block}
-.srv-subgroup-head{display:flex;align-items:center;gap:7px;padding:8px 4px 8px 16px;cursor:pointer;user-select:none}
-.srv-subgroup-head:hover{background:var(--surface);border-radius:6px}
-.srv-subgroup-bar{width:2px;height:14px;border-radius:1px;flex-shrink:0}
-.srv-subgroup-name{font-size:11px;font-weight:600;color:var(--text-2);letter-spacing:.05em;text-transform:uppercase;flex:1}
-.srv-subgroup-count{font-size:10px;font-weight:600;color:var(--text-2);padding:1px 6px;border-radius:8px;background:var(--surface);border:1px solid var(--border)}
+.srv-subgroup-head{display:flex;align-items:center;gap:8px;padding:7px 12px;cursor:pointer;user-select:none;background:var(--surface2);border-radius:8px;border:1px solid var(--border);margin-bottom:6px}
+.srv-subgroup-head:hover{background:var(--surface3,var(--surface2));border-color:var(--border-hi)}
+.srv-subgroup-bar{width:3px;height:14px;border-radius:2px;flex-shrink:0}
+.srv-subgroup-name{font-size:11px;font-weight:700;color:var(--text-hi);letter-spacing:.07em;text-transform:uppercase;flex:1}
+.srv-subgroup-count{font-size:10px;font-weight:600;color:var(--text-2);padding:1px 7px;border-radius:8px;background:var(--bg);border:1px solid var(--border)}
 .srv-subgroup-chevron{display:flex;align-items:center;justify-content:center;color:var(--text-2);transition:transform .2s}
 .srv-subgroup.collapsed .srv-subgroup-chevron{transform:rotate(-90deg)}
-.srv-subgroup-body{display:grid;grid-template-columns:repeat(auto-fill, minmax(300px, 1fr));gap:12px;padding-left:16px;max-height:5000px;overflow:hidden;transition:max-height .25s ease}
+.srv-subgroup-body{display:grid;grid-template-columns:repeat(auto-fill, minmax(220px, 1fr));gap:7px;padding-left:0;max-height:5000px;overflow:hidden;transition:max-height .25s ease}
 .srv-subgroup.collapsed .srv-subgroup-body{max-height:0}
+/* Sub-sections always span the full group width so cards inside get proper room */
+.srv-group-body:not(.sub-cols) > .srv-subgroup{grid-column:1 / -1}
+/* 2-column sub-section layout — CSS grid with min-width:0 so items never overflow */
+.srv-group-body.sub-cols,.srv-subgroup-body.sub-cols{display:grid;grid-template-columns:1fr 1fr;gap:10px;align-items:start;overflow:hidden}
+.srv-group-body.sub-cols > .srv-subgroup,.srv-subgroup-body.sub-cols > .srv-subgroup{min-width:0;overflow:hidden}
+.srv-group-body.sub-cols .srv-subgroup-body,.srv-subgroup-body.sub-cols .srv-subgroup-body{grid-template-columns:1fr;padding-left:6px}
 
 /* Quick create button — column-span:all makes it stretch across all CSS columns */
 .srv-create-btn{display:flex;align-items:center;gap:8px;padding:14px 20px;font-size:11px;font-weight:600;color:var(--blue);text-decoration:none;border:1px dashed var(--border-hi);border-radius:12px;letter-spacing:.04em;text-transform:uppercase;transition:background .15s;column-span:all;margin-bottom:8px}
@@ -169,7 +181,7 @@ body::before{content:'';position:fixed;inset:0;pointer-events:none;background:ra
 .srv-dot.pending {background:var(--text-2)}
 @keyframes blink{0%,100%{opacity:1}50%{opacity:.3}}
 .srv-info{min-width:0;flex:1}
-.srv-name{font-size:14px;font-weight:500;color:var(--text-hi);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.srv-name{font-size:12px;font-weight:500;color:var(--text-hi);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .srv-host{font-family:var(--mono);font-size:10px;color:var(--text-2);margin-top:2px}
 .srv-badge{font-size:10px;font-weight:600;padding:3px 9px;border-radius:10px;flex-shrink:0;letter-spacing:.04em}
 .srv-badge.up      {color:var(--green);background:var(--green-soft)}
@@ -255,11 +267,26 @@ body::before{content:'';position:fixed;inset:0;pointer-events:none;background:ra
 .hb-dot.down   {background:var(--red);opacity:1;min-width:3px;flex-shrink:0;box-shadow:0 0 6px var(--red)}
 .hb-dot.pending{background:var(--surface2)}
 .hb-dot:hover  {opacity:1!important}
+.hb-dot.down   {cursor:pointer}
 .hb-tooltip{position:fixed;z-index:9999;background:var(--surface2);border:1px solid var(--border-hi);border-radius:8px;padding:10px 16px;white-space:nowrap;pointer-events:none;text-align:center;box-shadow:0 4px 20px rgba(0,0,0,.5)}
 .hb-tooltip-time{font-size:16px;font-weight:600;color:var(--text-hi)}
 .hb-tooltip-status{font-size:14px;color:var(--text-2);margin-top:3px}
 .hb-tooltip::after{content:"";position:absolute;top:100%;left:50%;transform:translateX(-50%);border:6px solid transparent;border-top-color:var(--border-hi)}
 .hb-legend{display:flex;align-items:center;justify-content:space-between;font-size:11px;color:var(--text-2);margin-top:8px}
+/* -- INCIDENT MODAL (heartbeat click) -- */
+.hb-modal-overlay{position:fixed;inset:0;z-index:9998;display:flex;align-items:center;justify-content:center;background:rgba(0,5,20,.65);backdrop-filter:blur(5px);animation:fadeIn .15s}
+.hb-modal-box{background:var(--surface);border:1px solid var(--border-hi);border-radius:14px;padding:0;min-width:320px;max-width:560px;width:92%;box-shadow:0 12px 48px rgba(0,0,0,.6);position:relative;overflow:hidden}
+.hb-modal-head{display:flex;align-items:center;gap:10px;padding:16px 20px;border-bottom:1px solid var(--border);background:var(--surface2)}
+.hb-modal-head-dot{width:10px;height:10px;border-radius:50%;background:var(--red);flex-shrink:0;box-shadow:0 0 6px var(--red)}
+.hb-modal-title{font-size:14px;font-weight:700;color:var(--text-white);flex:1}
+.hb-modal-ts{font-size:11px;color:var(--text-2);font-family:var(--mono)}
+.hb-modal-close{width:28px;height:28px;border:none;background:var(--surface3);color:var(--text-2);border-radius:6px;cursor:pointer;font-size:14px;display:flex;align-items:center;justify-content:center;flex-shrink:0;transition:background .12s,color .12s}
+.hb-modal-close:hover{background:var(--red-soft);color:var(--red)}
+.hb-modal-body{padding:16px 20px;max-height:55vh;overflow-y:auto}
+.hb-modal-body .incident-list{display:flex;flex-direction:column;gap:0}
+.hb-modal-body .incident-row{display:grid;grid-template-columns:auto 1fr auto;align-items:start;gap:14px;padding:11px 0;border-bottom:1px solid var(--border)}
+.hb-modal-body .incident-row:last-child{border-bottom:none}
+.hb-modal-none{padding:8px 0;color:var(--text-2);font-size:13px;text-align:center}
 
 /* -- RESPONSE TIME CHART -- */
 .chart-wrap{position:relative;height:120px;width:100%}
@@ -316,8 +343,14 @@ canvas#responseChart{width:100%!important}
   .topbar-dashboards::-webkit-scrollbar{display:none}
   .dash-nav{padding:4px 10px;font-size:10px}
   .layout{height:auto;overflow:visible}
-  .sidebar{padding:16px 12px}
+  /* On mobile the whole page scrolls — disable the inner scroll container */
+  .sidebar{height:auto;overflow:visible}
+  .sidebar-scroll{height:auto;overflow:visible;padding:16px 12px}
+  .sb-scroll-btn{display:none}
   .sidebar-body{columns:1}
+  .srv-group-body.sub-cols,.srv-subgroup-body.sub-cols{grid-template-columns:1fr}
+  .srv-group-body{grid-template-columns:1fr}
+  .srv-subgroup-body{grid-template-columns:1fr}
   .main{padding:14px 12px}
   .detail-header{flex-direction:column;gap:10px;margin-bottom:18px}
   .detail-name{font-size:18px}
@@ -438,12 +471,16 @@ function _shade(hex, amount) {
 <div class="layout">
   <!-- SIDEBAR -->
   <div class="sidebar">
-    <div class="sidebar-header">
-      <div class="sidebar-title">Servers</div>
+    <div class="sidebar-scroll" id="sidebarScroll">
+      <div class="sidebar-header">
+        <div class="sidebar-title">Servers</div>
+      </div>
+      <div class="sidebar-body" id="sidebarList">
+        <!-- populated by JS -->
+      </div>
     </div>
-    <div class="sidebar-body" id="sidebarList">
-      <!-- populated by JS -->
-    </div>
+    <button class="sb-scroll-btn sb-scroll-up" id="sbScrollUp" onclick="sbScrollStep(-1)" title="Scroll up">▲</button>
+    <button class="sb-scroll-btn sb-scroll-dn" id="sbScrollDn" onclick="sbScrollStep(1)" title="Scroll down">▼</button>
   </div>
 
   <!-- MAIN -->
@@ -463,6 +500,7 @@ let   currentGroupId = null; // populated from /api/public/group/:slug response
 let dashboardGroups = [];
 let sidebarSession  = { loggedIn: false, role: null };
 const COLLAPSE_KEY  = "sm-sidebar-collapsed";
+let currentIncidents = []; // kept in sync by renderDetail for hb click handler
 let collapsedGroups = new Set(JSON.parse(localStorage.getItem(COLLAPSE_KEY) || "[]"));
 
 async function loadDashboardGroups(){
@@ -635,6 +673,56 @@ function hideHbTip(){
   const t = document.getElementById("hbTip");
   if (t) t.remove();
 }
+function showHbIncident(el){
+  hideHbTip();
+  // Remove any existing modal
+  const existing = document.getElementById("hbModal");
+  if (existing) existing.remove();
+
+  const ts = new Date(el.dataset.ts).getTime();
+
+  // Find all incidents whose window covers this heartbeat tick (±90s tolerance)
+  const matches = currentIncidents.filter(i => {
+    const start = new Date(i.started_at).getTime() - 90000;
+    const end   = i.ended_at ? new Date(i.ended_at).getTime() + 90000 : Date.now();
+    return ts >= start && ts <= end;
+  });
+
+  let bodyHtml;
+  if (matches.length === 0) {
+    bodyHtml = `<div class="hb-modal-none">No incident record found for this time window.</div>`;
+  } else {
+    bodyHtml = `<div class="incident-list">` + matches.map(i => {
+      const cause = i.cause || "Service unavailable";
+      const timeStr = fmtTime(i.started_at) + (i.ended_at ? " → " + fmtTime(i.ended_at) : "");
+      const dur = i.ended_at ? fmtDur(i.duration_s) : '<span style="color:var(--red);font-weight:700">ONGOING</span>';
+      return `<div class="incident-row">
+        <div class="incident-dot ${i.ended_at?"resolved":""}"></div>
+        <div class="incident-info">
+          <div class="incident-cause">${cause}</div>
+          <div class="incident-time">${timeStr}</div>
+        </div>
+        <div class="incident-dur ${i.ended_at?"resolved":"open"}">${dur}</div>
+      </div>`;
+    }).join("") + `</div>`;
+  }
+
+  const overlay = document.createElement("div");
+  overlay.className = "hb-modal-overlay";
+  overlay.id = "hbModal";
+  overlay.innerHTML = `
+    <div class="hb-modal-box">
+      <div class="hb-modal-head">
+        <div class="hb-modal-head-dot"></div>
+        <div class="hb-modal-title">Incident Detail</div>
+        <div class="hb-modal-ts">${el.dataset.time}</div>
+        <button class="hb-modal-close" onclick="document.getElementById('hbModal').remove()">✕</button>
+      </div>
+      <div class="hb-modal-body">${bodyHtml}</div>
+    </div>`;
+  overlay.addEventListener("click", e => { if (e.target === overlay) overlay.remove(); });
+  document.body.appendChild(overlay);
+}
 
 function uptimeCls(pct){
   if (pct === null) return "";
@@ -714,10 +802,12 @@ function renderSidebar(){
         const dotColor  = downCount > 0 ? "var(--red)" : degCount > 0 ? "var(--orange)" : "var(--green)";
         // Check if any server in this section actually has a sub_category
         const hasSubCats = subOrder.some(k => k !== "\0");
+        const namedSubCount = subOrder.filter(k => k !== "\0").length;
+        const useSubCols = namedSubCount >= 5;
         let bodyHtml;
         if (hasSubCats) {
           // Render sub-groups; servers with no sub_category go under an implicit unsorted block
-          bodyHtml = subOrder.map(key => {
+          const subHtml = subOrder.map(key => {
             const items = bySubCat[key];
             const subDown = items.filter(s => s.overall === "down").length;
             const subDeg  = items.filter(s => s.overall === "degraded").length;
@@ -739,6 +829,7 @@ function renderSidebar(){
                 <div class="srv-subgroup-body">${items.map(renderRow).join("")}</div>
               </div>`;
           }).join("");
+          bodyHtml = subHtml;
         } else {
           bodyHtml = allItems.map(renderRow).join("");
         }
@@ -752,7 +843,7 @@ function renderSidebar(){
               <span class="srv-group-count">${allItems.length}</span>
               <span class="srv-group-chevron"><svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"/></svg></span>
             </div>
-            <div class="srv-group-body">${bodyHtml}</div>
+            <div class="srv-group-body${useSubCols ? ' sub-cols' : ''}">${bodyHtml}</div>
           </div>`;
       }).join("");
     } else {
@@ -785,9 +876,11 @@ function renderSidebar(){
       const degC  = allItems.filter(s => s.overall === "degraded").length;
       const dotC  = downC > 0 ? "var(--red)" : degC > 0 ? "var(--orange)" : "var(--green)";
       const hasSubCats = subOrder.some(k => k !== "\0");
+      const namedSubCnt = subOrder.filter(k => k !== "\0").length;
+      const useSC = namedSubCnt >= 5;
       let bodyHtml;
       if (hasSubCats) {
-        bodyHtml = subOrder.map(key => {
+        const subHtml2 = subOrder.map(key => {
           const sitems = bySubCat[key];
           const subDown = sitems.filter(s => s.overall === "down").length;
           const subDeg  = sitems.filter(s => s.overall === "degraded").length;
@@ -806,6 +899,7 @@ function renderSidebar(){
               <div class="srv-subgroup-body">${sitems.map(renderRow).join("")}</div>
             </div>`;
         }).join("");
+        bodyHtml = subHtml2;
       } else {
         bodyHtml = allItems.map(renderRow).join("");
       }
@@ -819,7 +913,7 @@ function renderSidebar(){
             <span class="srv-subgroup-count">${allItems.length}</span>
             <span class="srv-subgroup-chevron"><svg width="9" height="9" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"/></svg></span>
           </div>
-          <div class="srv-subgroup-body">${bodyHtml}</div>
+          <div class="srv-subgroup-body${useSC ? ' sub-cols' : ''}">${bodyHtml}</div>
         </div>`;
     }).join("");
   }
@@ -843,6 +937,8 @@ function renderSidebar(){
     const degCount  = groupServers.filter(s => s.overall === "degraded").length;
     const dotColor  = downCount > 0 ? "var(--red)" : degCount > 0 ? "var(--orange)" : (g.accent_color || "var(--blue)");
     const isCollapsed = collapsedGroups.has("g" + g.id);
+    const gCats = new Set(groupServers.map(s => (s.category || "").trim()).filter(Boolean));
+    const gSubCols = gCats.size >= 5 ? ' sub-cols' : '';
     sections.push(`
       <div class="srv-group ${isCollapsed ? 'collapsed' : ''}">
         <div class="srv-group-head" onclick="toggleGroup('g${g.id}')">
@@ -851,7 +947,7 @@ function renderSidebar(){
           <span class="srv-group-count">${groupServers.length}</span>
           <span class="srv-group-chevron"><svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"/></svg></span>
         </div>
-        <div class="srv-group-body">${renderBodyWithSections(groupServers, "g" + g.id)}</div>
+        <div class="srv-group-body${gSubCols}">${renderBodyWithSections(groupServers, "g" + g.id)}</div>
       </div>`);
   }
 
@@ -862,6 +958,8 @@ function renderSidebar(){
     const degU  = ungrouped.filter(s => s.overall === "degraded").length;
     const dotU  = downU > 0 ? "var(--red)" : degU > 0 ? "var(--orange)" : "var(--text-2)";
     const isCollapsedU = collapsedGroups.has("ungrouped");
+    const uCats = new Set(ungrouped.map(s => (s.category || "").trim()).filter(Boolean));
+    const uSubCols = uCats.size >= 5 ? ' sub-cols' : '';
     sections.push(`
       <div class="srv-group ${isCollapsedU ? 'collapsed' : ''}">
         <div class="srv-group-head" onclick="toggleGroup('ungrouped')">
@@ -870,7 +968,7 @@ function renderSidebar(){
           <span class="srv-group-count">${ungrouped.length}</span>
           <span class="srv-group-chevron"><svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"/></svg></span>
         </div>
-        <div class="srv-group-body">${renderBodyWithSections(ungrouped, "ungrouped")}</div>
+        <div class="srv-group-body${uSubCols}">${renderBodyWithSections(ungrouped, "ungrouped")}</div>
       </div>`);
   }
 
@@ -942,6 +1040,7 @@ function renderDetailSkeleton(s){
 
 // -- Full detail render
 function renderDetail(s, uptime, heartbeat, incidents){
+  currentIncidents = incidents || []; // expose for heartbeat click handler
   const statusLabel = s.overall==="up"?"Online":s.overall==="down"?"Offline":s.overall==="degraded"?"Degraded":"Pending";
   const tags = (s.tags||[]).map(t=>`<span class="detail-tag">${t}</span>`).join("");
 
@@ -964,7 +1063,8 @@ function renderDetail(s, uptime, heartbeat, incidents){
     ...heartbeat.map(h => {
       const status = h.ok ? "Up" : "Down";
       const ms = h.response_ms ? ` · ${h.response_ms}ms` : "";
-      return `<div class="hb-dot ${h.ok?"up":"down"}" data-time="${fmtTimeFull(h.checked_at)}" data-status="${status}${ms}" onmouseenter="showHbTip(this)" onmouseleave="hideHbTip(this)"></div>`;
+      const clickAttr = h.ok ? "" : ` onclick="showHbIncident(this)"`;
+      return `<div class="hb-dot ${h.ok?"up":"down"}" data-time="${fmtTimeFull(h.checked_at)}" data-ts="${h.checked_at}" data-status="${status}${ms}" onmouseenter="showHbTip(this)" onmouseleave="hideHbTip(this)"${clickAttr}></div>`;
     })
   ].join("");
 
@@ -1311,6 +1411,27 @@ setInterval(() => {
 
 loadServers();
 loadDashboardGroups();  // master view: paints sidebar groups; public dashboards: paints topbar quick-nav pills
+
+// -- Sidebar scroll buttons
+function updateSbScrollBtns(){
+  const el = document.getElementById("sidebarScroll");
+  const up = document.getElementById("sbScrollUp");
+  const dn = document.getElementById("sbScrollDn");
+  if (!el || !up || !dn) return;
+  up.classList.toggle("visible", el.scrollTop > 4);
+  dn.classList.toggle("visible", el.scrollTop + el.clientHeight < el.scrollHeight - 4);
+}
+function sbScrollStep(dir){
+  const el = document.getElementById("sidebarScroll");
+  if (el) el.scrollBy({ top: dir * 220, behavior: "smooth" });
+  setTimeout(updateSbScrollBtns, 260);
+}
+(function(){
+  const el = document.getElementById("sidebarScroll");
+  if (!el) return;
+  el.addEventListener("scroll", updateSbScrollBtns, { passive: true });
+  new MutationObserver(updateSbScrollBtns).observe(el, { childList: true, subtree: true });
+})();
 
 // Register service worker for PWA installability (group dashboards only)
 if (<%- JSON.stringify(!!groupSlug) %> && "serviceWorker" in navigator) {

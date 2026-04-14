@@ -4,6 +4,22 @@ All notable changes to this project are documented here.
 
 ---
 
+## [3.1.0] — 2026-04-14
+
+### Added
+- **Square POS accounts tab** — centralized Square account management in the admin panel (mirrors the Omada tab). Store access tokens once; all Square POS checks reference an account by ID. Supports production and sandbox environments. Deletion is blocked while any server check still references the account.
+- **Square POS check type** (`square_pos`) — polls the Square Locations and Devices APIs to verify a POS location is `ACTIVE` and at least one registered Terminal/device is online. Reports device count, online ratio, and "needs attention" state. Backwards-compatible with inline tokens if no `account_id` is set.
+- **Heartbeat incident modal** — clicking a red (down) heartbeat dot opens a popup showing every matching incident from the server's history. Incidents are matched with a ±90-second tolerance so the exact poll time doesn't have to align perfectly with the incident start/end.
+
+### Changed
+- **Dashboard fills full viewport width** — removed the 1440 px cap and the 2-column maximum on the main dashboard columns layout. The grid now uses as many ~640 px columns as the viewport allows (3 on 1920 px, 4+ on ultrawide), filling the screen edge to edge.
+- **Sub-section cards span full group width** — named sub-sections (e.g. "ACCESS POINT") now span all columns inside their parent group via `grid-column: 1 / -1`, preventing cards from stacking in a single narrow column.
+- **Sub-section titles styled** — section heading rows now have a visible grey card background (`--surface2`), border, and bright uppercase text so they read clearly against the card grid.
+- **Admin sidebar server descriptions** — server rows in the admin panel sidebar now show the server's description as a third line (italic, muted) when one is set.
+- **Admin sidebar independent scroll** — the admin sidebar uses `position:sticky` with `overflow-y:auto` so it scrolls independently while the main content area scrolls with the page.
+
+---
+
 ## [3.0.2] — 2026-04-14
 
 ### Changed

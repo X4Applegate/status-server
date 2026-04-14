@@ -585,6 +585,20 @@ async function initDB() {
   } catch(e) { /* column already exists, ignore */ }
 
   await db.query(`
+    CREATE TABLE IF NOT EXISTS status_square_accounts (
+      id             INT AUTO_INCREMENT PRIMARY KEY,
+      name           VARCHAR(150) NOT NULL,
+      application_id VARCHAR(255) DEFAULT '',
+      access_token   VARCHAR(255) NOT NULL,
+      environment    VARCHAR(16)  NOT NULL DEFAULT 'production',
+      created_at     TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    )
+  `);
+  try {
+    await db.query("ALTER TABLE status_square_accounts ADD COLUMN application_id VARCHAR(255) DEFAULT ''");
+  } catch(e) { /* column already exists */ }
+
+  await db.query(`
     CREATE TABLE IF NOT EXISTS status_groups (
       id            INT AUTO_INCREMENT PRIMARY KEY,
       slug          VARCHAR(64)  UNIQUE NOT NULL,
@@ -1405,6 +1419,73 @@ async function omadaLteCheck(controllerId, siteId, customerId, siteName, custome
   }
 }
 
+async function squarePosCheck(accountId, locationId, deviceId, timeout=8000, inlineToken="") {
+  const t0 = Date.now();
+  try {
+    let accessToken = inlineToken;
+    let baseUrl = "https://connect.squareup.com";
+    if (accountId) {
+      const [rows] = await db.query("SELECT access_token, environment FROM status_square_accounts WHERE id=?", [accountId]);
+      if (!rows.length) return { type:"square_pos", ok:false, detail:"Square account not found" };
+      accessToken = rows[0].access_token;
+      baseUrl = rows[0].environment === "sandbox" ? "https://connect.squareupsandbox.com" : "https://connect.squareup.com";
+    }
+    if (!accessToken) return { type:"square_pos", ok:false, detail:"No access token configured" };
+    const headers = {
+      "Authorization": `Bearer ${accessToken}`,
+      "Square-Version": "2024-01-17",
+      "Content-Type": "application/json"
+    };
+    // 1 — Location status
+    const locRes = await fetch(`${baseUrl}/v2/locations/${locationId}`, {
+      headers, signal: AbortSignal.timeout(timeout)
+    });
+    if (!locRes.ok) {
+      return { type:"square_pos", ok:false, detail:`Location API HTTP ${locRes.status}` };
+    }
+    const locData = await locRes.json();
+    const loc = locData.location || {};
+    const locationActive = loc.status === "ACTIVE";
+
+    // 2 — Device status
+    const devRes = await fetch(`${baseUrl}/v2/devices?location_id=${locationId}`, {
+      headers, signal: AbortSignal.timeout(timeout)
+    });
+    if (!devRes.ok) {
+      return { type:"square_pos", ok:false, detail:`Devices API HTTP ${devRes.status}` };
+    }
+    const devData = await devRes.json();
+    const devices = devData.devices || [];
+    const locLabel = loc.name || locationId;
+
+    // If no Terminal hardware devices are registered (e.g. iPad/mobile POS), skip device check
+    if (!devices.length) {
+      return { type:"square_pos", ok: locationActive, detail:`${locLabel} ${locationActive ? "ACTIVE" : "INACTIVE"}`, response_ms: Date.now()-t0 };
+    }
+
+    const targetDevices = deviceId ? devices.filter(d => d.id === deviceId || d.attributes?.serial_number === deviceId) : devices;
+    const isOnline     = d => d.status?.category === "AVAILABLE" || d.status?.category === "NEEDS_ATTENTION";
+    const anyOnline    = targetDevices.some(isOnline);
+    const onlineCount  = targetDevices.filter(isOnline).length;
+    const totalCount   = targetDevices.length;
+    const anyNeedsAttn = targetDevices.some(d => d.status?.category === "NEEDS_ATTENTION");
+
+    const ok = locationActive && anyOnline;
+    const devName   = targetDevices[0]?.attributes?.name || targetDevices[0]?.attributes?.serial_number || deviceId;
+    const devStatus = totalCount === 0        ? " (not found)"
+      : anyNeedsAttn && onlineCount === totalCount ? " (needs attention)"
+      : !anyOnline                           ? " (offline)" : "";
+    const devLabel = deviceId
+      ? `${devName}${devStatus}`
+      : `${onlineCount}/${totalCount} device${totalCount !== 1 ? "s" : ""} online`;
+    const detail = `${locLabel} ${locationActive ? "ACTIVE" : "INACTIVE"} · ${devLabel}`;
+
+    return { type:"square_pos", ok, detail, response_ms: Date.now()-t0 };
+  } catch(e) {
+    return { type:"square_pos", ok:false, detail: e.message };
+  }
+}
+
 async function runChecks(def) {
   return Promise.all((def.checks||[{type:"ping"}]).map(async c => {
     // Wrap every check in a try/catch so one malformed check (bad URL, etc.)
@@ -1418,6 +1499,7 @@ async function runChecks(def) {
       if (c.type==="omada_gateway") return await omadaGatewayCheck(c.controller_id, c.site_id, c.customer_id, c.site_name, c.customer_name, def.host);
       if (c.type==="omada_lte")     return await omadaLteCheck(c.controller_id, c.site_id, c.customer_id, c.site_name, c.customer_name, c.probe_ip || null);
       if (c.type==="omada_device")  return await omadaDeviceCheck(c.controller_id, c.site_id, c.customer_id, c.site_name, c.customer_name, c.device_mac, c.device_name);
+      if (c.type==="square_pos")   return await squarePosCheck(c.account_id||0, c.location_id, c.device_id||"", c.timeout, c.access_token||"");
       return { type:c.type, ok:false, detail:"unknown check type" };
     } catch(e) {
       return { type:c.type, ok:false, detail:`check error: ${e.message}` };
@@ -1447,6 +1529,7 @@ async function recordHistory(def, checks, overall) {
                   : ch.type === "omada_gateway" ? "omada_gateway"
                   : ch.type === "omada_lte"     ? "omada_lte"
                   : ch.type === "omada_device"  ? `omada_device:${ch.device_name||ch.device_mac||"?"}`
+                  : ch.type === "square_pos"    ? `square_pos:${ch.location_id||"?"}`
                   : ch.type;
       await db.query(
         "INSERT INTO status_history (server_id, check_type, ok, response_ms, detail, checked_at) VALUES (?,?,?,?,?,?)",
@@ -3218,6 +3301,55 @@ app.get("/api/admin/omada-controllers/:id/sites/:siteId/devices", requireAuth, a
   } catch(e) {
     res.status(502).json({ error: e.message });
   }
+});
+
+// ── Square Accounts ───────────────────────────────────────────────────────────
+app.get("/api/admin/square-accounts", requireAuth, async (req, res) => {
+  try {
+    const [rows] = await db.query("SELECT id, name, application_id, environment, created_at FROM status_square_accounts ORDER BY created_at");
+    res.json(rows);
+  } catch(e) { res.status(500).json({ error: e.message }); }
+});
+
+app.post("/api/admin/square-accounts", requireAdmin, async (req, res) => {
+  const { name, application_id, access_token, environment } = req.body;
+  if (!name || !access_token) return res.status(400).json({ error: "Name and access token are required" });
+  const env = environment === "sandbox" ? "sandbox" : "production";
+  try {
+    const [result] = await db.query(
+      "INSERT INTO status_square_accounts (name, application_id, access_token, environment) VALUES (?,?,?,?)",
+      [name.trim(), (application_id||"").trim(), access_token.trim(), env]
+    );
+    addLog({ level:"info", server:"square", message:`Square account added: ${name} by ${req.session.username}` });
+    res.json({ ok:true, id: result.insertId });
+  } catch(e) { res.status(500).json({ error: e.message }); }
+});
+
+app.put("/api/admin/square-accounts/:id", requireAdmin, async (req, res) => {
+  const id = parseInt(req.params.id);
+  const { name, application_id, access_token, environment } = req.body;
+  if (!name) return res.status(400).json({ error: "Name is required" });
+  const env = environment === "sandbox" ? "sandbox" : "production";
+  try {
+    const [rows] = await db.query("SELECT access_token FROM status_square_accounts WHERE id=?", [id]);
+    if (!rows.length) return res.status(404).json({ error: "Account not found" });
+    const finalToken = (access_token && access_token !== "••••••") ? access_token.trim() : rows[0].access_token;
+    await db.query("UPDATE status_square_accounts SET name=?, application_id=?, access_token=?, environment=? WHERE id=?",
+      [name.trim(), (application_id||"").trim(), finalToken, env, id]);
+    addLog({ level:"info", server:"square", message:`Square account updated: ${name} by ${req.session.username}` });
+    res.json({ ok:true });
+  } catch(e) { res.status(500).json({ error: e.message }); }
+});
+
+app.delete("/api/admin/square-accounts/:id", requireAdmin, async (req, res) => {
+  const id = parseInt(req.params.id);
+  try {
+    const [rows] = await db.query("SELECT name FROM status_square_accounts WHERE id=?", [id]);
+    if (!rows.length) return res.status(404).json({ error: "Account not found" });
+    await db.query("DELETE FROM status_square_accounts WHERE id=?", [id]);
+    addLog({ level:"warn", server:"square", message:`Square account removed: ${rows[0].name} by ${req.session.username}` });
+    res.json({ ok:true });
+  } catch(e) { res.status(500).json({ error: e.message }); }
 });
 
 // Update own profile (first name, last name, email) — all authenticated users
