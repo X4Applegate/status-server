@@ -388,6 +388,9 @@ async function initDB() {
       username      VARCHAR(100) UNIQUE NOT NULL,
       password_hash VARCHAR(255) NOT NULL,
       role          ENUM('admin','viewer') NOT NULL DEFAULT 'viewer',
+      first_name    VARCHAR(100) DEFAULT NULL,
+      last_name     VARCHAR(100) DEFAULT NULL,
+      email         VARCHAR(255) DEFAULT NULL,
       created_at    TIMESTAMP DEFAULT CURRENT_TIMESTAMP
     )
   `);
@@ -396,6 +399,15 @@ async function initDB() {
   try {
     await db.query("ALTER TABLE status_users ADD COLUMN role ENUM('admin','viewer') NOT NULL DEFAULT 'viewer'");
   } catch(e) { /* column already exists, ignore */ }
+  try {
+    await db.query("ALTER TABLE status_users ADD COLUMN first_name VARCHAR(100) DEFAULT NULL");
+  } catch(e) { /* column already exists */ }
+  try {
+    await db.query("ALTER TABLE status_users ADD COLUMN last_name VARCHAR(100) DEFAULT NULL");
+  } catch(e) { /* column already exists */ }
+  try {
+    await db.query("ALTER TABLE status_users ADD COLUMN email VARCHAR(255) DEFAULT NULL");
+  } catch(e) { /* column already exists */ }
 
   await db.query(`
     CREATE TABLE IF NOT EXISTS status_servers (
@@ -1993,14 +2005,21 @@ app.get("/api/version", requireAdmin, async (req, res) => {
 app.get("/api/me", async (req, res) => {
   if (req.session && req.session.userId) {
     try {
-      const allowed = await getUserAllowedGroupIds(req.session.userId, req.session.role);
-      const login_redirect = await computeLoginRedirect(req.session.userId, req.session.role);
+      const [allowed, login_redirect, rows] = await Promise.all([
+        getUserAllowedGroupIds(req.session.userId, req.session.role),
+        computeLoginRedirect(req.session.userId, req.session.role),
+        db.query("SELECT first_name, last_name, email FROM status_users WHERE id=?", [req.session.userId]).then(([r]) => r)
+      ]);
+      const profile = rows[0] || {};
       res.json({
-        loggedIn: true,
-        username: req.session.username,
-        role:     req.session.role,
-        allowed_group_ids: allowed,  // null for admin (unrestricted), array for viewer
-        login_redirect               // where "already logged in" visitors should bounce to
+        loggedIn:   true,
+        username:   req.session.username,
+        role:       req.session.role,
+        first_name: profile.first_name || null,
+        last_name:  profile.last_name  || null,
+        email:      profile.email      || null,
+        allowed_group_ids: allowed,
+        login_redirect
       });
     } catch(e) {
       res.json({ loggedIn:true, username: req.session.username, role: req.session.role, allowed_group_ids: [], login_redirect: "/" });
@@ -2382,7 +2401,7 @@ app.post("/api/admin/settings/smtp/test", requireAdmin, async (req, res) => {
 });
 
 app.get("/api/admin/users", requireAdmin, async (req, res) => {
-  const [users] = await db.query("SELECT id, username, role, created_at FROM status_users ORDER BY created_at");
+  const [users] = await db.query("SELECT id, username, role, first_name, last_name, email, created_at FROM status_users ORDER BY created_at");
   // Pull all user→group mappings in one query and bucket them
   const [maps] = await db.query("SELECT user_id, group_id FROM status_user_groups");
   const byUser = {};
@@ -2402,13 +2421,17 @@ async function setUserGroupGrants(userId, groupIds) {
 }
 
 app.post("/api/admin/users", requireAdmin, async (req, res) => {
-  const { username, password, role, allowed_group_ids } = req.body;
+  const { username, password, role, allowed_group_ids, first_name, last_name, email } = req.body;
   if (!username || !password) return res.status(400).json({ error:"Username and password required" });
   if (!["admin","viewer"].includes(role)) return res.status(400).json({ error:"Role must be admin or viewer" });
   if (password.length < 8) return res.status(400).json({ error:"Password must be at least 8 characters" });
+  if (email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) return res.status(400).json({ error:"Invalid email address" });
   try {
     const hash = await bcrypt.hash(password, 10);
-    const [result] = await db.query("INSERT INTO status_users (username, password_hash, role) VALUES (?,?,?)", [username, hash, role]);
+    const [result] = await db.query(
+      "INSERT INTO status_users (username, password_hash, role, first_name, last_name, email) VALUES (?,?,?,?,?,?)",
+      [username, hash, role, first_name?.trim()||null, last_name?.trim()||null, email?.trim()||null]
+    );
     // Only viewers get explicit group grants — admins see everything anyway
     if (role === "viewer" && Array.isArray(allowed_group_ids)) {
       await setUserGroupGrants(result.insertId, allowed_group_ids);
@@ -2423,20 +2446,22 @@ app.post("/api/admin/users", requireAdmin, async (req, res) => {
 });
 
 app.put("/api/admin/users/:id", requireAdmin, async (req, res) => {
-  const { username, role, password, allowed_group_ids } = req.body;
+  const { username, role, password, allowed_group_ids, first_name, last_name, email } = req.body;
   if (!username) return res.status(400).json({ error:"Username required" });
   if (!["admin","viewer"].includes(role)) return res.status(400).json({ error:"Invalid role" });
+  if (email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) return res.status(400).json({ error:"Invalid email address" });
   // Prevent removing admin role from yourself
   if (parseInt(req.params.id) === req.session.userId && role !== "admin") {
     return res.status(400).json({ error:"Cannot remove admin role from your own account" });
   }
+  const fn = first_name?.trim()||null, ln = last_name?.trim()||null, em = email?.trim()||null;
   try {
     if (password) {
       if (password.length < 8) return res.status(400).json({ error:"Password must be at least 8 characters" });
       const hash = await bcrypt.hash(password, 10);
-      await db.query("UPDATE status_users SET username=?, role=?, password_hash=? WHERE id=?", [username, role, hash, req.params.id]);
+      await db.query("UPDATE status_users SET username=?, role=?, password_hash=?, first_name=?, last_name=?, email=? WHERE id=?", [username, role, hash, fn, ln, em, req.params.id]);
     } else {
-      await db.query("UPDATE status_users SET username=?, role=? WHERE id=?", [username, role, req.params.id]);
+      await db.query("UPDATE status_users SET username=?, role=?, first_name=?, last_name=?, email=? WHERE id=?", [username, role, fn, ln, em, req.params.id]);
     }
     // Only viewers can have explicit group restrictions; admins always see all
     if (role === "viewer" && Array.isArray(allowed_group_ids)) {
@@ -2966,6 +2991,24 @@ app.get("/api/admin/omada-controllers/:id/sites", requireAuth, async (req, res) 
     res.json(sites);
   } catch(e) {
     res.status(502).json({ error: e.message });
+  }
+});
+
+// Update own profile (first name, last name, email) — all authenticated users
+app.put("/api/profile", requireAuth, async (req, res) => {
+  const { first_name, last_name, email } = req.body;
+  if (email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+    return res.status(400).json({ error: "Invalid email address" });
+  }
+  try {
+    await db.query(
+      "UPDATE status_users SET first_name=?, last_name=?, email=? WHERE id=?",
+      [first_name?.trim() || null, last_name?.trim() || null, email?.trim() || null, req.session.userId]
+    );
+    addAuditLog({ userId: req.session.userId, username: req.session.username, action:"profile.update", resourceType:"user", resourceId: req.session.userId, resourceName: req.session.username, ip: req.ip });
+    res.json({ ok:true });
+  } catch(err) {
+    res.status(500).json({ error: err.message });
   }
 });
 

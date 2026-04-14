@@ -495,6 +495,19 @@ body{font-family:var(--sans);background:var(--bg);color:var(--text);min-height:1
   </div>
 </div>
 
+<!-- Profile Modal -->
+<div class="modal-overlay" id="profileModal">
+  <div class="modal-box" style="max-width:420px">
+    <div class="modal-title">My Profile</div>
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:12px">
+      <div class="modal-group" style="margin-bottom:0"><label class="modal-label">First Name</label><input class="modal-input" id="profFirstName" type="text" placeholder="First name" autocomplete="given-name"></div>
+      <div class="modal-group" style="margin-bottom:0"><label class="modal-label">Last Name</label><input class="modal-input" id="profLastName" type="text" placeholder="Last name" autocomplete="family-name"></div>
+    </div>
+    <div class="modal-group"><label class="modal-label">Email <span style="font-weight:400;text-transform:none;letter-spacing:0;color:var(--text-2)">(for password reset)</span></label><input class="modal-input" id="profEmail" type="email" placeholder="you@example.com" autocomplete="email"></div>
+    <div class="modal-footer"><span class="modal-err" id="profErr"></span><button class="btn" onclick="closeProfile()">Cancel</button><button class="btn btn-primary" onclick="submitProfile()">Save</button></div>
+  </div>
+</div>
+
 <div class="toast-stack" id="toasts"></div>
 
 <!-- LOG DRAWER -->
@@ -580,6 +593,9 @@ body{font-family:var(--sans);background:var(--bg);color:var(--text);min-height:1
         <div class="form-grid">
           <div class="fg full"><label class="flabel">Username *</label><input class="finput" id="uName" placeholder="e.g. richard"></div>
           <div class="fg full"><label class="flabel">Role *</label><select class="fselect" id="uRole" onchange="onUserRoleChange()"><option value="viewer">Viewer — restricted to allowed dashboards</option><option value="admin">Admin — full access to everything</option></select></div>
+          <div class="fg"><label class="flabel">First Name</label><input class="finput" id="uFirstName" placeholder="First name" autocomplete="off"></div>
+          <div class="fg"><label class="flabel">Last Name</label><input class="finput" id="uLastName" placeholder="Last name" autocomplete="off"></div>
+          <div class="fg full"><label class="flabel">Email <span style="font-weight:400;text-transform:none;letter-spacing:0;color:var(--text-2)">(for password reset)</span></label><input class="finput" id="uEmail" type="email" placeholder="user@example.com" autocomplete="off"></div>
           <div class="fg full"><label class="flabel">Password <span id="uPwdHint" style="font-weight:400;text-transform:none;letter-spacing:0">(required)</span></label><input class="finput" id="uPassword" type="password" placeholder="Min 8 characters"></div>
           <div class="fg full" id="uGroupsRow"><label class="flabel">Allowed Dashboards <span style="font-weight:400;text-transform:none;letter-spacing:0;color:var(--text-2)" id="uGroupsHint">(viewer can only see servers in these groups)</span></label>
             <div id="uGroupsPicker" style="background:var(--input-bg);border:1px solid var(--border-hi);border-radius:var(--r-sm);max-height:200px;overflow-y:auto;padding:8px"></div>
@@ -756,6 +772,7 @@ body{font-family:var(--sans);background:var(--bg);color:var(--text);min-height:1
         <span class="icon-moon"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/></svg></span>
       </button>
       <button class="btn" id="adminMenuBtn" onclick="openAdmin()" style="display:none"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.07 4.93a10 10 0 0 1 0 14.14M4.93 4.93a10 10 0 0 0 0 14.14"/></svg>Manage</button>
+      <button class="btn btn-icon" id="profileBtn" onclick="openProfile()" style="display:none" title="My profile"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg></button>
       <button class="btn btn-icon" id="pwdBtn" onclick="openChangePassword()" style="display:none" title="Change password"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="11" width="18" height="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg></button>
       <button class="btn btn-logs" id="logMenuBtn" onclick="openLogs()" style="display:none"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/></svg>Logs<span class="log-badge" id="logBadge">0</span></button>
       <button class="btn btn-icon" id="rfBtn" onclick="triggerRefresh()" style="display:none" title="Refresh"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 12a9 9 0 0 1 9-9 9.75 9.75 0 0 1 6.74 2.74L21 8"/><path d="M21 3v5h-5"/><path d="M21 12a9 9 0 0 1-9 9 9.75 9.75 0 0 1-6.74-2.74L3 16"/><path d="M8 16H3v5"/></svg></button>
@@ -905,11 +922,16 @@ function isViewer(){ return sessionRole === "viewer"; }
       const show = ids => ids.forEach(id => { const el=document.getElementById(id); if(el) el.style.display=""; });
       // Both roles get badge, logout, change-password, refresh, AND the Admin button
       // (viewers need it to manage servers in their assigned groups)
-      show(["userBadge","logoutBtn","pwdBtn","rfBtn","adminMenuBtn"]);
+      show(["userBadge","logoutBtn","profileBtn","pwdBtn","rfBtn","adminMenuBtn"]);
       // Logs are system-info — admin only
       if (isAdmin()) show(["logMenuBtn"]);
       const badge = document.getElementById("userBadge");
-      if (badge) badge.textContent = d.username;
+      if (badge) {
+        const displayName = (d.first_name || d.last_name)
+          ? [d.first_name, d.last_name].filter(Boolean).join(" ")
+          : d.username;
+        badge.textContent = displayName;
+      }
       applyRoleVisibility();
       // Populate the topbar dashboard quick-nav with the user's accessible dashboards
       renderTopbarDashboards();
@@ -1064,6 +1086,43 @@ async function doLogout(){
 }
 
 // ── Change Password ───────────────────────────────────────────────────────────
+async function openProfile(){
+  try {
+    const r = await fetch("/api/me");
+    const d = await r.json();
+    document.getElementById("profFirstName").value = d.first_name || "";
+    document.getElementById("profLastName").value  = d.last_name  || "";
+    document.getElementById("profEmail").value     = d.email      || "";
+  } catch(e) {}
+  document.getElementById("profErr").textContent = "";
+  document.getElementById("profileModal").classList.add("open");
+  setTimeout(() => document.getElementById("profFirstName").focus(), 50);
+}
+function closeProfile(){
+  document.getElementById("profileModal").classList.remove("open");
+}
+async function submitProfile(){
+  const first_name = document.getElementById("profFirstName").value.trim();
+  const last_name  = document.getElementById("profLastName").value.trim();
+  const email      = document.getElementById("profEmail").value.trim();
+  const err        = document.getElementById("profErr");
+  try {
+    const r = await fetch("/api/profile", {
+      method:"PUT", headers:{"Content-Type":"application/json"},
+      body: JSON.stringify({first_name, last_name, email})
+    });
+    const d = await r.json();
+    if (!r.ok){ err.textContent = d.error || "Failed"; return; }
+    const badge = document.getElementById("userBadge");
+    if (badge) {
+      const displayName = (first_name || last_name) ? [first_name, last_name].filter(Boolean).join(" ") : badge.textContent;
+      badge.textContent = displayName;
+    }
+    closeProfile();
+    toast("Profile saved", "success");
+  } catch(e){ err.textContent = "Error: " + e.message; }
+}
+
 function openChangePassword(){
   document.getElementById("changePwdModal").classList.add("open");
   ["pwdCurrent","pwdNew","pwdConfirm"].forEach(id => document.getElementById(id).value = "");
@@ -2002,11 +2061,13 @@ function renderAdminUserList(users){
         }).join("");
       }
     }
+    const fullName = (u.first_name || u.last_name) ? [u.first_name, u.last_name].filter(Boolean).join(" ") : "";
+    const avatarLetter = ((u.first_name || u.username) || "?")[0].toUpperCase();
     return `<div class="user-item" onclick="showUserForm(_userStore[${u.id}])">
-      <div class="user-avatar">${(u.username||"?")[0].toUpperCase()}</div>
+      <div class="user-avatar">${avatarLetter}</div>
       <div class="user-info">
-        <div class="user-name">${u.username}</div>
-        <div class="user-meta">Created ${new Date(u.created_at).toLocaleDateString()}</div>
+        <div class="user-name">${fullName || u.username}${fullName ? ` <span style="color:var(--text-2);font-weight:400;font-size:11px">(${u.username})</span>` : ""}</div>
+        <div class="user-meta">${u.email ? `${u.email} · ` : ""}Created ${new Date(u.created_at).toLocaleDateString()}</div>
         <div class="user-dash-pills">${pillsHtml}</div>
       </div>
       <span class="role-badge ${u.role}">${u.role}</span>
@@ -2061,6 +2122,9 @@ async function showUserForm(u){
   document.getElementById("uId").value       = u?.id       || "";
   document.getElementById("uName").value     = u?.username || "";
   document.getElementById("uRole").value     = u?.role     || "viewer";
+  document.getElementById("uFirstName").value = u?.first_name || "";
+  document.getElementById("uLastName").value  = u?.last_name  || "";
+  document.getElementById("uEmail").value     = u?.email      || "";
   document.getElementById("uPassword").value = "";
   document.getElementById("uPwdHint").textContent = u ? "(leave blank to keep current)" : "(required)";
   document.getElementById("uErr").textContent = "";
@@ -2108,7 +2172,12 @@ async function submitUserForm(){
   const err      = document.getElementById("uErr");
   if (!username)           { err.textContent = "Username required"; return; }
   if (!id && !password)    { err.textContent = "Password required for new users"; return; }
-  const body = {username, role};
+  const body = {
+    username, role,
+    first_name: document.getElementById("uFirstName").value.trim(),
+    last_name:  document.getElementById("uLastName").value.trim(),
+    email:      document.getElementById("uEmail").value.trim()
+  };
   if (password) body.password = password;
   // Only attach allowed_group_ids when role=viewer (admins are always unrestricted)
   if (role === "viewer") body.allowed_group_ids = Array.from(userPickedGroups);
