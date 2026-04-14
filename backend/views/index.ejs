@@ -121,7 +121,7 @@ body::before{content:'';position:fixed;inset:0;pointer-events:none;background:ra
 .sidebar::-webkit-scrollbar-thumb{background:var(--surface2);border-radius:2px}
 .sidebar-header{padding:0 0 16px;flex-shrink:0}
 .sidebar-title{font-size:11px;font-weight:600;letter-spacing:.08em;text-transform:uppercase;color:var(--text-2)}
-.sidebar-body{display:grid;grid-template-columns:repeat(auto-fill, minmax(280px, 1fr));gap:12px}
+.sidebar-body{columns:320px;column-gap:20px;display:block}
 
 /* Server card */
 .srv-row{display:flex;flex-direction:column;gap:10px;padding:16px 20px;cursor:pointer;border:1px solid var(--border);border-radius:12px;background:var(--surface);transition:border-color .18s,box-shadow .18s,transform .1s}
@@ -133,32 +133,32 @@ body::before{content:'';position:fixed;inset:0;pointer-events:none;background:ra
 .srv-hb-dot.down{background:var(--red);opacity:1;box-shadow:0 0 4px var(--red)}
 .srv-hb-dot.pending{background:var(--surface2)}
 
-/* Grouped sections */
-.srv-group{}
-.srv-group-head{display:flex;align-items:center;gap:9px;padding:14px 4px;cursor:pointer;user-select:none;transition:background .15s;grid-column:1/-1}
+/* Grouped sections — break-inside keeps each group whole within its column */
+.srv-group{break-inside:avoid;display:block;margin-bottom:20px}
+.srv-group-head{display:flex;align-items:center;gap:9px;padding:14px 4px;cursor:pointer;user-select:none;transition:background .15s}
 .srv-group-head:hover{background:var(--surface);border-radius:8px}
 .srv-group-dot{width:8px;height:8px;border-radius:50%;flex-shrink:0;box-shadow:0 0 6px rgba(255,255,255,.08)}
 .srv-group-name{font-size:12px;font-weight:700;color:var(--text-hi);letter-spacing:.06em;text-transform:uppercase;flex:1;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .srv-group-count{font-size:10px;font-weight:600;color:var(--text-2);padding:2px 7px;border-radius:10px;background:var(--surface);border:1px solid var(--border)}
 .srv-group-chevron{display:flex;align-items:center;justify-content:center;color:var(--text-2);transition:transform .2s}
 .srv-group.collapsed .srv-group-chevron{transform:rotate(-90deg)}
-.srv-group-body{display:grid;grid-template-columns:repeat(auto-fill, minmax(280px, 1fr));gap:12px;grid-column:1/-1;max-height:5000px;overflow:hidden;transition:max-height .25s ease}
+.srv-group-body{display:grid;grid-template-columns:repeat(auto-fill, minmax(300px, 1fr));gap:12px;max-height:5000px;overflow:hidden;transition:max-height .25s ease}
 .srv-group.collapsed .srv-group-body{max-height:0}
 
 /* Sub-group sections (nested inside a srv-group) */
-.srv-subgroup{grid-column:1/-1}
-.srv-subgroup-head{display:flex;align-items:center;gap:7px;padding:8px 4px 8px 16px;cursor:pointer;user-select:none;grid-column:1/-1}
+.srv-subgroup{break-inside:avoid;display:block}
+.srv-subgroup-head{display:flex;align-items:center;gap:7px;padding:8px 4px 8px 16px;cursor:pointer;user-select:none}
 .srv-subgroup-head:hover{background:var(--surface);border-radius:6px}
 .srv-subgroup-bar{width:2px;height:14px;border-radius:1px;flex-shrink:0}
 .srv-subgroup-name{font-size:11px;font-weight:600;color:var(--text-2);letter-spacing:.05em;text-transform:uppercase;flex:1}
 .srv-subgroup-count{font-size:10px;font-weight:600;color:var(--text-2);padding:1px 6px;border-radius:8px;background:var(--surface);border:1px solid var(--border)}
 .srv-subgroup-chevron{display:flex;align-items:center;justify-content:center;color:var(--text-2);transition:transform .2s}
 .srv-subgroup.collapsed .srv-subgroup-chevron{transform:rotate(-90deg)}
-.srv-subgroup-body{display:grid;grid-template-columns:repeat(auto-fill, minmax(280px, 1fr));gap:12px;grid-column:1/-1;padding-left:16px;max-height:5000px;overflow:hidden;transition:max-height .25s ease}
+.srv-subgroup-body{display:grid;grid-template-columns:repeat(auto-fill, minmax(300px, 1fr));gap:12px;padding-left:16px;max-height:5000px;overflow:hidden;transition:max-height .25s ease}
 .srv-subgroup.collapsed .srv-subgroup-body{max-height:0}
 
-/* Quick create button */
-.srv-create-btn{display:flex;align-items:center;gap:8px;padding:14px 20px;font-size:11px;font-weight:600;color:var(--blue);text-decoration:none;border:1px dashed var(--border-hi);border-radius:12px;letter-spacing:.04em;text-transform:uppercase;transition:background .15s;grid-column:1/-1}
+/* Quick create button — column-span:all makes it stretch across all CSS columns */
+.srv-create-btn{display:flex;align-items:center;gap:8px;padding:14px 20px;font-size:11px;font-weight:600;color:var(--blue);text-decoration:none;border:1px dashed var(--border-hi);border-radius:12px;letter-spacing:.04em;text-transform:uppercase;transition:background .15s;column-span:all;margin-bottom:8px}
 .srv-create-btn:hover{background:var(--blue-soft)}
 .srv-create-btn svg{width:12px;height:12px;flex-shrink:0}
 .srv-dot{width:10px;height:10px;border-radius:50%;flex-shrink:0;transition:none}
@@ -317,7 +317,7 @@ canvas#responseChart{width:100%!important}
   .dash-nav{padding:4px 10px;font-size:10px}
   .layout{height:auto;overflow:visible}
   .sidebar{padding:16px 12px}
-  .sidebar-body{grid-template-columns:1fr}
+  .sidebar-body{columns:1}
   .main{padding:14px 12px}
   .detail-header{flex-direction:column;gap:10px;margin-bottom:18px}
   .detail-name{font-size:18px}
