@@ -89,6 +89,13 @@ body{font-family:var(--sans);background:var(--bg);color:var(--text);min-height:1
 .sidebar-body{flex:1;overflow-y:auto;padding:6px 0}
 .sidebar-body::-webkit-scrollbar{width:3px}
 .sidebar-body::-webkit-scrollbar-thumb{background:var(--surface3);border-radius:2px}
+.sidebar-search{padding:8px 12px;border-bottom:1px solid var(--border);flex-shrink:0;position:relative}
+.sidebar-search input{width:100%;background:var(--surface);border:1px solid var(--border);border-radius:7px;padding:6px 28px 6px 10px;font-size:11px;color:var(--text-hi);outline:none;box-sizing:border-box;transition:border-color .15s}
+.sidebar-search input:focus{border-color:var(--blue)}
+.sidebar-search svg{position:absolute;right:20px;top:50%;transform:translateY(-50%);width:12px;height:12px;color:var(--text-2);pointer-events:none}
+.sidebar-search-clear{position:absolute;right:20px;top:50%;transform:translateY(-50%);width:14px;height:14px;cursor:pointer;color:var(--text-2);display:none;align-items:center;justify-content:center;background:var(--surface2);border-radius:50%;font-size:9px;line-height:1}
+.sidebar-search-clear.visible{display:flex}
+.sidebar-search-clear:hover{color:var(--text-hi)}
 
 /* Server rows in sidebar */
 .srv-row{display:flex;align-items:center;gap:10px;padding:9px 18px;cursor:pointer;border-left:3px solid transparent;transition:background .12s,border-color .12s}
@@ -837,6 +844,11 @@ body{font-family:var(--sans);background:var(--bg);color:var(--text);min-height:1
           <div class="live-pill"><div class="live-dot"></div> Live</div>
         </div>
       </div>
+      <div class="sidebar-search">
+        <input type="text" id="sidebarSearchInput" placeholder="Filter servers..." oninput="onSidebarSearch(this.value)">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" id="sidebarSearchIcon"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+        <span class="sidebar-search-clear" id="sidebarSearchClear" onclick="clearSidebarSearch()" title="Clear">&#x2715;</span>
+      </div>
       <div class="sidebar-body" id="sidebarList"></div>
     </div>
 
@@ -1259,21 +1271,7 @@ function renderServers(servers){
   cacheSet("servers", servers);
 
   // Sidebar list
-  const sidebar = document.getElementById("sidebarList");
-  if (sidebar) {
-    sidebar.innerHTML = servers.map(s => {
-      const lbl    = s.overall==="up"?"UP":s.overall==="down"?"DOWN":s.overall==="degraded"?"DEG":"PEND";
-      const active = s.id === selectedServerId ? " active" : "";
-      return `<div class="srv-row${active}" onclick="selectServer('${s.id}')">
-        <div class="srv-dot ${s.overall||'pending'}"></div>
-        <div class="srv-row-info">
-          <div class="srv-row-name">${s.name}</div>
-          <div class="srv-row-host">${s.host}</div>
-        </div>
-        <div class="srv-badge ${s.overall||'pending'}">${lbl}</div>
-      </div>`;
-    }).join("");
-  }
+  renderSidebarList(servers);
 
   // Stats
   document.getElementById("sT").textContent = servers.length;
@@ -1304,6 +1302,44 @@ function renderServers(servers){
       }
     }
   }
+}
+
+function renderSidebarList(servers){
+  const q = (document.getElementById("sidebarSearchInput")?.value || "").trim().toLowerCase();
+  const list = q ? servers.filter(s =>
+    (s.name        || "").toLowerCase().includes(q) ||
+    (s.host        || "").toLowerCase().includes(q) ||
+    (s.category    || "").toLowerCase().includes(q) ||
+    (s.sub_category|| "").toLowerCase().includes(q) ||
+    (s.description || "").toLowerCase().includes(q)
+  ) : servers;
+  const sidebar = document.getElementById("sidebarList");
+  if (!sidebar) return;
+  sidebar.innerHTML = list.map(s => {
+    const lbl    = s.overall==="up"?"UP":s.overall==="down"?"DOWN":s.overall==="degraded"?"DEG":"PEND";
+    const active = s.id === selectedServerId ? " active" : "";
+    return `<div class="srv-row${active}" onclick="selectServer('${s.id}')">
+      <div class="srv-dot ${s.overall||'pending'}"></div>
+      <div class="srv-row-info">
+        <div class="srv-row-name">${s.name}</div>
+        <div class="srv-row-host">${s.host}</div>
+      </div>
+      <div class="srv-badge ${s.overall||'pending'}">${lbl}</div>
+    </div>`;
+  }).join("");
+}
+
+function onSidebarSearch(q){
+  document.getElementById("sidebarSearchClear").classList.toggle("visible", q.length > 0);
+  document.getElementById("sidebarSearchIcon").style.display = q.length > 0 ? "none" : "";
+  renderSidebarList(liveServers);
+}
+function clearSidebarSearch(){
+  const inp = document.getElementById("sidebarSearchInput");
+  if (inp) inp.value = "";
+  document.getElementById("sidebarSearchClear").classList.remove("visible");
+  document.getElementById("sidebarSearchIcon").style.display = "";
+  renderSidebarList(liveServers);
 }
 
 // ── Server detail (cached, stale-while-revalidate) ───────────────────────────
