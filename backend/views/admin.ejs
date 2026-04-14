@@ -1633,6 +1633,7 @@ function renderAdminServerList(list){
       c.type==="dns"?`DNS ${(c.record_type||"A").toUpperCase()}`:
       c.type==="omada_gateway"?"Omada WAN":
       c.type==="omada_lte"?"Omada LTE":
+      c.type==="omada_device"?(c.device_name||"Omada Device"):
       "HTTP"
     ).join(" - ") || "No checks";
     // Cert badges: pull from any HTTP check on this server that has live cert info
@@ -1837,6 +1838,8 @@ function renderCrows(){
           ["A","AAAA","CNAME","MX","TXT","NS"].map(rtOpt).join("") +
         `</select>` +
         `<input class="finput" placeholder="Expected value (optional)" value="${ck.expected || ""}" oninput="upCk(${i},'expected',this.value)">`;
+    } else if (ck.type === "omada_device") {
+      detail = `<span class="crow-hint">${ck.device_name || ck.device_mac || "Unknown device"} · <span style="font-family:var(--mono)">${ck.device_mac || ""}</span></span>`;
     } else if (ck.type === "omada_gateway" || ck.type === "omada_lte") {
       // Controller dropdown + site dropdown.
       // Site dropdown gets populated lazily by populateOmadaSitePicker(i) once a controller is chosen.
@@ -1863,6 +1866,7 @@ function renderCrows(){
       + "<option value=\"dns\" "  + sel("dns")  + ">DNS Record</option>"
       + "<option value=\"omada_gateway\" " + sel("omada_gateway") + ">Omada Gateway</option>"
       + "<option value=\"omada_lte\" "     + sel("omada_lte")     + ">Omada LTE / Cellular</option>"
+      + "<option value=\"omada_device\" "  + sel("omada_device")  + ">Omada AP / Switch</option>"
       + "</select>"
       + "<div class=\"crow-detail\">" + detail + "</div>"
       + "<button class=\"rm-check\" onclick=\"rmCk(" + i + ")\">x</button>"
@@ -2810,6 +2814,7 @@ async function doDeleteGroup(){
 let adminOmada     = [];
 let pendDelOmada   = null;
 let omadaSitesCache = {}; // { controllerId: [sites] } — for the server form picker
+let currentOmadaCtrl = null; // controller currently open in the sites/devices browser
 
 async function ensureOmadaLoaded(){
   if (adminOmada.length) return;
@@ -2981,18 +2986,20 @@ async function showOmadaSites(c){
     }
     // Build a row helper that includes customer_id and the friendly names when present
     const esc = (v) => String(v||"").replace(/'/g,"\\'");
+    currentOmadaCtrl = c;
     const renderSiteRow = (s) => {
       const sid    = s.siteId || s.id;
       const sname  = s.name || sid;
       const cid    = s.customerId || "";
       const cname  = s.customerName || "";
       const args   = `${c.id}, '${esc(sid)}', '${esc(sname)}', '${esc(cid)}', '${esc(cname)}'`;
-      return `<div style="display:flex;align-items:center;gap:12px;padding:10px 14px;background:var(--surface);border:1px solid var(--border);border-radius:var(--r-sm)">
+      return `<div style="display:flex;align-items:center;gap:8px;padding:10px 14px;background:var(--surface);border:1px solid var(--border);border-radius:var(--r-sm)">
         <div style="flex:1;min-width:0">
           <div style="font-size:13px;font-weight:500;color:var(--text-hi)">${sname}</div>
           <div style="font-family:var(--mono);font-size:10px;color:var(--text-2);margin-top:2px">${sid}</div>
         </div>
-        <button class="btn btn-sm btn-primary" onclick="createServerFromSite(${args})">+ Create server</button>
+        <button class="btn btn-sm" onclick="showOmadaDevices(${args})">Devices</button>
+        <button class="btn btn-sm btn-primary" onclick="createServerFromSite(${args})">+ Gateway</button>
       </div>`;
     };
     if (c.mode === "msp") {
@@ -3035,6 +3042,84 @@ async function createServerFromSite(controllerId, siteId, siteName, customerId, 
   // We store BOTH the IDs and the friendly names — the names are required to filter
   // /devices/known-devices (which doesn't return siteId per device).
   const check = { type: "omada_gateway", controller_id: controllerId, site_id: siteId, site_name: siteName };
+  if (customerId)   check.customer_id   = customerId;
+  if (customerName) check.customer_name = customerName;
+  currentChecks = [check];
+  renderCrows();
+}
+
+// Show APs and switches for a site in the Omada sites panel
+async function showOmadaDevices(controllerId, siteId, siteName, customerId, customerName){
+  const heading = document.getElementById("oSitesHeading");
+  const subhead = document.getElementById("oSitesSubhead");
+  const list    = document.getElementById("oSitesList");
+  heading.textContent = `Devices — ${siteName}`;
+  subhead.textContent = siteId;
+  list.innerHTML = `<div style="padding:18px;text-align:center;color:var(--text-2);font-size:12px">Fetching devices…</div>`;
+
+  const esc = (v) => String(v||"").replace(/'/g,"\\'");
+  const params = new URLSearchParams({ siteName: siteName||"", customerId: customerId||"", customerName: customerName||"" });
+  try {
+    const r = await fetch(`/api/admin/omada-controllers/${controllerId}/sites/${encodeURIComponent(siteId)}/devices?${params}`);
+    const devices = r.ok ? await r.json() : [];
+    if (!devices.length) {
+      const backArgs = `${controllerId},'${esc(siteId)}','${esc(siteName)}','${esc(customerId)}','${esc(customerName)}'`;
+      list.innerHTML = `<div style="padding:18px;text-align:center;color:var(--text-2);font-size:12px">No APs or switches found in this site.</div>
+        <div style="margin-top:12px"><button class="btn btn-sm" onclick="showOmadaDevices(${backArgs})">↩ Try again</button></div>`;
+      if (!r.ok) {
+        const d = await r.json().catch(()=>({error:"unknown"}));
+        list.innerHTML = `<div style="padding:18px;text-align:center;color:var(--red);font-size:12px">${d.error||"Failed"}</div>`;
+      }
+      return;
+    }
+
+    // Classify devices
+    const isAP     = (d) => { const t=(d.deviceType||"").toLowerCase(); const m=(d.model||"").toUpperCase(); return d.type===1||t.includes("ap")||t.includes("access")||m.startsWith("EAP"); };
+    const isSwitch = (d) => { const t=(d.deviceType||"").toLowerCase(); const m=(d.model||"").toUpperCase(); return d.type===2||t.includes("switch")||m.startsWith("TL-SG")||m.startsWith("TL-SH")||m.startsWith("OC"); };
+    const aps      = devices.filter(isAP);
+    const switches = devices.filter(isSwitch);
+    const others   = devices.filter(d => !isAP(d) && !isSwitch(d));
+
+    const statusDot = (s) => s===1||s===11
+      ? `<span style="color:var(--green);font-size:10px">●</span>`
+      : `<span style="color:var(--red);font-size:10px">●</span>`;
+
+    const renderDevice = (d) => {
+      const dname  = d.name || d.mac;
+      const model  = d.model || "";
+      const clients = d.clientNum != null ? ` · ${d.clientNum} clients` : "";
+      const devArgs = `${controllerId},'${esc(siteId)}','${esc(siteName)}','${esc(customerId)}','${esc(customerName)}','${esc(d.mac)}','${esc(dname)}'`;
+      return `<div style="display:flex;align-items:center;gap:10px;padding:9px 14px;background:var(--surface);border:1px solid var(--border);border-radius:var(--r-sm)">
+        <div style="flex:1;min-width:0">
+          <div style="display:flex;align-items:center;gap:6px;font-size:13px;font-weight:500;color:var(--text-hi)">${statusDot(d.status)} ${dname}</div>
+          <div style="font-size:11px;color:var(--text-2);margin-top:2px">${model}${clients} · <span style="font-family:var(--mono)">${d.mac}</span></div>
+        </div>
+        <button class="btn btn-sm btn-primary" onclick="createServerFromDevice(${devArgs})">+ Add</button>
+      </div>`;
+    };
+
+    const section = (title, items) => items.length ? `
+      <div style="font-size:11px;font-weight:600;letter-spacing:.06em;text-transform:uppercase;color:var(--text-2);padding:10px 0 6px">${title}</div>
+      <div style="display:flex;flex-direction:column;gap:6px">${items.map(renderDevice).join("")}</div>` : "";
+
+    const backArgs = `${controllerId},'${esc(siteId)}','${esc(siteName)}','${esc(customerId)}','${esc(customerName)}'`;
+    list.innerHTML = `
+      <button class="btn btn-sm" onclick="showOmadaSites(currentOmadaCtrl)" style="margin-bottom:8px">← Back to sites</button>
+      ${section("Access Points", aps)}
+      ${section("Switches", switches)}
+      ${section("Other Devices", others)}`;
+  } catch(e) {
+    list.innerHTML = `<div style="padding:18px;text-align:center;color:var(--red);font-size:12px">${e.message}</div>`;
+  }
+}
+
+// One-click: create a server entry pre-filled with an omada_device check
+async function createServerFromDevice(controllerId, siteId, siteName, customerId, customerName, deviceMac, deviceName){
+  await showServerForm(null);
+  serverFormReturn = { type: "omada-sites", controller: currentOmadaCtrl };
+  document.getElementById("fName").value = deviceName || deviceMac;
+  document.getElementById("fHost").value = "omada-managed";
+  const check = { type:"omada_device", controller_id:controllerId, site_id:siteId, site_name:siteName, device_mac:deviceMac, device_name:deviceName };
   if (customerId)   check.customer_id   = customerId;
   if (customerName) check.customer_name = customerName;
   currentChecks = [check];

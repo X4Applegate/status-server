@@ -1262,6 +1262,37 @@ async function omadaGatewayCheck(controllerId, siteId, customerId, siteName, cus
 }
 
 const _lteShapeLogged = new Set();
+async function omadaDeviceCheck(controllerId, siteId, customerId, siteName, customerName, deviceMac, deviceName) {
+  try {
+    const [rows] = await db.query("SELECT * FROM status_omada_controllers WHERE id=?", [controllerId]);
+    if (!rows.length) return { type:"omada_device", ok:false, detail:"controller not found" };
+    const ctrl = rows[0];
+    const apiStart = Date.now();
+    const devices = await omadaListDevices(ctrl, siteId, customerId, siteName, customerName);
+    const apiResponseMs = Date.now() - apiStart;
+
+    const device = devices.find(d => (d.mac || "").toLowerCase() === (deviceMac || "").toLowerCase());
+    if (!device) {
+      return { type:"omada_device", ok:false, detail:`${deviceName || deviceMac} not found in site` };
+    }
+
+    const ok    = device.status === 1 || device.status === 11;
+    const model = device.model || device.modelName || device.product || null;
+    const uptimeSec  = parseOmadaUptime(device.uptimeLong ?? device.uptime ?? null);
+    const uptimeStr  = uptimeSec ? ` · up ${formatUptime(uptimeSec)}` : "";
+    const modelStr   = model ? `${model} ` : "";
+    const clientNum  = device.clientNum ?? device.clients ?? device.numClient ?? device.numClients ?? null;
+    const clientStr  = clientNum != null ? ` · ${clientNum} client${clientNum === 1 ? "" : "s"}` : "";
+    const detail = ok
+      ? `${modelStr}connected${uptimeStr}${clientStr}`
+      : `${deviceName || model || "Device"} offline (status ${device.status})`;
+
+    return { type:"omada_device", ok, detail, response_ms: apiResponseMs };
+  } catch(e) {
+    return { type:"omada_device", ok:false, detail: e.message };
+  }
+}
+
 async function omadaLteCheck(controllerId, siteId, customerId, siteName, customerName, lteProbeIp) {
   try {
     const [rows] = await db.query("SELECT * FROM status_omada_controllers WHERE id=?", [controllerId]);
@@ -1380,6 +1411,7 @@ async function runChecks(def) {
       if (c.type==="dns")           return await dnsCheck(c.hostname || def.host, c.record_type, c.expected, c.timeout);
       if (c.type==="omada_gateway") return await omadaGatewayCheck(c.controller_id, c.site_id, c.customer_id, c.site_name, c.customer_name, def.host);
       if (c.type==="omada_lte")     return await omadaLteCheck(c.controller_id, c.site_id, c.customer_id, c.site_name, c.customer_name, c.probe_ip || null);
+      if (c.type==="omada_device")  return await omadaDeviceCheck(c.controller_id, c.site_id, c.customer_id, c.site_name, c.customer_name, c.device_mac, c.device_name);
       return { type:c.type, ok:false, detail:"unknown check type" };
     } catch(e) {
       return { type:c.type, ok:false, detail:`check error: ${e.message}` };
@@ -1408,6 +1440,7 @@ async function recordHistory(def, checks, overall) {
                   : ch.type === "dns"           ? `dns:${(ch.record_type||"A").toUpperCase()}`
                   : ch.type === "omada_gateway" ? "omada_gateway"
                   : ch.type === "omada_lte"     ? "omada_lte"
+                  : ch.type === "omada_device"  ? `omada_device:${ch.device_name||ch.device_mac||"?"}`
                   : ch.type;
       await db.query(
         "INSERT INTO status_history (server_id, check_type, ok, response_ms, detail, checked_at) VALUES (?,?,?,?,?,?)",
@@ -1865,6 +1898,7 @@ async function pollAll(force = false) {
         c.type === "http"          ? "HTTP" :
         c.type === "dns"           ? `DNS ${(c.record_type||"A").toUpperCase()}` :
         c.type === "omada_gateway" ? "OMADA-GW" :
+        c.type === "omada_device"  ? `OMADA-DEV:${c.device_name||c.device_mac||"?"}` :
         c.type.toUpperCase();
       addLog({ level:c.ok?"info":"error", server:def.name, serverId:def.id, check:label, message:`${label} - ${c.detail}`, ok:c.ok, detail:c.detail });
     });
@@ -3140,6 +3174,41 @@ app.get("/api/admin/omada-controllers/:id/sites", requireAuth, async (req, res) 
     }
     const sites = await omadaListSites(rows[0]);
     res.json(sites);
+  } catch(e) {
+    res.status(502).json({ error: e.message });
+  }
+});
+
+// List APs and switches for a site (excludes gateways)
+app.get("/api/admin/omada-controllers/:id/sites/:siteId/devices", requireAuth, async (req, res) => {
+  const id = parseInt(req.params.id);
+  try {
+    const [rows] = await db.query("SELECT * FROM status_omada_controllers WHERE id=?", [id]);
+    if (!rows.length) return res.status(404).json({ error: "Controller not found" });
+    const groupMap = await omadaLoadGroupIds([id]);
+    if (!(await userCanManageOmadaCtrl(req, groupMap[id] || []))) {
+      return res.status(403).json({ error: "You don't have access to this controller" });
+    }
+    const { siteId } = req.params;
+    const { customerId, siteName, customerName } = req.query;
+    const devices = await omadaListDevices(rows[0], siteId, customerId||null, siteName||null, customerName||null);
+    const isGateway = (d) => {
+      const t = (d.type || d.deviceType || "").toString().toLowerCase();
+      const m = (d.model || d.modelName || d.product || "").toString().toUpperCase();
+      return t === "gateway" || t.includes("gateway") || t.includes("router") || /^ER\d/.test(m) || d.type === 0;
+    };
+    const subDevices = devices.filter(d => !isGateway(d)).map(d => ({
+      mac:        d.mac,
+      name:       d.name || d.deviceName || d.mac,
+      model:      d.model || d.modelName || d.product || null,
+      type:       d.type,
+      deviceType: d.deviceType || null,
+      status:     d.status,
+      uptimeLong: d.uptimeLong || null,
+      uptime:     d.uptime || null,
+      clientNum:  d.clientNum ?? d.clients ?? d.numClient ?? d.numClients ?? null
+    }));
+    res.json(subDevices);
   } catch(e) {
     res.status(502).json({ error: e.message });
   }
