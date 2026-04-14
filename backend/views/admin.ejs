@@ -200,6 +200,11 @@ body{font-family:var(--sans);background:var(--bg);color:var(--text);min-height:1
 .drawer-close{width:28px;height:28px;border-radius:6px;border:1px solid var(--border);background:var(--surface);color:var(--text);cursor:pointer;display:flex;align-items:center;justify-content:center;font-size:14px}
 .drawer-close:hover{background:var(--surface2);color:var(--text-white)}
 .drawer-toolbar{padding:10px 18px;border-bottom:1px solid var(--border);display:flex;align-items:center;gap:8px;flex-shrink:0;flex-wrap:wrap}
+.drawer-stat-bar{display:none;grid-template-columns:repeat(4,1fr);gap:0;border-bottom:1px solid var(--border);flex-shrink:0}
+.drawer-stat-bar.visible{display:grid}
+.drawer-stat-bar .ss-card{padding:10px 0;border-right:1px solid var(--border)}
+.drawer-stat-bar .ss-card:last-child{border-right:none}
+.drawer-stat-bar .ss-val{font-size:20px}
 .server-search-bar{padding:8px 18px;border-bottom:1px solid var(--border);flex-shrink:0;display:none}
 .server-search-bar.visible{display:block}
 .server-search-input{width:100%;background:var(--surface);border:1px solid var(--border);border-radius:7px;padding:7px 34px 7px 12px;font-size:12px;color:var(--text-hi);outline:none;box-sizing:border-box;transition:border-color .15s}
@@ -547,6 +552,12 @@ body{font-family:var(--sans);background:var(--bg);color:var(--text);min-height:1
       <span style="font-size:11px;color:var(--text-2)" id="aCount"></span>
       <div class="drawer-spacer"></div>
       <button class="btn btn-primary" id="addBtn" onclick="showServerForm(null)" style="font-size:11px;padding:5px 11px"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" style="width:12px;height:12px"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg><span id="addBtnLabel">Add Server</span></button>
+    </div>
+    <div class="drawer-stat-bar" id="drawerStatBar">
+      <div class="ss-card"><div class="ss-val" id="dT">—</div><div class="ss-lbl">Total</div></div>
+      <div class="ss-card up"><div class="ss-val" id="dU">—</div><div class="ss-lbl">Up</div></div>
+      <div class="ss-card down"><div class="ss-val" id="dD">—</div><div class="ss-lbl">Down</div></div>
+      <div class="ss-card warn"><div class="ss-val" id="dW">—</div><div class="ss-lbl">Deg</div></div>
     </div>
     <div class="server-search-bar" id="serverSearchBar">
       <div class="server-search-wrap">
@@ -1624,12 +1635,15 @@ async function switchTab(tab){
   document.getElementById("aGroupFormView").style.display   = "none";
   document.getElementById("aOmadaFormView").style.display   = "none";
   document.getElementById("aOmadaSitesView").style.display  = "none";
-  // Show search bar only on servers tab; reset it when switching away
+  // Show search bar and stat bar only on servers tab; reset when switching away
   const searchBar = document.getElementById("serverSearchBar");
+  const statBar   = document.getElementById("drawerStatBar");
   if (tab === "servers") {
     searchBar.classList.add("visible");
+    statBar.classList.add("visible");
   } else {
     searchBar.classList.remove("visible");
+    statBar.classList.remove("visible");
     clearServerSearch();
   }
   // Load content
@@ -1640,6 +1654,17 @@ async function switchTab(tab){
   else if (tab === "settings") await loadSettings();
   else if (tab === "audit")    await loadAuditLog();
   else                         await loadWebhookList();
+}
+
+// ── Drawer stat bar ───────────────────────────────────────────────────────────
+function updateDrawerStats(list){
+  const up  = list.filter(s => s.overall === "up").length;
+  const dn  = list.filter(s => s.overall === "down").length;
+  const deg = list.filter(s => s.overall === "degraded").length;
+  document.getElementById("dT").textContent = list.length;
+  document.getElementById("dU").textContent = up;
+  document.getElementById("dD").textContent = dn;
+  document.getElementById("dW").textContent = deg;
 }
 
 // ── Server search ─────────────────────────────────────────────────────────────
@@ -1721,6 +1746,7 @@ async function loadServerList(){
   if (cached) {
     adminServers = cached;
     renderAdminServerList(adminServers);
+    updateDrawerStats(adminServers);
     if (serverListScrollTop != null) {
       void el.scrollHeight;
       requestAnimationFrame(() => { el.scrollTop = serverListScrollTop; });
@@ -1740,6 +1766,7 @@ async function loadServerList(){
     adminServers = await r.json();
     cacheSet("admin-servers", adminServers);
     renderAdminServerList(adminServers);
+    updateDrawerStats(adminServers);
     if (serverListScrollTop != null) {
       const target = serverListScrollTop;
       serverListScrollTop = null;
