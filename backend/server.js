@@ -2001,13 +2001,18 @@ app.get("/auth/google", (req, res) => {
   if (!googleOAuth) return res.redirect("/login");
   const state = crypto.randomBytes(16).toString("hex");
   req.session.oauthState = state;
-  const url = googleOAuth.generateAuthUrl({
-    access_type: "offline",
-    scope: ["openid", "email", "profile"],
-    state,
-    prompt: "select_account"
+  // Save session to DB before redirecting — without this the state won't be
+  // present when Google returns to the callback (async session write race).
+  req.session.save(err => {
+    if (err) return res.redirect("/login?error=google_failed");
+    const url = googleOAuth.generateAuthUrl({
+      access_type: "offline",
+      scope: ["openid", "email", "profile"],
+      state,
+      prompt: "select_account"
+    });
+    res.redirect(url);
   });
-  res.redirect(url);
 });
 
 // Google OAuth — callback after Google consent
