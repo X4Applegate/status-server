@@ -1,0 +1,8 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Security Vulnerability
+    url: mailto:richard@x4-applegate.com
+    about: Please report security vulnerabilities privately via email — do not open a public issue.
+  - name: General Question
+    url: mailto:richard@x4-applegate.com
+    about: Have a question that doesn't fit a bug or feature request? Reach out directly.
