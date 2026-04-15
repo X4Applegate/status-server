@@ -4,6 +4,16 @@ All notable changes to this project are documented here.
 
 ---
 
+## [3.1.5] — 2026-04-15
+
+### Changed
+- **Mobile-style hamburger menu** — at widths ≤ 1100 px all topbar-right buttons (Manage, Profile, Password, Logs, Refresh, Home, Logout, user badge) collapse into a single hamburger icon that opens a floating dropdown panel. Prevents buttons from wrapping onto multiple lines or squeezing awkwardly.
+- **Dashboards dropdown menu** — dashboard pills collapse into a single "Dashboards ▾" dropdown at the same 1100 px breakpoint (previously horizontal scroll). Chevron rotates when open; click outside to close.
+- **"Manage" renamed to "Admin"** on all group dashboard topbars (the admin panel itself keeps its internal "Manage" drawer title).
+- **Removed legacy Manage star pill** from the main dashboard quick-nav — the existing Manage / Admin button next to the theme toggle is the single source of truth.
+
+---
+
 ## [3.1.4] — 2026-04-15
 
 ### Fixed

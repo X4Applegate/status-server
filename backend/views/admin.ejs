@@ -53,7 +53,29 @@ body{font-family:var(--sans);background:var(--bg);color:var(--text);min-height:1
 .brand-name{font-size:15px;font-weight:700;color:var(--text-white);letter-spacing:-.02em}
 .brand-name span{color:var(--blue)}
 .topbar-right{display:flex;align-items:center;gap:8px}
-.topbar-dashboards{display:flex;align-items:center;gap:6px;flex:1;flex-wrap:wrap;margin:0 16px;min-width:0;overflow:hidden}
+/* Hamburger: collapses topbar-right into a dropdown on narrow screens */
+.topbar-hamburger{display:none;align-items:center;justify-content:center;width:36px;height:36px;border-radius:var(--r-sm);border:1px solid var(--border-hi);background:var(--surface);color:var(--text-hi);cursor:pointer;flex-shrink:0;transition:background .15s,border-color .15s,color .15s}
+.topbar-hamburger:hover,.topbar-hamburger.open{background:var(--blue-soft);border-color:var(--blue);color:var(--blue)}
+@media(max-width:1100px){
+  .topbar-hamburger{display:inline-flex}
+  .topbar-right{position:absolute;top:calc(100% + 6px);right:10px;min-width:220px;max-width:92vw;background:var(--surface2);border:1px solid var(--border-hi);border-radius:12px;padding:10px;gap:6px;z-index:550;box-shadow:0 8px 32px rgba(0,0,0,.5);flex-wrap:wrap;justify-content:flex-end;visibility:hidden;opacity:0;pointer-events:none;transition:opacity .15s}
+  .topbar-right.menu-open{visibility:visible;opacity:1;pointer-events:auto}
+}
+.topbar-dashboards{display:flex;align-items:center;gap:6px;flex:1;flex-wrap:nowrap;margin:0 16px;min-width:0;overflow-x:auto;overflow-y:hidden;scrollbar-width:none}
+.topbar-dashboards::-webkit-scrollbar{display:none}
+/* Dropdown nav — shown below 900px instead of pills */
+.topbar-dash-menu{display:none;position:relative;margin:0 12px;flex-shrink:0}
+.topbar-dash-btn{display:inline-flex;align-items:center;gap:6px;padding:5px 12px;border-radius:var(--r-sm);border:1px solid var(--border-hi);background:var(--surface);color:var(--text-hi);cursor:pointer;font-family:var(--sans);font-size:11px;font-weight:500;white-space:nowrap;transition:background .15s,border-color .15s,color .15s}
+.topbar-dash-btn:hover,.topbar-dash-btn.open{background:var(--blue-soft);border-color:var(--blue);color:var(--blue)}
+.topbar-dash-btn svg{transition:transform .2s}
+.topbar-dash-btn.open svg{transform:rotate(180deg)}
+.topbar-dash-popup{position:absolute;top:calc(100% + 8px);left:0;min-width:220px;background:var(--surface2);border:1px solid var(--border-hi);border-radius:10px;padding:5px;z-index:600;display:none;flex-direction:column;gap:2px;box-shadow:0 8px 32px rgba(0,0,0,.5)}
+.topbar-dash-popup.open{display:flex}
+.topbar-dash-popup .dash-nav{width:100%;border-radius:7px;box-sizing:border-box;justify-content:flex-start}
+@media(max-width:1100px){
+  .topbar-dashboards{display:none}
+  .topbar-dash-menu{display:block}
+}
 .dash-nav{display:inline-flex;align-items:center;gap:6px;padding:5px 11px;border-radius:var(--r-sm);border:1px solid var(--border-hi);background:var(--surface);color:var(--text-hi);cursor:pointer;font-family:var(--sans);font-size:11px;font-weight:500;text-decoration:none;white-space:nowrap;transition:background .15s,border-color .15s,color .15s}
 .dash-nav:hover{background:var(--blue-soft);border-color:var(--blue);color:var(--blue)}
 .dash-nav-dot{width:7px;height:7px;border-radius:50%;flex-shrink:0}
@@ -372,7 +394,7 @@ body{font-family:var(--sans);background:var(--bg);color:var(--text);min-height:1
   #clock{display:none}
   .topbar-dashboards{width:100%;order:3;margin:0;flex-basis:100%;overflow-x:auto;flex-wrap:nowrap;padding-bottom:2px}
   .dash-nav{padding:4px 9px;font-size:10px}
-  .topbar-right{gap:6px;flex-wrap:wrap;justify-content:flex-end;flex:1;min-width:0}
+  .topbar-right{gap:6px}
   .btn{padding:5px 9px;font-size:11px;gap:5px}
   .btn svg{width:12px;height:12px}
   .btn-icon{width:30px;height:30px;padding:0}
@@ -838,9 +860,19 @@ body{font-family:var(--sans);background:var(--bg);color:var(--text);min-height:1
       <div class="brand-name">Applegate<span>Monitor</span></div>
       <span style="font-family:var(--mono);font-size:11px;color:var(--text-2);margin-left:12px" id="clock">00:00:00</span>
     </div>
-    <!-- Dashboard quick-nav: one button per dashboard the logged-in user has access to -->
+    <!-- Dashboard quick-nav: pills on wide screens, dropdown on narrow -->
     <div class="topbar-dashboards" id="topbarDashboards"></div>
-    <div class="topbar-right">
+    <div class="topbar-dash-menu" id="topbarDashMenu">
+      <button class="topbar-dash-btn" id="topbarDashBtn" onclick="toggleDashMenu(event)">
+        Dashboards
+        <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"/></svg>
+      </button>
+      <div class="topbar-dash-popup" id="topbarDashPopup"></div>
+    </div>
+    <button class="topbar-hamburger" id="topbarHamburger" onclick="toggleTopbarMenu(event)" title="Menu" aria-label="Open menu">
+      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="3" y1="6" x2="21" y2="6"/><line x1="3" y1="12" x2="21" y2="12"/><line x1="3" y1="18" x2="21" y2="18"/></svg>
+    </button>
+    <div class="topbar-right" id="topbarRight">
       <span class="user-badge" id="userBadge" style="display:none;font-size:12px"></span>
       <button class="btn btn-icon" id="loginBtn" onclick="window.location.href='/login'" style="display:none" title="Login"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M15 3h4a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2h-4"/><polyline points="10 17 15 12 10 7"/><line x1="15" y1="12" x2="3" y2="12"/></svg></button>
       <button class="btn btn-icon theme-btn" onclick="toggleTheme()" title="Toggle theme">
@@ -1073,31 +1105,60 @@ function applyRoleVisibility(){
 // Admins also get a trailing "Admin" pill that links to the master view at `/`; viewers
 // see the same pill but clicking it pops a permission-denied toast (matches public page behavior).
 async function renderTopbarDashboards(){
-  const el = document.getElementById("topbarDashboards");
+  const el     = document.getElementById("topbarDashboards");
+  const popup  = document.getElementById("topbarDashPopup");
   if (!el) return;
   try {
     const r = await fetch("/api/admin/groups");
     if (!r.ok) return;
     const groups = await r.json();
+    const makePill = (dot, href, label, extra="") =>
+      `<a class="dash-nav ${extra}" href="${href}">
+        <span class="dash-nav-dot" style="background:${dot}"></span>${label}</a>`;
     const pills = groups.map(g => {
-      const dot = g.accent_color || "var(--blue)";
+      const dot  = g.accent_color || "var(--blue)";
       const href = g.custom_domain ? `https://${g.custom_domain}` : `/dashboard/${g.slug}`;
-      return `<a class="dash-nav" href="${href}" title="Open ${g.name}">
-        <span class="dash-nav-dot" style="background:${dot}"></span>
-        ${g.name}
-      </a>`;
+      return makePill(dot, href, g.name);
     });
-    // Admin pill — only shown to admins (links to the master dashboard "/" which viewers can't access).
-    // Viewers don't get a pill here because they're already on /admin; adding one would be redundant.
     if (isAdmin()) {
-      pills.push(`<a class="dash-nav dash-nav-admin" href="/" title="Master view — all servers">
-        <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2l3 7h7l-5.5 4 2 7-6.5-4.5L5.5 20l2-7L2 9h7z"/></svg>
-        Manage
-      </a>`);
+      pills.push(`<a class="dash-nav dash-nav-admin" href="/" title="Master view">
+        <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2l3 7h7l-5.5 4 2 7-6.5-4.5L5.5 20l2-7L2 9h7z"/></svg>All Servers</a>`);
     }
     el.innerHTML = pills.join("");
+    if (popup) popup.innerHTML = pills.join("");
   } catch(e) { /* silent */ }
 }
+
+function toggleDashMenu(e){
+  e.stopPropagation();
+  const btn    = document.getElementById("topbarDashBtn");
+  const popup  = document.getElementById("topbarDashPopup");
+  const isOpen = popup.classList.contains("open");
+  popup.classList.toggle("open", !isOpen);
+  btn.classList.toggle("open", !isOpen);
+}
+function toggleTopbarMenu(e){
+  e.stopPropagation();
+  const right = document.getElementById("topbarRight");
+  const btn   = document.getElementById("topbarHamburger");
+  const isOpen = right.classList.contains("menu-open");
+  right.classList.toggle("menu-open", !isOpen);
+  btn.classList.toggle("open", !isOpen);
+}
+document.addEventListener("click", (e) => {
+  // Close dashboards dropdown
+  const popup = document.getElementById("topbarDashPopup");
+  const dbtn  = document.getElementById("topbarDashBtn");
+  if (popup) popup.classList.remove("open");
+  if (dbtn)  dbtn.classList.remove("open");
+  // Close hamburger menu when clicking outside it
+  const right = document.getElementById("topbarRight");
+  const hbtn  = document.getElementById("topbarHamburger");
+  if (right && hbtn && !right.contains(e.target) && !hbtn.contains(e.target)) {
+    right.classList.remove("menu-open");
+    hbtn.classList.remove("open");
+  }
+});
 
 // Auto-open the admin drawer with a specific server pre-filled for editing.
 // Used when /admin is opened with ?edit=<server_id> (from the sidebar edit button).

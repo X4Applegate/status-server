@@ -27,9 +27,19 @@
       <% } %>
     </div>
   </div>
-  <!-- Dashboard quick-nav: one pill per dashboard the viewer can access, plus an Admin pill (admins only) -->
+  <!-- Dashboard quick-nav: pills on wide screens, dropdown on narrow -->
   <div class="topbar-dashboards" id="topbarDashboards"></div>
-  <div class="topbar-right">
+  <div class="topbar-dash-menu" id="topbarDashMenu">
+    <button class="topbar-dash-btn" id="topbarDashBtn" onclick="toggleDashMenu(event)">
+      Dashboards
+      <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"/></svg>
+    </button>
+    <div class="topbar-dash-popup" id="topbarDashPopup"></div>
+  </div>
+  <button class="topbar-hamburger" id="topbarHamburger" onclick="toggleTopbarMenu(event)" title="Menu" aria-label="Open menu">
+    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="3" y1="6" x2="21" y2="6"/><line x1="3" y1="12" x2="21" y2="12"/><line x1="3" y1="18" x2="21" y2="18"/></svg>
+  </button>
+  <div class="topbar-right" id="topbarRight">
     <div class="topbar-status">
       <div class="status-dot" id="globalDot"></div>
       <span id="globalStatus">All systems operational</span>
@@ -40,7 +50,7 @@
       <svg class="icon-moon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/></svg>
     </button>
     <% if (adminHref) { %>
-      <a class="topbar-admin" href="<%= adminHref %>">Manage</a>
+      <a class="topbar-admin" href="<%= adminHref %>">Admin</a>
     <% } %>
     <div id="topbarManageBtn"></div>
     <div id="topbarAuthBtn"></div>

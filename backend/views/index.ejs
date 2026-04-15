@@ -90,6 +90,13 @@ body::before{content:'';position:fixed;inset:0;pointer-events:none;background:ra
 .topbar-name{font-size:15px;font-weight:700;color:var(--text-white);letter-spacing:-.02em}
 .topbar-name span{color:var(--blue)}
 .topbar-right{display:flex;align-items:center;gap:14px;font-size:12px;color:var(--text-2)}
+.topbar-hamburger{display:none;align-items:center;justify-content:center;width:36px;height:36px;border-radius:8px;border:1px solid var(--border-hi);background:var(--surface);color:var(--text-hi);cursor:pointer;flex-shrink:0;transition:all .15s}
+.topbar-hamburger:hover,.topbar-hamburger.open{background:var(--blue-soft);border-color:var(--blue);color:var(--blue)}
+@media(max-width:1100px){
+  .topbar-hamburger{display:inline-flex}
+  .topbar-right{position:absolute;top:calc(100% + 6px);right:10px;min-width:220px;max-width:92vw;background:var(--surface2);border:1px solid var(--border-hi);border-radius:12px;padding:10px;gap:8px;z-index:550;box-shadow:0 8px 32px rgba(0,0,0,.5);flex-wrap:wrap;justify-content:flex-end;visibility:hidden;opacity:0;pointer-events:none;transition:opacity .15s}
+  .topbar-right.menu-open{visibility:visible;opacity:1;pointer-events:auto}
+}
 .topbar-status{display:flex;align-items:center;gap:6px}
 .status-dot{width:7px;height:7px;border-radius:50%;background:var(--green);animation:pulse 2s ease-in-out infinite}
 @keyframes pulse{0%,100%{box-shadow:0 0 0 0 rgba(16,232,138,0.4)}50%{box-shadow:0 0 0 5px transparent}}
@@ -104,7 +111,20 @@ body::before{content:'';position:fixed;inset:0;pointer-events:none;background:ra
 .topbar-logout:hover{border-color:var(--red);color:var(--red);background:var(--red-soft)}
 
 /* Dashboard quick-nav pills in the topbar — center-aligned, fills the gap between brand and topbar-right */
-.topbar-dashboards{display:flex;align-items:center;justify-content:center;gap:6px;flex:1 1 auto;flex-wrap:wrap;margin:0 16px;min-width:0}
+.topbar-dashboards{display:flex;align-items:center;justify-content:center;gap:6px;flex:1 1 auto;flex-wrap:nowrap;margin:0 16px;min-width:0;overflow-x:auto;overflow-y:hidden;scrollbar-width:none}
+.topbar-dashboards::-webkit-scrollbar{display:none}
+.topbar-dash-menu{display:none;position:relative;margin:0 12px;flex-shrink:0}
+.topbar-dash-btn{display:inline-flex;align-items:center;gap:6px;padding:5px 12px;border-radius:20px;border:1px solid var(--border);background:var(--surface);color:var(--text-hi);cursor:pointer;font-family:var(--sans);font-size:11px;font-weight:500;white-space:nowrap;transition:all .15s}
+.topbar-dash-btn:hover,.topbar-dash-btn.open{border-color:var(--blue);background:var(--blue-soft);color:var(--blue)}
+.topbar-dash-btn svg{transition:transform .2s}
+.topbar-dash-btn.open svg{transform:rotate(180deg)}
+.topbar-dash-popup{position:absolute;top:calc(100% + 8px);left:50%;transform:translateX(-50%);min-width:220px;background:var(--surface2);border:1px solid var(--border-hi);border-radius:12px;padding:5px;z-index:600;display:none;flex-direction:column;gap:2px;box-shadow:0 8px 32px rgba(0,0,0,.5)}
+.topbar-dash-popup.open{display:flex}
+.topbar-dash-popup .dash-nav{border-radius:8px;justify-content:flex-start;width:100%;box-sizing:border-box}
+@media(max-width:1100px){
+  .topbar-dashboards{display:none}
+  .topbar-dash-menu{display:block}
+}
 .dash-nav{display:inline-flex;align-items:center;gap:6px;padding:5px 11px;border:1px solid var(--border);border-radius:20px;color:var(--text-hi);font-size:11px;font-weight:500;text-decoration:none;background:var(--surface);white-space:nowrap;transition:all .15s;cursor:pointer}
 .dash-nav:hover{border-color:var(--blue);background:var(--blue-soft);color:var(--blue)}
 .dash-nav.active{border-color:var(--blue);background:var(--blue-soft);color:var(--blue)}
@@ -336,7 +356,7 @@ canvas#responseChart{width:100%!important}
   .topbar-name{font-size:14px}
   .topbar-icon{width:36px;height:36px;border-radius:9px}
   .topbar-logo-img{width:32px;height:32px;border-radius:7px}
-  .topbar-right{gap:10px;flex-wrap:wrap;justify-content:flex-end;font-size:11px;flex:1;min-width:0}
+  .topbar-right{gap:10px;font-size:11px}
   .topbar-status span{font-size:11px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:140px}
   .topbar-clock{display:none}
   .topbar-admin{padding:4px 9px;font-size:11px}
@@ -571,30 +591,48 @@ async function doLogout(){
 // an "Admin" pill at the end (admins only — viewers don't see it, and even if
 // they somehow do, clicking it shows a permission-denied toast).
 function renderTopbarDashboards(){
-  const el = document.getElementById("topbarDashboards");
+  const el    = document.getElementById("topbarDashboards");
+  const popup = document.getElementById("topbarDashPopup");
   if (!el) return;
   const pills = (dashboardGroups || []).map(g => {
     const dot = g.accent_color || "var(--blue)";
     const isCurrent = GROUP_SLUG === g.slug;
     const href = g.custom_domain ? `https://${g.custom_domain}` : `/dashboard/${g.slug}`;
-    return `<a class="dash-nav ${isCurrent ? 'active' : ''}" href="${href}" title="Open ${g.name}">
-      <span class="dash-nav-dot" style="background:${dot}"></span>
-      ${g.name}
-    </a>`;
+    return `<a class="dash-nav ${isCurrent ? 'active' : ''}" href="${href}">
+      <span class="dash-nav-dot" style="background:${dot}"></span>${g.name}</a>`;
   });
-  // Admin pill:
-  //   • Admins  → "/" (master dashboard — all servers across all groups)
-  //   • Viewers → "/admin" (management panel; their tabs are already filtered by role
-  //               to Servers / Omada / Webhooks — Groups + Users are hidden by applyRoleVisibility)
-  // Public (logged-out) visitors don't get the pill at all.
-  if (sidebarSession.loggedIn) {
-    pills.push(`<a class="dash-nav dash-nav-admin" href="/admin" title="Open management panel">
-      <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2l3 7h7l-5.5 4 2 7-6.5-4.5L5.5 20l2-7L2 9h7z"/></svg>
-      Manage
-    </a>`);
-  }
   el.innerHTML = pills.join("");
+  if (popup) popup.innerHTML = pills.join("");
 }
+
+function toggleDashMenu(e){
+  e.stopPropagation();
+  const btn   = document.getElementById("topbarDashBtn");
+  const popup = document.getElementById("topbarDashPopup");
+  const isOpen = popup.classList.contains("open");
+  popup.classList.toggle("open", !isOpen);
+  btn.classList.toggle("open", !isOpen);
+}
+function toggleTopbarMenu(e){
+  e.stopPropagation();
+  const right = document.getElementById("topbarRight");
+  const btn   = document.getElementById("topbarHamburger");
+  const isOpen = right.classList.contains("menu-open");
+  right.classList.toggle("menu-open", !isOpen);
+  btn.classList.toggle("open", !isOpen);
+}
+document.addEventListener("click", (e) => {
+  const popup = document.getElementById("topbarDashPopup");
+  const dbtn  = document.getElementById("topbarDashBtn");
+  if (popup) popup.classList.remove("open");
+  if (dbtn)  dbtn.classList.remove("open");
+  const right = document.getElementById("topbarRight");
+  const hbtn  = document.getElementById("topbarHamburger");
+  if (right && hbtn && !right.contains(e.target) && !hbtn.contains(e.target)) {
+    right.classList.remove("menu-open");
+    hbtn.classList.remove("open");
+  }
+});
 
 function toggleGroup(gid){
   if (collapsedGroups.has(gid)) collapsedGroups.delete(gid);
