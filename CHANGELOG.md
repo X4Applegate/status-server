@@ -4,6 +4,16 @@ All notable changes to this project are documented here.
 
 ---
 
+## [3.1.7] — 2026-04-15
+
+### Added
+- **Admin button on group dashboards** — the topbar Admin button now appears on every group dashboard (both custom-domain dashboards like `status.myanthemcoffee.com` and regular `/dashboard/<slug>` routes). Custom-domain dashboards link to the absolute gateway URL (`EXTERNAL_URL/admin`) since the session cookie lives on the gateway, not on the customer's domain.
+
+### Reverted
+- Removed the multi-source hostname matching and `/api/admin/whoami-host` diagnostic endpoint introduced in 3.1.6. The real fix for Cloudflare-Tunnel custom domains is adding the domain to Turnstile's Hostname Management allowlist in the Cloudflare dashboard — the app-side hardening wasn't needed.
+
+---
+
 ## [3.1.6] — 2026-04-15
 
 ### Changed

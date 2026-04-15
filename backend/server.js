@@ -3857,21 +3857,10 @@ app.use(async (req, res, next) => {
   // never /admin / /login / /static.
   if (req.method !== "GET") return next();
   if (req.path.startsWith("/api/") || req.path.startsWith("/admin") || req.path.startsWith("/login") || req.path.startsWith("/dashboard/")) return next();
-  // Build candidate hostnames from multiple sources. Cloudflare Tunnel, Caddy, and other
-  // reverse proxies may or may not populate X-Forwarded-Host; req.hostname respects trust
-  // proxy but the raw Host header is the most reliable fallback.
-  const candidates = [
-    req.hostname,
-    req.headers["x-forwarded-host"],
-    req.headers["host"]
-  ].filter(Boolean).map(h => String(h).split(",")[0].split(":")[0].trim().toLowerCase());
-  if (!candidates.length) return next();
+  const host = (req.hostname || "").toLowerCase();
+  if (!host) return next();
   try {
-    // Try every candidate hostname — first match wins
-    const [rows] = await db.query(
-      "SELECT * FROM status_groups WHERE LOWER(custom_domain) IN (?)",
-      [candidates]
-    );
+    const [rows] = await db.query("SELECT * FROM status_groups WHERE LOWER(custom_domain)=?", [host]);
     if (rows.length) {
       const g = rows[0];
       // Serve group-specific privacy/terms pages on the custom domain.
@@ -3888,7 +3877,9 @@ app.use(async (req, res, next) => {
           : res.render("terms");
       }
       return res.render("index", {
-        adminHref:    null,
+        // Absolute URL to admin — custom domain visitors aren't logged in on this hostname
+        // (different cookie scope), so link back to the gateway where their session lives.
+        adminHref:    EXTERNAL_URL ? `${EXTERNAL_URL}/admin` : "/admin",
         groupSlug:    g.slug,
         groupName:    g.name,
         groupSubtitle: g.description || "",
@@ -3907,21 +3898,6 @@ app.use(async (req, res, next) => {
   next();
 });
 
-// Diagnostic: shows what hostname/headers the app sees. Useful when custom-domain routing
-// via Cloudflare Tunnel / reverse proxy doesn't match. Admin-only to avoid leaking headers.
-app.get("/api/admin/whoami-host", requireAdmin, (req, res) => {
-  res.json({
-    hostname:            req.hostname,
-    rawHost:             req.headers["host"] || null,
-    xForwardedHost:      req.headers["x-forwarded-host"] || null,
-    xForwardedProto:     req.headers["x-forwarded-proto"] || null,
-    cfConnectingIp:      req.headers["cf-connecting-ip"] || null,
-    cfVisitor:           req.headers["cf-visitor"] || null,
-    cfRay:               req.headers["cf-ray"] || null,
-    trustProxyIp:        req.ip
-  });
-});
-
 // Authed master views: show all servers (across all groups + ungrouped)
 app.get("/",       requireAuthPage, (req, res) => res.render("index", { adminHref: "/admin", ...DEFAULT_BRANDING }));
 app.get("/status", requireAuthPage, (req, res) => res.render("index", { adminHref: "/", ...DEFAULT_BRANDING }));
@@ -3937,7 +3913,8 @@ app.get("/dashboard/:slug", async (req, res) => {
     if (!rows.length) return res.status(404).render("404", { slug: req.params.slug });
     const g = rows[0];
     res.render("index", {
-      adminHref:    null,
+      // Same-domain dashboard: relative /admin works (shared cookie scope with /admin)
+      adminHref:    "/admin",
       groupSlug:    g.slug,
       groupName:    g.name,
       groupSubtitle: g.description || "",
