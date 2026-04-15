@@ -1711,7 +1711,7 @@ async function switchTab(tab){
   const labels = { servers: "Add Server", groups: "Add Group", omada: "Add Controller", square: "Add Account", users: "Add User", webhooks: "Add Webhook", settings: "", audit: "" };
   document.getElementById("addBtnLabel").textContent  = labels[tab] || "";
   // Hide Add button for viewers on admin-only-create tabs, Settings, and Audit
-  const hideAdd = (!isAdmin() && (tab === "groups" || tab === "users" || tab === "square")) || tab === "settings" || tab === "audit";
+  const hideAdd = (!isAdmin() && (tab === "groups" || tab === "users")) || tab === "settings" || tab === "audit";
   document.getElementById("addBtn").style.display = hideAdd ? "none" : "";
   document.getElementById("addBtn").onclick           =
     tab === "servers"  ? () => showServerForm(null) :

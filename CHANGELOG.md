@@ -4,6 +4,14 @@ All notable changes to this project are documented here.
 
 ---
 
+## [3.1.4] — 2026-04-15
+
+### Fixed
+- **Viewers can now create Square accounts** — the Square tab's "+ Add Account" button was incorrectly hidden from viewer-role users. Viewers can now add, edit, and delete their own Square accounts; they only see accounts they created while admins see all accounts.
+- **Square delete endpoint** — corrected middleware from `requireAdmin` to `requireAuth` so viewers can delete their own accounts as intended.
+
+---
+
 ## [3.1.3] — 2026-04-15
 
 ### Changed

@@ -594,11 +594,15 @@ async function initDB() {
       application_id VARCHAR(255) DEFAULT '',
       access_token   VARCHAR(255) NOT NULL,
       environment    VARCHAR(16)  NOT NULL DEFAULT 'production',
+      created_by     INT DEFAULT NULL,
       created_at     TIMESTAMP DEFAULT CURRENT_TIMESTAMP
     )
   `);
   try {
     await db.query("ALTER TABLE status_square_accounts ADD COLUMN application_id VARCHAR(255) DEFAULT ''");
+  } catch(e) { /* column already exists */ }
+  try {
+    await db.query("ALTER TABLE status_square_accounts ADD COLUMN created_by INT DEFAULT NULL");
   } catch(e) { /* column already exists */ }
 
   await db.query(`
@@ -3372,35 +3376,45 @@ app.get("/api/admin/omada-controllers/:id/sites/:siteId/devices", requireAuth, a
 });
 
 // ── Square Accounts ───────────────────────────────────────────────────────────
+// Admins see all accounts; viewers see only accounts they created
 app.get("/api/admin/square-accounts", requireAuth, async (req, res) => {
   try {
-    const [rows] = await db.query("SELECT id, name, application_id, environment, created_at FROM status_square_accounts ORDER BY created_at");
+    const isAdmin = req.session.role === "admin";
+    const query = isAdmin
+      ? "SELECT id, name, application_id, environment, created_by, created_at FROM status_square_accounts ORDER BY created_at"
+      : "SELECT id, name, application_id, environment, created_by, created_at FROM status_square_accounts WHERE created_by=? ORDER BY created_at";
+    const [rows] = isAdmin ? await db.query(query) : await db.query(query, [req.session.userId]);
     res.json(rows);
   } catch(e) { res.status(500).json({ error: e.message }); }
 });
 
-app.post("/api/admin/square-accounts", requireAdmin, async (req, res) => {
+// Any authenticated user can create a Square account (stored under their userId)
+app.post("/api/admin/square-accounts", requireAuth, async (req, res) => {
   const { name, application_id, access_token, environment } = req.body;
   if (!name || !access_token) return res.status(400).json({ error: "Name and access token are required" });
   const env = environment === "sandbox" ? "sandbox" : "production";
   try {
     const [result] = await db.query(
-      "INSERT INTO status_square_accounts (name, application_id, access_token, environment) VALUES (?,?,?,?)",
-      [name.trim(), (application_id||"").trim(), access_token.trim(), env]
+      "INSERT INTO status_square_accounts (name, application_id, access_token, environment, created_by) VALUES (?,?,?,?,?)",
+      [name.trim(), (application_id||"").trim(), access_token.trim(), env, req.session.userId]
     );
     addLog({ level:"info", server:"square", message:`Square account added: ${name} by ${req.session.username}` });
     res.json({ ok:true, id: result.insertId });
   } catch(e) { res.status(500).json({ error: e.message }); }
 });
 
-app.put("/api/admin/square-accounts/:id", requireAdmin, async (req, res) => {
+// Admins can edit any account; viewers can only edit accounts they created
+app.put("/api/admin/square-accounts/:id", requireAuth, async (req, res) => {
   const id = parseInt(req.params.id);
   const { name, application_id, access_token, environment } = req.body;
   if (!name) return res.status(400).json({ error: "Name is required" });
   const env = environment === "sandbox" ? "sandbox" : "production";
   try {
-    const [rows] = await db.query("SELECT access_token FROM status_square_accounts WHERE id=?", [id]);
+    const [rows] = await db.query("SELECT access_token, created_by FROM status_square_accounts WHERE id=?", [id]);
     if (!rows.length) return res.status(404).json({ error: "Account not found" });
+    if (req.session.role !== "admin" && rows[0].created_by !== req.session.userId) {
+      return res.status(403).json({ error: "You can only edit your own Square accounts" });
+    }
     const finalToken = (access_token && access_token !== "••••••") ? access_token.trim() : rows[0].access_token;
     await db.query("UPDATE status_square_accounts SET name=?, application_id=?, access_token=?, environment=? WHERE id=?",
       [name.trim(), (application_id||"").trim(), finalToken, env, id]);
@@ -3409,11 +3423,15 @@ app.put("/api/admin/square-accounts/:id", requireAdmin, async (req, res) => {
   } catch(e) { res.status(500).json({ error: e.message }); }
 });
 
+// Admins can delete any account; viewers can only delete accounts they created
 app.delete("/api/admin/square-accounts/:id", requireAdmin, async (req, res) => {
   const id = parseInt(req.params.id);
   try {
-    const [rows] = await db.query("SELECT name FROM status_square_accounts WHERE id=?", [id]);
+    const [rows] = await db.query("SELECT name, created_by FROM status_square_accounts WHERE id=?", [id]);
     if (!rows.length) return res.status(404).json({ error: "Account not found" });
+    if (req.session.role !== "admin" && rows[0].created_by !== req.session.userId) {
+      return res.status(403).json({ error: "You can only delete your own Square accounts" });
+    }
     await db.query("DELETE FROM status_square_accounts WHERE id=?", [id]);
     addLog({ level:"warn", server:"square", message:`Square account removed: ${rows[0].name} by ${req.session.username}` });
     res.json({ ok:true });
