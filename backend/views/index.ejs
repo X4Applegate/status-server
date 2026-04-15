@@ -123,7 +123,7 @@ body::before{content:'';position:fixed;inset:0;pointer-events:none;background:ra
 .topbar-dash-popup .dash-nav{border-radius:8px;justify-content:flex-start;width:100%;box-sizing:border-box}
 @media(max-width:1100px){
   .topbar-dashboards{display:none}
-  .topbar-dash-menu{display:block}
+  .topbar-dash-menu{display:none}
 }
 .dash-nav{display:inline-flex;align-items:center;gap:6px;padding:5px 11px;border:1px solid var(--border);border-radius:20px;color:var(--text-hi);font-size:11px;font-weight:500;text-decoration:none;background:var(--surface);white-space:nowrap;transition:all .15s;cursor:pointer}
 .dash-nav:hover{border-color:var(--blue);background:var(--blue-soft);color:var(--blue)}
@@ -591,8 +591,9 @@ async function doLogout(){
 // an "Admin" pill at the end (admins only — viewers don't see it, and even if
 // they somehow do, clicking it shows a permission-denied toast).
 function renderTopbarDashboards(){
-  const el    = document.getElementById("topbarDashboards");
-  const popup = document.getElementById("topbarDashPopup");
+  const el      = document.getElementById("topbarDashboards");
+  const popup   = document.getElementById("topbarDashPopup");
+  const dashMenu = document.getElementById("topbarDashMenu");
   if (!el) return;
   const pills = (dashboardGroups || []).map(g => {
     const dot = g.accent_color || "var(--blue)";
@@ -603,6 +604,8 @@ function renderTopbarDashboards(){
   });
   el.innerHTML = pills.join("");
   if (popup) popup.innerHTML = pills.join("");
+  // Hide the Dashboards dropdown button entirely when there are no groups to show
+  if (dashMenu) dashMenu.style.display = pills.length ? "" : "none";
 }
 
 function toggleDashMenu(e){
