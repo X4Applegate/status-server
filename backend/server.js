@@ -259,6 +259,9 @@ let db;
 let serverStatus = {};
 let sseClients   = [];
 let logClients   = [];
+// Alert debounce: hold DOWN alerts for 5 min; cancel if server recovers first
+const pendingDownAlerts = new Map(); // serverId → { timer, evt }
+const sentDownAlerts    = new Set(); // serverIds whose down-alert was actually fired
 let serverConfig = [];
 let eventLog     = [];
 
@@ -1995,21 +1998,86 @@ async function pollAll(force = false) {
     if (prev.overall && prev.overall!=="pending" && prev.overall!==overall) {
       addLog({ level:overall==="up"?"info":"error", server:def.name, serverId:def.id, check:"STATUS", message:`Status changed: ${prev.overall.toUpperCase()} -> ${overall.toUpperCase()}`, ok:overall==="up", isStatusChange:true });
 
-      // Fire webhooks on down/degraded transitions and recoveries
       const isRecovery = overall === "up";
       const isDownward = overall === "down" || overall === "degraded";
-      if (isRecovery || isDownward) {
-        fireWebhooks({
-          server:          def.name,
-          host:            def.host,
-          status:          overall,
-          previous:        prev.overall,
-          cause:           checks.filter(c => !c.ok).map(c => c.detail).join(", ") || null,
-          checks:          checks.map(c => ({ type: c.type, port: c.port, ok: c.ok, detail: c.detail, response_ms: c.response_ms })),
-          time:            now,
-          isRecovery,
-          serverGroupIds:  def.group_ids || []
-        }).catch(() => {});
+      const isSquare   = (def.checks || []).some(c => c.type === "square_pos");
+
+      if (isDownward) {
+        if (isSquare) {
+          // Square POS: hold alert for 5 min — cancel if it recovers first
+          if (pendingDownAlerts.has(def.id)) {
+            clearTimeout(pendingDownAlerts.get(def.id).timer);
+            pendingDownAlerts.delete(def.id);
+          }
+          const evt = {
+            server:         def.name,
+            host:           def.host,
+            status:         overall,
+            previous:       prev.overall,
+            cause:          checks.filter(c => !c.ok).map(c => c.detail).join(", ") || null,
+            checks:         checks.map(c => ({ type:c.type, port:c.port, ok:c.ok, detail:c.detail, response_ms:c.response_ms })),
+            time:           now,
+            isRecovery:     false,
+            serverGroupIds: def.group_ids || []
+          };
+          const timer = setTimeout(() => {
+            pendingDownAlerts.delete(def.id);
+            sentDownAlerts.add(def.id);
+            fireWebhooks(evt).catch(() => {});
+            addLog({ level:"error", server:def.name, serverId:def.id, check:"ALERT", message:`Alert fired — Square POS down for 5+ minutes`, ok:false });
+          }, 5 * 60 * 1000);
+          pendingDownAlerts.set(def.id, { timer, evt });
+          addLog({ level:"warn", server:def.name, serverId:def.id, check:"ALERT", message:`Square POS DOWN — holding alert for 5-minute confirmation window`, ok:false });
+        } else {
+          // All other check types: alert immediately as normal
+          fireWebhooks({
+            server:         def.name,
+            host:           def.host,
+            status:         overall,
+            previous:       prev.overall,
+            cause:          checks.filter(c => !c.ok).map(c => c.detail).join(", ") || null,
+            checks:         checks.map(c => ({ type:c.type, port:c.port, ok:c.ok, detail:c.detail, response_ms:c.response_ms })),
+            time:           now,
+            isRecovery:     false,
+            serverGroupIds: def.group_ids || []
+          }).catch(() => {});
+        }
+      }
+
+      if (isRecovery) {
+        if (isSquare && pendingDownAlerts.has(def.id)) {
+          // Square recovered before 5-min window — suppress the alert entirely
+          clearTimeout(pendingDownAlerts.get(def.id).timer);
+          pendingDownAlerts.delete(def.id);
+          addLog({ level:"info", server:def.name, serverId:def.id, check:"ALERT", message:`Square POS recovered within 5-minute window — alert suppressed`, ok:true });
+        } else if (isSquare && sentDownAlerts.has(def.id)) {
+          // Square was genuinely down (alert was sent) — send recovery
+          sentDownAlerts.delete(def.id);
+          fireWebhooks({
+            server:         def.name,
+            host:           def.host,
+            status:         overall,
+            previous:       prev.overall,
+            cause:          null,
+            checks:         checks.map(c => ({ type:c.type, port:c.port, ok:c.ok, detail:c.detail, response_ms:c.response_ms })),
+            time:           now,
+            isRecovery:     true,
+            serverGroupIds: def.group_ids || []
+          }).catch(() => {});
+        } else if (!isSquare) {
+          // Non-Square recovery: alert immediately as normal
+          fireWebhooks({
+            server:         def.name,
+            host:           def.host,
+            status:         overall,
+            previous:       prev.overall,
+            cause:          null,
+            checks:         checks.map(c => ({ type:c.type, port:c.port, ok:c.ok, detail:c.detail, response_ms:c.response_ms })),
+            time:           now,
+            isRecovery:     true,
+            serverGroupIds: def.group_ids || []
+          }).catch(() => {});
+        }
       }
     }
 

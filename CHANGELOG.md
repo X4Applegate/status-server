@@ -4,6 +4,13 @@ All notable changes to this project are documented here.
 
 ---
 
+## [3.1.3] — 2026-04-15
+
+### Changed
+- **Square POS alert debounce** — Square POS down/degraded alerts are now held for 5 minutes before firing. If the device comes back online within that window the alert is silently cancelled (no Slack ping). If it is still down after 5 minutes the alert fires and a recovery notification is sent when it comes back up. All other check types (ping, HTTP, TCP, DNS, Omada, etc.) continue to alert immediately as before.
+
+---
+
 ## [3.1.2] — 2026-04-14
 
 ### Added
