@@ -4,6 +4,19 @@ All notable changes to this project are documented here.
 
 ---
 
+## [3.1.6] — 2026-04-15
+
+### Changed
+- **Custom-domain routing hardened** — the middleware that matches a request's hostname against each group's `custom_domain` now checks three sources (`req.hostname`, the `X-Forwarded-Host` header, and the raw `Host` header) and matches on any of them. Makes custom-domain dashboards work reliably behind Cloudflare Tunnel, Caddy, nginx, and other reverse proxies regardless of which header they forward.
+
+### Added
+- **`/api/admin/whoami-host` diagnostic endpoint** — admin-only JSON endpoint that echoes the hostname, raw Host header, `X-Forwarded-Host`, Cloudflare (`CF-*`) headers, and the resolved client IP. Useful for debugging why a custom-domain dashboard isn't routing.
+
+### Note
+- **Cloudflare Turnstile + custom domains**: if Turnstile is enabled, every custom domain must be added to the widget's **Hostname Management** list in the Cloudflare dashboard. Otherwise Turnstile refuses to render on that domain and the login page breaks.
+
+---
+
 ## [3.1.5] — 2026-04-15
 
 ### Changed

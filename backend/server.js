@@ -3857,10 +3857,21 @@ app.use(async (req, res, next) => {
   // never /admin / /login / /static.
   if (req.method !== "GET") return next();
   if (req.path.startsWith("/api/") || req.path.startsWith("/admin") || req.path.startsWith("/login") || req.path.startsWith("/dashboard/")) return next();
-  const host = (req.hostname || "").toLowerCase();
-  if (!host) return next();
+  // Build candidate hostnames from multiple sources. Cloudflare Tunnel, Caddy, and other
+  // reverse proxies may or may not populate X-Forwarded-Host; req.hostname respects trust
+  // proxy but the raw Host header is the most reliable fallback.
+  const candidates = [
+    req.hostname,
+    req.headers["x-forwarded-host"],
+    req.headers["host"]
+  ].filter(Boolean).map(h => String(h).split(",")[0].split(":")[0].trim().toLowerCase());
+  if (!candidates.length) return next();
   try {
-    const [rows] = await db.query("SELECT * FROM status_groups WHERE LOWER(custom_domain)=?", [host]);
+    // Try every candidate hostname — first match wins
+    const [rows] = await db.query(
+      "SELECT * FROM status_groups WHERE LOWER(custom_domain) IN (?)",
+      [candidates]
+    );
     if (rows.length) {
       const g = rows[0];
       // Serve group-specific privacy/terms pages on the custom domain.
@@ -3894,6 +3905,21 @@ app.use(async (req, res, next) => {
     }
   } catch(e) { /* silent — fall through to normal routing */ }
   next();
+});
+
+// Diagnostic: shows what hostname/headers the app sees. Useful when custom-domain routing
+// via Cloudflare Tunnel / reverse proxy doesn't match. Admin-only to avoid leaking headers.
+app.get("/api/admin/whoami-host", requireAdmin, (req, res) => {
+  res.json({
+    hostname:            req.hostname,
+    rawHost:             req.headers["host"] || null,
+    xForwardedHost:      req.headers["x-forwarded-host"] || null,
+    xForwardedProto:     req.headers["x-forwarded-proto"] || null,
+    cfConnectingIp:      req.headers["cf-connecting-ip"] || null,
+    cfVisitor:           req.headers["cf-visitor"] || null,
+    cfRay:               req.headers["cf-ray"] || null,
+    trustProxyIp:        req.ip
+  });
 });
 
 // Authed master views: show all servers (across all groups + ungrouped)
