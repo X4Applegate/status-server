@@ -604,6 +604,17 @@ async function initDB() {
   try {
     await db.query("ALTER TABLE status_square_accounts ADD COLUMN created_by INT DEFAULT NULL");
   } catch(e) { /* column already exists */ }
+  // Many-to-many: Square accounts can be assigned to multiple groups, and viewers assigned
+  // to any of those groups can see/use the account in their server checks.
+  await db.query(`
+    CREATE TABLE IF NOT EXISTS status_square_account_groups (
+      account_id INT NOT NULL,
+      group_id   INT NOT NULL,
+      PRIMARY KEY (account_id, group_id),
+      FOREIGN KEY (account_id) REFERENCES status_square_accounts(id) ON DELETE CASCADE,
+      FOREIGN KEY (group_id)   REFERENCES status_groups(id)          ON DELETE CASCADE
+    )
+  `);
 
   await db.query(`
     CREATE TABLE IF NOT EXISTS status_groups (
@@ -3376,21 +3387,52 @@ app.get("/api/admin/omada-controllers/:id/sites/:siteId/devices", requireAuth, a
 });
 
 // ── Square Accounts ───────────────────────────────────────────────────────────
-// Admins see all accounts; viewers see only accounts they created
+// Helper: load group_ids array for a list of Square account ids from the map table.
+async function loadGroupIdsForSquareAccounts(accountIds) {
+  if (!accountIds.length) return {};
+  const [rows] = await db.query(
+    "SELECT account_id, group_id FROM status_square_account_groups WHERE account_id IN (?)",
+    [accountIds]
+  );
+  const byId = {};
+  for (const r of rows) (byId[r.account_id] ||= []).push(r.group_id);
+  return byId;
+}
+
+// Permission model:
+//   • Admins see every account.
+//   • Viewers see accounts they created OR accounts mapped to a group they have access to.
 app.get("/api/admin/square-accounts", requireAuth, async (req, res) => {
   try {
     const isAdmin = req.session.role === "admin";
-    const query = isAdmin
-      ? "SELECT id, name, application_id, environment, created_by, created_at FROM status_square_accounts ORDER BY created_at"
-      : "SELECT id, name, application_id, environment, created_by, created_at FROM status_square_accounts WHERE created_by=? ORDER BY created_at";
-    const [rows] = isAdmin ? await db.query(query) : await db.query(query, [req.session.userId]);
-    res.json(rows);
+    let rows;
+    if (isAdmin) {
+      [rows] = await db.query(
+        "SELECT id, name, application_id, environment, created_by, created_at FROM status_square_accounts ORDER BY created_at"
+      );
+    } else {
+      const allowed = await getUserAllowedGroupIds(req.session.userId, req.session.role);
+      const params  = [req.session.userId];
+      let sql = `SELECT DISTINCT sa.id, sa.name, sa.application_id, sa.environment, sa.created_by, sa.created_at
+                 FROM status_square_accounts sa
+                 LEFT JOIN status_square_account_groups sag ON sag.account_id = sa.id
+                 WHERE sa.created_by = ?`;
+      if (Array.isArray(allowed) && allowed.length) {
+        sql += ` OR sag.group_id IN (?)`;
+        params.push(allowed);
+      }
+      sql += ` ORDER BY sa.created_at`;
+      [rows] = await db.query(sql, params);
+    }
+    const groupMap = await loadGroupIdsForSquareAccounts(rows.map(r => r.id));
+    res.json(rows.map(r => ({ ...r, group_ids: groupMap[r.id] || [] })));
   } catch(e) { res.status(500).json({ error: e.message }); }
 });
 
-// Any authenticated user can create a Square account (stored under their userId)
+// Any authenticated user can create a Square account (stored under their userId).
+// Viewers can only assign the account to groups they themselves have access to.
 app.post("/api/admin/square-accounts", requireAuth, async (req, res) => {
-  const { name, application_id, access_token, environment } = req.body;
+  const { name, application_id, access_token, environment, group_ids } = req.body;
   if (!name || !access_token) return res.status(400).json({ error: "Name and access token are required" });
   const env = environment === "sandbox" ? "sandbox" : "production";
   try {
@@ -3398,39 +3440,83 @@ app.post("/api/admin/square-accounts", requireAuth, async (req, res) => {
       "INSERT INTO status_square_accounts (name, application_id, access_token, environment, created_by) VALUES (?,?,?,?,?)",
       [name.trim(), (application_id||"").trim(), access_token.trim(), env, req.session.userId]
     );
+    const newId = result.insertId;
+    if (Array.isArray(group_ids) && group_ids.length) {
+      // Scope viewer selections to their allowed groups
+      let ids = group_ids.map(Number).filter(Boolean);
+      if (req.session.role !== "admin") {
+        const allowed = await getUserAllowedGroupIds(req.session.userId, req.session.role);
+        ids = ids.filter(gid => (allowed || []).includes(gid));
+      }
+      if (ids.length) {
+        await db.query(
+          "INSERT IGNORE INTO status_square_account_groups (account_id, group_id) VALUES ?",
+          [ids.map(gid => [newId, gid])]
+        );
+      }
+    }
     addLog({ level:"info", server:"square", message:`Square account added: ${name} by ${req.session.username}` });
-    res.json({ ok:true, id: result.insertId });
+    res.json({ ok:true, id: newId });
   } catch(e) { res.status(500).json({ error: e.message }); }
 });
 
-// Admins can edit any account; viewers can only edit accounts they created
+// Admins can edit any account. Viewers can edit accounts they created OR accounts mapped
+// to any of their allowed groups (same visibility rule as the GET endpoint).
 app.put("/api/admin/square-accounts/:id", requireAuth, async (req, res) => {
   const id = parseInt(req.params.id);
-  const { name, application_id, access_token, environment } = req.body;
+  const { name, application_id, access_token, environment, group_ids } = req.body;
   if (!name) return res.status(400).json({ error: "Name is required" });
   const env = environment === "sandbox" ? "sandbox" : "production";
   try {
     const [rows] = await db.query("SELECT access_token, created_by FROM status_square_accounts WHERE id=?", [id]);
     if (!rows.length) return res.status(404).json({ error: "Account not found" });
-    if (req.session.role !== "admin" && rows[0].created_by !== req.session.userId) {
-      return res.status(403).json({ error: "You can only edit your own Square accounts" });
+    // Viewer permission check
+    if (req.session.role !== "admin") {
+      const allowed = await getUserAllowedGroupIds(req.session.userId, req.session.role) || [];
+      const [g] = await db.query("SELECT group_id FROM status_square_account_groups WHERE account_id=?", [id]);
+      const accountGroupIds = g.map(r => r.group_id);
+      const sharesGroup = accountGroupIds.some(gid => allowed.includes(gid));
+      if (rows[0].created_by !== req.session.userId && !sharesGroup) {
+        return res.status(403).json({ error: "You can only edit Square accounts in your allowed dashboards" });
+      }
     }
     const finalToken = (access_token && access_token !== "••••••") ? access_token.trim() : rows[0].access_token;
     await db.query("UPDATE status_square_accounts SET name=?, application_id=?, access_token=?, environment=? WHERE id=?",
       [name.trim(), (application_id||"").trim(), finalToken, env, id]);
+    // Replace group mapping if provided
+    if (Array.isArray(group_ids)) {
+      let ids = group_ids.map(Number).filter(Boolean);
+      if (req.session.role !== "admin") {
+        const allowed = await getUserAllowedGroupIds(req.session.userId, req.session.role);
+        ids = ids.filter(gid => (allowed || []).includes(gid));
+      }
+      await db.query("DELETE FROM status_square_account_groups WHERE account_id=?", [id]);
+      if (ids.length) {
+        await db.query(
+          "INSERT IGNORE INTO status_square_account_groups (account_id, group_id) VALUES ?",
+          [ids.map(gid => [id, gid])]
+        );
+      }
+    }
     addLog({ level:"info", server:"square", message:`Square account updated: ${name} by ${req.session.username}` });
     res.json({ ok:true });
   } catch(e) { res.status(500).json({ error: e.message }); }
 });
 
-// Admins can delete any account; viewers can only delete accounts they created
-app.delete("/api/admin/square-accounts/:id", requireAdmin, async (req, res) => {
+// Admins can delete any account. Viewers can delete accounts they created OR in their groups.
+app.delete("/api/admin/square-accounts/:id", requireAuth, async (req, res) => {
   const id = parseInt(req.params.id);
   try {
     const [rows] = await db.query("SELECT name, created_by FROM status_square_accounts WHERE id=?", [id]);
     if (!rows.length) return res.status(404).json({ error: "Account not found" });
-    if (req.session.role !== "admin" && rows[0].created_by !== req.session.userId) {
-      return res.status(403).json({ error: "You can only delete your own Square accounts" });
+    if (req.session.role !== "admin") {
+      const allowed = await getUserAllowedGroupIds(req.session.userId, req.session.role) || [];
+      const [g] = await db.query("SELECT group_id FROM status_square_account_groups WHERE account_id=?", [id]);
+      const accountGroupIds = g.map(r => r.group_id);
+      const sharesGroup = accountGroupIds.some(gid => allowed.includes(gid));
+      if (rows[0].created_by !== req.session.userId && !sharesGroup) {
+        return res.status(403).json({ error: "You can only delete Square accounts in your allowed dashboards" });
+      }
     }
     await db.query("DELETE FROM status_square_accounts WHERE id=?", [id]);
     addLog({ level:"warn", server:"square", message:`Square account removed: ${rows[0].name} by ${req.session.username}` });
@@ -3877,9 +3963,10 @@ app.use(async (req, res, next) => {
           : res.render("terms");
       }
       return res.render("index", {
-        // Absolute URL to admin — custom domain visitors aren't logged in on this hostname
-        // (different cookie scope), so link back to the gateway where their session lives.
-        adminHref:    EXTERNAL_URL ? `${EXTERNAL_URL}/admin` : "/admin",
+        // Relative /admin — keeps the viewer on their own custom domain (e.g.
+        // status.myanthemcoffee.com/admin) so they can log in and manage without
+        // being bounced to the gateway host.
+        adminHref:    "/admin",
         groupSlug:    g.slug,
         groupName:    g.name,
         groupSubtitle: g.description || "",

@@ -731,6 +731,10 @@ body{font-family:var(--sans);background:var(--bg);color:var(--text);min-height:1
             <label class="flabel">Production Access Token <span id="sqTokenHint" style="font-weight:400;text-transform:none;letter-spacing:0;color:var(--text-2)">*</span></label>
             <input class="finput" id="sqToken" type="password" autocomplete="new-password" placeholder="EAAAl... (copy from Square Developer → Credentials)">
           </div>
+          <div class="fg full">
+            <label class="flabel">Allowed Dashboards <span style="font-weight:400;text-transform:none;letter-spacing:0;color:var(--text-2)">(viewers in these groups can see and use this Square account)</span></label>
+            <div id="sqGroupPicker" style="background:var(--input-bg);border:1px solid var(--border-hi);border-radius:var(--r-sm);max-height:180px;overflow-y:auto;padding:8px"></div>
+          </div>
         </div>
         <div class="form-footer">
           <span class="form-err" id="sqErr"></span>
@@ -3441,7 +3445,7 @@ async function loadSquareList(){
   }
 }
 
-function showSquareForm(a){
+async function showSquareForm(a){
   document.getElementById("aListView").style.display        = "none";
   document.getElementById("aFormView").style.display        = "none";
   document.getElementById("aUserFormView").style.display    = "none";
@@ -3458,6 +3462,20 @@ function showSquareForm(a){
   document.getElementById("sqTokenHint").textContent = a ? "(leave blank to keep existing)" : "*";
   document.getElementById("sqEnv").value    = a?.environment    || "production";
   document.getElementById("sqErr").textContent = "";
+  // Populate the group picker — viewers only see groups they have access to
+  await ensureGroupsLoaded();
+  const pickedIds = new Set((a?.group_ids || []).map(Number));
+  const picker = document.getElementById("sqGroupPicker");
+  const visibleGroups = isAdmin() ? adminGroups : adminGroups.filter(g => (sessionAllowedGroupIds||[]).includes(g.id));
+  if (!visibleGroups.length) {
+    picker.innerHTML = `<div style="font-size:12px;color:var(--text-2);padding:4px">No groups available</div>`;
+  } else {
+    picker.innerHTML = visibleGroups.map(g => `
+      <label style="display:flex;align-items:center;gap:8px;padding:5px 4px;cursor:pointer;border-radius:4px;font-size:13px;color:var(--text-hi)">
+        <input type="checkbox" value="${g.id}" ${pickedIds.has(g.id) ? "checked" : ""} style="accent-color:var(--accent)">
+        ${g.name}
+      </label>`).join("");
+  }
 }
 
 async function submitSquareForm(){
@@ -3470,7 +3488,8 @@ async function submitSquareForm(){
   err.textContent = "";
   if (!name)          { err.textContent = "Name is required"; return; }
   if (!id && !token)  { err.textContent = "Production Access Token is required"; return; }
-  const body = { name, application_id: appId, environment: env };
+  const group_ids = Array.from(document.querySelectorAll("#sqGroupPicker input[type=checkbox]:checked")).map(el => parseInt(el.value));
+  const body = { name, application_id: appId, environment: env, group_ids };
   if (token) body.access_token = token;
   try {
     const r = await fetch(id ? `/api/admin/square-accounts/${id}` : "/api/admin/square-accounts", {

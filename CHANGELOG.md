@@ -4,6 +4,17 @@ All notable changes to this project are documented here.
 
 ---
 
+## [3.1.8] — 2026-04-15
+
+### Added
+- **Square account group permissions** — Square accounts can now be assigned to one or more dashboard groups via a new "Allowed Dashboards" multi-checkbox in the Square form (mirrors the Omada group picker). Viewers who have access to any of those groups can see and use that Square account in their server checks. New `status_square_account_groups` many-to-many table with `ON DELETE CASCADE` so mappings clean up automatically when accounts or groups are removed.
+
+### Changed
+- **Square account visibility**: admins still see every account; **viewers** now see accounts they created **or** accounts mapped to any of their allowed dashboards (previously only their own).
+- **Admin button on custom-domain dashboards** now links to `/admin` on the **same custom domain** (e.g. `status.myanthemcoffee.com/admin`) instead of bouncing visitors to the gateway host. Lets each customer log in and manage on their own branded domain.
+
+---
+
 ## [3.1.7] — 2026-04-15
 
 ### Added
