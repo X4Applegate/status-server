@@ -2872,7 +2872,7 @@ function renderAdminGroupList(list){
       <div class="admin-row-actions" onclick="event.stopPropagation()">
         <a class="btn btn-sm" href="/dashboard/${g.slug}" target="_blank" style="text-decoration:none">View</a>
         <button class="btn btn-sm" onclick="showGroupForm(adminGroups[${idx}])">Edit</button>
-        ${isAdmin() ? `<button class="btn btn-sm btn-danger" onclick="askDelGroup(${g.id},'${g.name.replace(/'/g,"\\'")}')">Remove</button>` : ``}
+        ${isAdmin() ? `<button class="btn btn-sm btn-danger" onclick="askDelGroup(${g.id},'${g.name.replace(/\\/g,"\\\\").replace(/'/g,"\\'")}')">Remove</button>` : ``}
       </div>
     </div>
   `).join("");
@@ -3110,7 +3110,7 @@ function renderAdminOmadaList(list){
       <div class="admin-row-actions" onclick="event.stopPropagation()">
         <button class="btn btn-sm" onclick="showOmadaSites(adminOmada[${idx}])">Sites</button>
         <button class="btn btn-sm" onclick="showOmadaForm(adminOmada[${idx}])">Edit</button>
-        <button class="btn btn-sm btn-danger" onclick="askDelOmada(${c.id},'${c.name.replace(/'/g,"\\'")}')">Remove</button>
+        <button class="btn btn-sm btn-danger" onclick="askDelOmada(${c.id},'${c.name.replace(/\\/g,"\\\\").replace(/'/g,"\\'")}')">Remove</button>
       </div>
     </div>`;
   }).join("");
@@ -3246,7 +3246,7 @@ async function showOmadaSites(c){
       return;
     }
     // Build a row helper that includes customer_id and the friendly names when present
-    const esc = (v) => String(v||"").replace(/'/g,"\\'");
+    const esc = (v) => String(v||"").replace(/\\/g,"\\\\").replace(/'/g,"\\'");
     currentOmadaCtrl = c;
     const renderSiteRow = (s) => {
       const sid    = s.siteId || s.id;
@@ -3318,7 +3318,7 @@ async function showOmadaDevices(controllerId, siteId, siteName, customerId, cust
   subhead.textContent = siteId;
   list.innerHTML = `<div style="padding:18px;text-align:center;color:var(--text-2);font-size:12px">Fetching devices…</div>`;
 
-  const esc = (v) => String(v||"").replace(/'/g,"\\'");
+  const esc = (v) => String(v||"").replace(/\\/g,"\\\\").replace(/'/g,"\\'");
   const params = new URLSearchParams({ siteName: siteName||"", customerId: customerId||"", customerName: customerName||"" });
   try {
     const r = await fetch(`/api/admin/omada-controllers/${controllerId}/sites/${encodeURIComponent(siteId)}/devices?${params}`);
@@ -3422,7 +3422,7 @@ function renderAdminSquareList(list){
       <div class="admin-row-actions" onclick="event.stopPropagation()">
         <button class="btn btn-sm" onclick="dupSquare(adminSquare[${idx}])">Dup</button>
         <button class="btn btn-sm" onclick="showSquareForm(adminSquare[${idx}])">Edit</button>
-        <button class="btn btn-sm btn-danger" onclick="askDelSquare(${a.id},'${a.name.replace(/'/g,"\\'")}')">Remove</button>
+        <button class="btn btn-sm btn-danger" onclick="askDelSquare(${a.id},'${a.name.replace(/\\/g,"\\\\").replace(/'/g,"\\'")}')">Remove</button>
       </div>
     </div>`;
   }).join("");

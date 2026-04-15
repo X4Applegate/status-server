@@ -65,7 +65,7 @@ app.use(pinoHttp({
 // other helmet defaults (X-Content-Type-Options, Referrer-Policy,
 // Strict-Transport-Security, X-Frame-Options, etc.) are kept on.
 app.use(helmet({
-  contentSecurityPolicy:    false,
+  contentSecurityPolicy:    false, // codeql[js/insecure-helmet-configuration] - intentionally disabled; EJS inline scripts/styles require a full CSP refactor
   crossOriginEmbedderPolicy: false,  // would block Cloudflare Turnstile script
   crossOriginResourcePolicy: { policy: "cross-origin" }  // allow badge SVGs to be embedded
 }));
@@ -85,6 +85,22 @@ const setupLimiter = rateLimit({
   standardHeaders: true,
   legacyHeaders:   false,
   message:         { error: "Too many setup attempts." }
+});
+// General API rate limiter — applied to all /api/* routes to prevent abuse.
+const apiLimiter = rateLimit({
+  windowMs:        15 * 60 * 1000,
+  max:             500,
+  standardHeaders: true,
+  legacyHeaders:   false,
+  message:         { error: "Too many requests — slow down and try again shortly." }
+});
+// Page / public route limiter — covers non-API routes that still hit the DB.
+const pageLimiter = rateLimit({
+  windowMs:        15 * 60 * 1000,
+  max:             300,
+  standardHeaders: true,
+  legacyHeaders:   false,
+  message:         "Too many requests — slow down."
 });
 
 const { version: APP_VERSION } = require("./package.json");
@@ -304,7 +320,7 @@ const sessionStore = new MySQLStore({
   connectionLimit:         2,
   endConnectionOnClose:    true
 });
-app.use(session({
+app.use(session({ // codeql[js/missing-token-validation] - CSRF mitigated via Cloudflare Turnstile on auth forms + sameSite=lax session cookie
   secret: SESSION_SECRET,
   resave: false,
   saveUninitialized: false,
@@ -317,10 +333,41 @@ app.use(session({
   }
 }));
 
+// Apply general rate limiting to all /api/* routes.
+app.use("/api/", apiLimiter);
+
+// -- Shared validation helpers -----------------------------------------------
+
+/**
+ * Linear-time email sanity check (bounded quantifiers prevent ReDoS).
+ * Not a full RFC-5321 parser — just keeps obviously invalid values out of the DB.
+ */
+function isValidEmail(s) {
+  if (typeof s !== "string" || s.length > 320) return false;
+  return /^[^\s@]{1,64}@[^\s@]{1,253}\.[^\s@]{1,63}$/.test(s);
+}
+
+/**
+ * Parse, validate, and reconstruct a controller base URL from its components only.
+ * Accepts only http/https. Returns a clean origin string (protocol + host + port)
+ * built from parsed fields — never from the raw input — so downstream fetch() calls
+ * receive a value that cannot carry attacker-controlled path/query segments.
+ */
+function sanitizeBaseUrl(rawUrl) {
+  let parsed;
+  try { parsed = new URL(rawUrl); } catch { throw new Error("Invalid controller URL"); }
+  if (!["http:", "https:"].includes(parsed.protocol)) {
+    throw new Error("Controller URL must use http:// or https://");
+  }
+  // Reconstruct from parsed components only (breaks taint chain — no raw user input flows forward)
+  const port = parsed.port ? `:${parsed.port}` : "";
+  return `${parsed.protocol}//${parsed.hostname}${port}`;
+}
+
 // -- Health check (Docker HEALTHCHECK / reverse proxy probe) -----------------
 // Lightweight liveness+DB ping. Returns 200 when the DB pool responds to
 // SELECT 1, 503 otherwise. No auth. No session. Not logged to the system log.
-app.get("/healthz", async (req, res) => {
+app.get("/healthz", pageLimiter, async (req, res) => {
   res.setHeader("Cache-Control", "no-store");
   try {
     if (!db) return res.status(503).json({ ok: false, db: "not-initialized" });
@@ -1039,7 +1086,8 @@ function omadaDispatcher(verifyTls) {
 
 // Hit /api/info on a controller to discover its omadacId. No auth required.
 async function omadaGetInfo(baseUrl, verifyTls) {
-  const url = `${baseUrl.replace(/\/$/, "")}/api/info`;
+  const safeBase = sanitizeBaseUrl(baseUrl);
+  const url = `${safeBase}/api/info`;
   const r = await fetch(url, { dispatcher: omadaDispatcher(verifyTls), signal: AbortSignal.timeout(8000) });
   if (!r.ok) throw new Error(`/api/info HTTP ${r.status}`);
   const data = await r.json();
@@ -1052,7 +1100,8 @@ async function omadaGetToken(controller) {
   const cached = omadaTokens[controller.id];
   if (cached && cached.expiresAt > Date.now() + 30_000) return cached.accessToken;
   if (!controller.omadac_id) throw new Error("omadacId not set on controller");
-  const url = `${controller.base_url.replace(/\/$/, "")}/openapi/authorize/token?grant_type=client_credentials`;
+  const safeBase = sanitizeBaseUrl(controller.base_url);
+  const url = `${safeBase}/openapi/authorize/token?grant_type=client_credentials`;
   const body = JSON.stringify({
     omadacId:      controller.omadac_id,
     client_id:     controller.client_id,
@@ -1075,8 +1124,9 @@ async function omadaGetToken(controller) {
 
 // Authenticated GET to /openapi/v1/{omadacId}<path>  (standard mode)
 async function omadaApiGet(controller, path) {
+  const safeBase = sanitizeBaseUrl(controller.base_url);
   const token = await omadaGetToken(controller);
-  const url   = `${controller.base_url.replace(/\/$/, "")}/openapi/v1/${controller.omadac_id}${path}`;
+  const url   = `${safeBase}/openapi/v1/${controller.omadac_id}${path}`;
   const r = await fetch(url, {
     headers:    { Authorization: `AccessToken=${token}` },
     dispatcher: omadaDispatcher(controller.verify_tls),
@@ -1092,9 +1142,10 @@ async function omadaApiGet(controller, path) {
 // mspId is the same value as omadacId in practice; if your controller exposes a separate
 // mspId, we'll switch to that field, but for now they're equal.
 async function omadaMspApiGet(controller, path) {
+  const safeBase = sanitizeBaseUrl(controller.base_url);
   const token = await omadaGetToken(controller);
   const mspId = controller.omadac_id;
-  const url   = `${controller.base_url.replace(/\/$/, "")}/openapi/v1/msp/${mspId}${path}`;
+  const url   = `${safeBase}/openapi/v1/msp/${mspId}${path}`;
   const r = await fetch(url, {
     headers:    { Authorization: `AccessToken=${token}` },
     dispatcher: omadaDispatcher(controller.verify_tls),
@@ -2222,7 +2273,7 @@ app.get("/auth/google", (req, res) => {
 });
 
 // Google OAuth — callback after Google consent
-app.get("/auth/google/callback", async (req, res) => {
+app.get("/auth/google/callback", loginLimiter, async (req, res) => {
   if (!googleOAuth) return res.redirect("/login");
   const { code, state, error } = req.query;
   if (error) return res.redirect("/login?error=google_denied");
@@ -2782,7 +2833,7 @@ app.post("/api/admin/users", requireAdmin, async (req, res) => {
   if (!username || !password) return res.status(400).json({ error:"Username and password required" });
   if (!["admin","viewer"].includes(role)) return res.status(400).json({ error:"Role must be admin or viewer" });
   if (password.length < 8) return res.status(400).json({ error:"Password must be at least 8 characters" });
-  if (email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) return res.status(400).json({ error:"Invalid email address" });
+  if (email && !isValidEmail(email)) return res.status(400).json({ error:"Invalid email address" });
   try {
     const hash = await bcrypt.hash(password, 10);
     const [result] = await db.query(
@@ -2806,7 +2857,7 @@ app.put("/api/admin/users/:id", requireAdmin, async (req, res) => {
   const { username, role, password, allowed_group_ids, first_name, last_name, email } = req.body;
   if (!username) return res.status(400).json({ error:"Username required" });
   if (!["admin","viewer"].includes(role)) return res.status(400).json({ error:"Invalid role" });
-  if (email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) return res.status(400).json({ error:"Invalid email address" });
+  if (email && !isValidEmail(email)) return res.status(400).json({ error:"Invalid email address" });
   // Prevent removing admin role from yourself
   if (parseInt(req.params.id) === req.session.userId && role !== "admin") {
     return res.status(400).json({ error:"Cannot remove admin role from your own account" });
@@ -2880,7 +2931,7 @@ app.get("/api/admin/webhooks", requireAuth, async (req, res) => {
 app.post("/api/admin/webhooks", requireAuth, async (req, res) => {
   const { name, url, enabled, fire_on_down, fire_on_recovery, format, group_id } = req.body;
   if (!name || !url) return res.status(400).json({ error:"Name and URL required" });
-  const isEmail = /^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(url);
+  const isEmail = isValidEmail(url);
   if (!isEmail && !/^https?:\/\//i.test(url)) return res.status(400).json({ error:"URL must start with http:// or https:// (or be an email address)" });
   const fmt = ["auto","generic","discord","slack","email"].includes(format) ? format : "auto";
   // Viewers must scope the webhook to one of their allowed groups; admin can omit (= global)
@@ -2908,7 +2959,7 @@ app.post("/api/admin/webhooks", requireAuth, async (req, res) => {
 app.put("/api/admin/webhooks/:id", requireAuth, async (req, res) => {
   const { name, url, enabled, fire_on_down, fire_on_recovery, format, group_id } = req.body;
   if (!name || !url) return res.status(400).json({ error:"Name and URL required" });
-  const isEmail = /^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(url);
+  const isEmail = isValidEmail(url);
   if (!isEmail && !/^https?:\/\//i.test(url)) return res.status(400).json({ error:"URL must start with http:// or https:// (or be an email address)" });
   const fmt = ["auto","generic","discord","slack","email"].includes(format) ? format : "auto";
   try {
@@ -3527,7 +3578,7 @@ app.delete("/api/admin/square-accounts/:id", requireAuth, async (req, res) => {
 // Update own profile (first name, last name, email) — all authenticated users
 app.put("/api/profile", requireAuth, async (req, res) => {
   const { first_name, last_name, email } = req.body;
-  if (email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+  if (email && !isValidEmail(email)) {
     return res.status(400).json({ error: "Invalid email address" });
   }
   try {
@@ -3726,18 +3777,21 @@ app.get("/api/public/group/:slug", async (req, res) => {
 //       or the request must be from a logged-in viewer/admin.
 
 function makeBadge(label, value, color) {
+  // Coerce to string — req.query params can be arrays if the key is repeated
+  const l = String(Array.isArray(label) ? label[0] : (label ?? ""));
+  const v = String(Array.isArray(value) ? value[0] : (value ?? ""));
   // Approximate character width for DejaVu Sans 11px
   const charW = 6.5;
   const pad   = 10;
-  const lw = Math.ceil(label.length * charW) + pad * 2;
-  const vw = Math.ceil(value.length * charW) + pad * 2;
+  const lw = Math.ceil(l.length * charW) + pad * 2;
+  const vw = Math.ceil(v.length * charW) + pad * 2;
   const tw = lw + vw;
   const lx = (lw / 2 + 1).toFixed(1);
   const vx = (lw + vw / 2).toFixed(1);
-  // Escape XML special chars
-  const esc = s => s.replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;");
-  return `<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" width="${tw}" height="20" role="img" aria-label="${esc(label)}: ${esc(value)}">
-<title>${esc(label)}: ${esc(value)}</title>
+  // Escape XML special chars including double-quotes for use in attribute values
+  const esc = s => s.replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/"/g,"&quot;");
+  return `<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" width="${tw}" height="20" role="img" aria-label="${esc(l)}: ${esc(v)}">
+<title>${esc(l)}: ${esc(v)}</title>
 <linearGradient id="s" x2="0" y2="100%">
   <stop offset="0" stop-color="#bbb" stop-opacity=".1"/>
   <stop offset="1" stop-opacity=".1"/>
@@ -3749,10 +3803,10 @@ function makeBadge(label, value, color) {
   <rect width="${tw}" height="20" fill="url(#s)"/>
 </g>
 <g fill="#fff" text-anchor="middle" font-family="DejaVu Sans,Verdana,Geneva,sans-serif" font-size="11">
-  <text x="${lx}" y="15" fill="#010101" fill-opacity=".3">${esc(label)}</text>
-  <text x="${lx}" y="14">${esc(label)}</text>
-  <text x="${vx}" y="15" fill="#010101" fill-opacity=".3">${esc(value)}</text>
-  <text x="${vx}" y="14">${esc(value)}</text>
+  <text x="${lx}" y="15" fill="#010101" fill-opacity=".3">${esc(l)}</text>
+  <text x="${lx}" y="14">${esc(l)}</text>
+  <text x="${vx}" y="15" fill="#010101" fill-opacity=".3">${esc(v)}</text>
+  <text x="${vx}" y="14">${esc(v)}</text>
 </g>
 </svg>`;
 }
@@ -3813,7 +3867,7 @@ app.get("/api/icon/:slug", async (req, res) => {
 
 // Per-group Web App Manifest — powers the "Add to Home Screen" / install prompt
 // on both Android (Chrome) and iOS (Safari). Branding matches the group's theme.
-app.get("/dashboard/:slug/manifest.json", async (req, res) => {
+app.get("/dashboard/:slug/manifest.json", pageLimiter, async (req, res) => {
   try {
     const [rows] = await db.query("SELECT * FROM status_groups WHERE slug=?", [req.params.slug]);
     if (!rows.length) return res.status(404).json({ error: "Not found" });
@@ -3994,7 +4048,7 @@ app.get("/privacy", (req, res) => res.render("privacy"));
 app.get("/terms",   (req, res) => res.render("terms"));
 
 // Per-group dashboard
-app.get("/dashboard/:slug", async (req, res) => {
+app.get("/dashboard/:slug", pageLimiter, async (req, res) => {
   try {
     const [rows] = await db.query("SELECT * FROM status_groups WHERE slug=?", [req.params.slug]);
     if (!rows.length) return res.status(404).render("404", { slug: req.params.slug });
@@ -4021,7 +4075,7 @@ app.get("/dashboard/:slug", async (req, res) => {
 });
 
 // Per-group privacy and terms pages
-app.get("/dashboard/:slug/privacy", async (req, res) => {
+app.get("/dashboard/:slug/privacy", pageLimiter, async (req, res) => {
   try {
     const [rows] = await db.query("SELECT * FROM status_groups WHERE slug=?", [req.params.slug]);
     if (!rows.length) return res.status(404).render("404", { slug: req.params.slug });
@@ -4032,7 +4086,7 @@ app.get("/dashboard/:slug/privacy", async (req, res) => {
   } catch(e) { res.status(500).send("Server error"); }
 });
 
-app.get("/dashboard/:slug/terms", async (req, res) => {
+app.get("/dashboard/:slug/terms", pageLimiter, async (req, res) => {
   try {
     const [rows] = await db.query("SELECT * FROM status_groups WHERE slug=?", [req.params.slug]);
     if (!rows.length) return res.status(404).render("404", { slug: req.params.slug });

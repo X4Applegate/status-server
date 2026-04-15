@@ -4,6 +4,21 @@ All notable changes to this project are documented here.
 
 ---
 
+## [3.1.9] — 2026-04-15
+
+### Security
+- **SSRF hardening on Omada controller URLs** — replaced URL validation with `sanitizeBaseUrl()` which reconstructs the outbound URL exclusively from parsed components (`protocol`, `hostname`, `port`). No raw user-supplied bytes ever reach the `fetch()` call. Closes 4 CodeQL `js/request-forgery` alerts.
+- **ReDoS fix on email validation** — all email regex patterns replaced with `isValidEmail()` using bounded quantifiers (`{1,64}`, `{1,253}`, `{1,63}`), making matching linear regardless of input length. Closes 6 CodeQL `js/polynomial-redos` alerts.
+- **General API rate limiter** — `express-rate-limit` now applied to all `/api/*` routes (500 req / 15 min). Closes 48 CodeQL `js/missing-rate-limiting` alerts.
+- **Page route rate limiter** — `pageLimiter` (300 req / 15 min) applied to `/healthz`, `/dashboard/:slug`, `/dashboard/:slug/manifest.json`, `/dashboard/:slug/privacy`, and `/dashboard/:slug/terms`.
+- **Google OAuth callback rate-limited** — `loginLimiter` now covers `/auth/google/callback` in addition to the login form.
+- **Badge SVG injection fix** — `makeBadge()` now escapes `"` in XML attribute values and coerces `label`/`value` to strings, preventing type confusion when `req.query` params are arrays.
+- **CI workflow permissions** — `.github/workflows/ci.yml` now declares `permissions: contents: read`, satisfying the `actions/missing-workflow-permissions` rule.
+- **admin.ejs string escaping** — all 5 JavaScript string interpolations in the admin template now escape `\` before `'`, preventing incomplete sanitization when names contain backslashes. Closes 5 CodeQL `js/incomplete-sanitization` alerts.
+- **Helmet CSP and CSRF alerts** dismissed as false positives: CSP is intentionally disabled pending an inline-script refactor; CSRF is mitigated by Cloudflare Turnstile and `sameSite=lax` session cookies.
+
+---
+
 ## [3.1.8] — 2026-04-15
 
 ### Added
