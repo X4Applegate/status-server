@@ -359,6 +359,37 @@ function sanitizeBaseUrl(rawUrl) {
   // Only http/https allowed — pick protocol from a fixed allow-list
   const proto = parsed.protocol === "https:" ? "https:" : parsed.protocol === "http:" ? "http:" : null;
   if (!proto) throw new Error("Controller URL must use http:// or https://");
+
+  const rawHost = (parsed.hostname || "").toLowerCase();
+  if (!rawHost) throw new Error("Invalid hostname in controller URL");
+  if (rawHost === "localhost") throw new Error("Controller URL hostname is not allowed");
+
+  // Reject private/local IP literals to prevent SSRF into internal networks.
+  const isIpv4 = /^(?:\d{1,3}\.){3}\d{1,3}$/.test(rawHost);
+  if (isIpv4) {
+    const oct = rawHost.split(".").map(n => parseInt(n, 10));
+    const valid = oct.length === 4 && oct.every(n => Number.isInteger(n) && n >= 0 && n <= 255);
+    if (!valid) throw new Error("Invalid IPv4 hostname in controller URL");
+    const [a, b] = oct;
+    if (
+      a === 127 ||                 // loopback
+      a === 10 ||                  // private
+      (a === 172 && b >= 16 && b <= 31) || // private
+      (a === 192 && b === 168) ||  // private
+      (a === 169 && b === 254) ||  // link-local
+      a === 0                      // invalid/current network
+    ) {
+      throw new Error("Controller URL points to a disallowed private/local address");
+    }
+  }
+
+  // Basic IPv6 local-range checks (URL.hostname is de-bracketed).
+  if (rawHost.includes(":")) {
+    if (rawHost === "::1" || rawHost.startsWith("fe80:") || rawHost.startsWith("fc") || rawHost.startsWith("fd")) {
+      throw new Error("Controller URL points to a disallowed private/local address");
+    }
+  }
+
   // Whitelist-filter each DNS label to [a-zA-Z0-9-] — explicit character-class
   // replacement that CodeQL's taint analysis recognises as breaking the SSRF taint chain.
   const hostname = parsed.hostname
