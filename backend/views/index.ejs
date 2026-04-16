@@ -1530,47 +1530,103 @@ if (<%- JSON.stringify(!!groupSlug) %> && "serviceWorker" in navigator) {
 
 <% if (typeof groupSlug !== 'undefined' && groupSlug) { %>
 <div id="subscribeModal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.6);z-index:900;align-items:center;justify-content:center">
-  <div style="background:var(--surface);border:1px solid var(--border-hi);border-radius:16px;padding:28px;max-width:360px;width:calc(100% - 32px);position:relative">
+  <div style="background:var(--surface);border:1px solid var(--border-hi);border-radius:16px;padding:28px;max-width:380px;width:calc(100% - 32px);position:relative">
     <button onclick="closeSubscribeModal()" style="position:absolute;top:12px;right:14px;background:none;border:none;color:var(--text-2);cursor:pointer;font-size:18px">&#x2715;</button>
-    <h3 style="margin:0 0 6px;color:var(--text-hi)">&#x1F514; Alert Subscriptions</h3>
-    <p style="margin:0 0 16px;font-size:12px;color:var(--text-2)" id="subModalDesc">Get email alerts when servers go down or recover.</p>
-    <div id="subModalForm">
-      <div style="margin-bottom:10px">
-        <label style="font-size:11px;color:var(--text-2);display:block;margin-bottom:4px">Email address</label>
-        <input id="subEmail" type="email" placeholder="you@example.com" style="width:100%;background:var(--input-bg,#0d1829);border:1px solid var(--border-hi);border-radius:6px;color:var(--text-hi);font-size:13px;padding:8px 12px;outline:none;box-sizing:border-box">
+    <h3 style="margin:0 0 4px;color:var(--text-hi)">&#x1F514; Alert Subscriptions</h3>
+    <p style="margin:0 0 16px;font-size:12px;color:var(--text-2)">Get email alerts when servers go down or recover.</p>
+
+    <!-- Step 1: email entry -->
+    <div id="subStepEmail">
+      <label style="font-size:11px;color:var(--text-2);display:block;margin-bottom:4px">Your email address</label>
+      <div style="display:flex;gap:8px">
+        <input id="subEmail" type="email" placeholder="you@example.com"
+          style="flex:1;background:var(--input-bg,#0d1829);border:1px solid var(--border-hi);border-radius:6px;color:var(--text-hi);font-size:13px;padding:8px 12px;outline:none;box-sizing:border-box"
+          onkeydown="if(event.key==='Enter')checkSubStatus()">
+        <button onclick="checkSubStatus()" style="background:var(--blue,#2a7fff);color:#fff;border:none;border-radius:6px;padding:8px 14px;font-size:13px;font-weight:600;cursor:pointer;white-space:nowrap">Check</button>
       </div>
-      <div style="display:flex;gap:16px;margin-bottom:14px;font-size:12px;color:var(--text-hi)">
-        <label style="display:flex;align-items:center;gap:5px;cursor:pointer">
-          <input type="checkbox" id="subDown" checked> Down alerts
-        </label>
-        <label style="display:flex;align-items:center;gap:5px;cursor:pointer">
-          <input type="checkbox" id="subRecovery" checked> Recovery alerts
-        </label>
-      </div>
-      <span id="subErr" style="font-size:11px;color:var(--red);display:block;min-height:16px;margin-bottom:8px"></span>
-      <button onclick="submitSubscription()" style="width:100%;background:var(--blue,#2a7fff);color:#fff;border:none;border-radius:8px;padding:10px 20px;font-size:13px;font-weight:600;cursor:pointer">Subscribe</button>
+      <span id="subStepEmailErr" style="font-size:11px;color:var(--red);display:block;min-height:14px;margin-top:5px"></span>
     </div>
-    <div id="subModalSuccess" style="display:none;text-align:center;padding:12px 0">
+
+    <!-- Step 2a: not subscribed → show subscribe form -->
+    <div id="subStepNew" style="display:none;margin-top:14px">
+      <div style="font-size:12px;color:var(--text-2);margin-bottom:10px">Not subscribed yet. Choose your alerts:</div>
+      <div style="display:flex;gap:16px;margin-bottom:14px;font-size:12px;color:var(--text-hi)">
+        <label style="display:flex;align-items:center;gap:5px;cursor:pointer"><input type="checkbox" id="subDown" checked> Down alerts</label>
+        <label style="display:flex;align-items:center;gap:5px;cursor:pointer"><input type="checkbox" id="subRecovery" checked> Recovery alerts</label>
+      </div>
+      <span id="subErr" style="font-size:11px;color:var(--red);display:block;min-height:14px;margin-bottom:8px"></span>
+      <button onclick="submitSubscription()" style="width:100%;background:var(--blue,#2a7fff);color:#fff;border:none;border-radius:8px;padding:10px;font-size:13px;font-weight:600;cursor:pointer">Subscribe</button>
+    </div>
+
+    <!-- Step 2b: already subscribed → show manage/unsubscribe -->
+    <div id="subStepManage" style="display:none;margin-top:14px">
+      <div style="background:var(--surface2);border:1px solid var(--border);border-radius:8px;padding:12px 14px;margin-bottom:12px">
+        <div style="font-size:12px;font-weight:600;color:var(--green);margin-bottom:6px">&#x2705; Subscribed</div>
+        <div style="display:flex;gap:16px;margin-bottom:10px;font-size:12px;color:var(--text-hi)">
+          <label style="display:flex;align-items:center;gap:5px;cursor:pointer"><input type="checkbox" id="subDownManage"> Down alerts</label>
+          <label style="display:flex;align-items:center;gap:5px;cursor:pointer"><input type="checkbox" id="subRecoveryManage"> Recovery alerts</label>
+        </div>
+        <span id="subManageErr" style="font-size:11px;color:var(--red);display:block;min-height:14px;margin-bottom:6px"></span>
+        <button onclick="updateSubscription()" style="width:100%;background:var(--blue,#2a7fff);color:#fff;border:none;border-radius:8px;padding:8px;font-size:12px;font-weight:600;cursor:pointer">Update preferences</button>
+      </div>
+      <button onclick="confirmUnsubscribe()" style="width:100%;background:none;border:1px solid var(--red);color:var(--red);border-radius:8px;padding:8px;font-size:12px;font-weight:600;cursor:pointer">&#x1F515; Unsubscribe</button>
+    </div>
+
+    <!-- Success states -->
+    <div id="subModalSuccess" style="display:none;text-align:center;padding:16px 0">
       <div style="font-size:32px;margin-bottom:8px">&#x2705;</div>
       <div style="color:var(--green);font-weight:600">Subscribed!</div>
       <div style="font-size:12px;color:var(--text-2);margin-top:4px">You'll receive alerts for this dashboard.</div>
+    </div>
+    <div id="subModalUnsubSuccess" style="display:none;text-align:center;padding:16px 0">
+      <div style="font-size:32px;margin-bottom:8px">&#x1F515;</div>
+      <div style="color:var(--text-hi);font-weight:600">Unsubscribed</div>
+      <div style="font-size:12px;color:var(--text-2);margin-top:4px">You've been removed from alerts for this dashboard.</div>
+    </div>
+    <div id="subModalUpdateSuccess" style="display:none;text-align:center;padding:16px 0">
+      <div style="font-size:32px;margin-bottom:8px">&#x2705;</div>
+      <div style="color:var(--green);font-weight:600">Preferences updated!</div>
     </div>
   </div>
 </div>
 
 <script>
+function _subShowOnly(...ids) {
+  ["subStepEmail","subStepNew","subStepManage","subModalSuccess","subModalUnsubSuccess","subModalUpdateSuccess"]
+    .forEach(id => { const el = document.getElementById(id); if (el) el.style.display = ids.includes(id) ? "" : "none"; });
+}
 function openSubscribeModal(){
   document.getElementById("subscribeModal").style.display = "flex";
-  document.getElementById("subModalForm").style.display   = "";
-  document.getElementById("subModalSuccess").style.display = "none";
-  document.getElementById("subErr").textContent = "";
+  document.getElementById("subEmail").value = "";
+  document.getElementById("subStepEmailErr").textContent = "";
+  _subShowOnly("subStepEmail");
 }
 function closeSubscribeModal(){
   document.getElementById("subscribeModal").style.display = "none";
 }
+async function checkSubStatus(){
+  const email = document.getElementById("subEmail").value.trim();
+  const errEl = document.getElementById("subStepEmailErr");
+  if (!email) { errEl.textContent = "Please enter your email address."; return; }
+  if (!currentGroupId) { errEl.textContent = "Could not determine dashboard group."; return; }
+  errEl.textContent = "";
+  try {
+    const r = await fetch(`/api/public/subscription-status?email=${encodeURIComponent(email)}&group_id=${currentGroupId}`);
+    const data = await r.json();
+    if (data.subscribed) {
+      document.getElementById("subDownManage").checked     = data.notify_down;
+      document.getElementById("subRecoveryManage").checked = data.notify_recovery;
+      document.getElementById("subManageErr").textContent  = "";
+      _subShowOnly("subStepEmail","subStepManage");
+    } else {
+      document.getElementById("subErr").textContent = "";
+      _subShowOnly("subStepEmail","subStepNew");
+    }
+  } catch(e) { errEl.textContent = "Network error — please try again."; }
+}
 async function submitSubscription(){
-  const email    = document.getElementById("subEmail").value.trim();
-  const errEl    = document.getElementById("subErr");
+  const email = document.getElementById("subEmail").value.trim();
+  const errEl = document.getElementById("subErr");
   const notifyDown     = document.getElementById("subDown").checked;
   const notifyRecovery = document.getElementById("subRecovery").checked;
   if (!email) { errEl.textContent = "Please enter your email address."; return; }
@@ -1578,17 +1634,42 @@ async function submitSubscription(){
   errEl.textContent = "";
   try {
     const r = await fetch("/api/public/subscribe", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
+      method: "POST", headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ email, group_id: currentGroupId, notify_down: notifyDown, notify_recovery: notifyRecovery })
     });
     const data = await r.json();
     if (!r.ok) { errEl.textContent = data.error || "Subscription failed."; return; }
-    document.getElementById("subModalForm").style.display    = "none";
-    document.getElementById("subModalSuccess").style.display = "";
-  } catch(e) {
-    errEl.textContent = "Network error — please try again.";
-  }
+    _subShowOnly("subModalSuccess");
+  } catch(e) { errEl.textContent = "Network error — please try again."; }
+}
+async function updateSubscription(){
+  const email = document.getElementById("subEmail").value.trim();
+  const errEl = document.getElementById("subManageErr");
+  const notifyDown     = document.getElementById("subDownManage").checked;
+  const notifyRecovery = document.getElementById("subRecoveryManage").checked;
+  errEl.textContent = "";
+  try {
+    const r = await fetch("/api/public/subscribe", {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ email, group_id: currentGroupId, notify_down: notifyDown, notify_recovery: notifyRecovery })
+    });
+    const data = await r.json();
+    if (!r.ok) { errEl.textContent = data.error || "Update failed."; return; }
+    _subShowOnly("subModalUpdateSuccess");
+    setTimeout(() => { if (document.getElementById("subscribeModal").style.display !== "none") closeSubscribeModal(); }, 1500);
+  } catch(e) { errEl.textContent = "Network error — please try again."; }
+}
+async function confirmUnsubscribe(){
+  const email = document.getElementById("subEmail").value.trim();
+  if (!currentGroupId) return;
+  try {
+    const r = await fetch("/api/public/subscribe", {
+      method: "DELETE", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ email, group_id: currentGroupId })
+    });
+    if (!r.ok) { document.getElementById("subManageErr").textContent = "Failed to unsubscribe."; return; }
+    _subShowOnly("subModalUnsubSuccess");
+  } catch(e) { document.getElementById("subManageErr").textContent = "Network error — please try again."; }
 }
 </script>
 <% } %>

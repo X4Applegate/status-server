@@ -2229,9 +2229,9 @@ async function fireSubscriberEmails(evt) {
               <a href="${dashUrl}" style="display:inline-block;padding:10px 20px;background:#2a7fff;color:#fff;text-decoration:none;border-radius:6px;font-size:13px;font-weight:600">View Dashboard</a>
             </div>
           </div>
-          <div style="padding:12px 24px;background:#f4f7fb;border-top:1px solid #dce6f0;font-size:11px;color:#8fa0b5">
-            You're receiving this because you subscribed to alerts for ${sub.group_name}.
-            <a href="${unsubUrl}" style="color:#8fa0b5">Unsubscribe</a>
+          <div style="padding:16px 24px;background:#f4f7fb;border-top:1px solid #dce6f0;text-align:center">
+            <a href="${unsubUrl}" style="display:inline-block;padding:8px 18px;background:#fff;border:1px solid #d0d9e5;border-radius:6px;color:#5a6a7e;text-decoration:none;font-size:12px;font-weight:500">🔕 Unsubscribe from alerts</a>
+            <div style="margin-top:8px;font-size:11px;color:#b0bec8">You subscribed to alerts for <strong>${sub.group_name}</strong>.</div>
           </div>
         </div>
       </body></html>`;
@@ -4271,6 +4271,23 @@ app.get("/api/public/subscription-status", pageLimiter, async (req, res) => {
     res.json({ subscribed: true, notify_down: !!rows[0].notify_down, notify_recovery: !!rows[0].notify_recovery });
   } catch(e) {
     res.json({ subscribed: false });
+  }
+});
+
+// Modal-based unsubscribe — no token needed, user is voluntarily removing themselves
+app.delete("/api/public/subscribe", pageLimiter, async (req, res) => {
+  try {
+    const { email, group_id } = req.body;
+    if (!email || !group_id) return res.status(400).json({ error: "email and group_id required" });
+    const [result] = await db.query(
+      "DELETE FROM status_email_subscriptions WHERE email=? AND group_id=?",
+      [email.trim().toLowerCase(), group_id]
+    );
+    if (result.affectedRows === 0) return res.status(404).json({ error: "Subscription not found" });
+    addLog({ level:"info", server:"subscriptions", message:`Unsubscribed (modal): ${email} from group ${group_id}` });
+    res.json({ ok: true });
+  } catch(e) {
+    res.status(500).json({ error: "Server error" });
   }
 });
 
