@@ -1231,7 +1231,7 @@ function omadaDispatcher(verifyTls) {
 
 // Hit /api/info on a controller to discover its omadacId. No auth required.
 async function omadaGetInfo(baseUrl, verifyTls) {
-  const safeBase = sanitizeBaseUrl(baseUrl);
+  const safeBase = await sanitizeBaseUrl(baseUrl);
   const url = `${safeBase}/api/info`;
   const r = await fetch(url, { dispatcher: omadaDispatcher(verifyTls), signal: AbortSignal.timeout(8000) });
   if (!r.ok) throw new Error(`/api/info HTTP ${r.status}`);
@@ -1245,7 +1245,7 @@ async function omadaGetToken(controller) {
   const cached = omadaTokens[controller.id];
   if (cached && cached.expiresAt > Date.now() + 30_000) return cached.accessToken;
   if (!controller.omadac_id) throw new Error("omadacId not set on controller");
-  const safeBase = sanitizeBaseUrl(controller.base_url);
+  const safeBase = await sanitizeBaseUrl(controller.base_url);
   const url = `${safeBase}/openapi/authorize/token?grant_type=client_credentials`;
   const body = JSON.stringify({
     omadacId:      controller.omadac_id,
@@ -1269,7 +1269,7 @@ async function omadaGetToken(controller) {
 
 // Authenticated GET to /openapi/v1/{omadacId}<path>  (standard mode)
 async function omadaApiGet(controller, path) {
-  const safeBase  = sanitizeBaseUrl(controller.base_url);
+  const safeBase  = await sanitizeBaseUrl(controller.base_url);
   const safeId    = sanitizePathSegment(controller.omadac_id);
   // Sanitize each path segment to prevent traversal; preserve query string as-is
   const [pathOnly, queryString] = path.split("?");
@@ -1291,7 +1291,7 @@ async function omadaApiGet(controller, path) {
 // mspId is the same value as omadacId in practice; if your controller exposes a separate
 // mspId, we'll switch to that field, but for now they're equal.
 async function omadaMspApiGet(controller, path) {
-  const safeBase = sanitizeBaseUrl(controller.base_url);
+  const safeBase = await sanitizeBaseUrl(controller.base_url);
   const mspId    = sanitizePathSegment(controller.omadac_id);
   // Sanitize each path segment to prevent traversal; preserve query string as-is
   const [pathOnly, queryString] = path.split("?");
