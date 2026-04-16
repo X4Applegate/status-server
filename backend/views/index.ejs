@@ -1003,9 +1003,9 @@ function renderSidebar(){
     <div class="srv-row ${s.id===selectedId?"active":""}" onclick="selectServer('${s.id}')">
       <div style="display:flex;align-items:center;gap:8px;width:100%">
         <div class="srv-dot ${s.overall||'pending'}"></div>
-        <div class="srv-info">
-          <div class="srv-name">${s.name}</div>
-          ${sidebarSession.loggedIn && s.host ? `<div class="srv-host">${s.host}</div>` : ""}
+        <div class="srv-info" style="min-width:0;flex:1;overflow:hidden">
+          <div class="srv-name" style="white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${s.name}</div>
+          ${sidebarSession.loggedIn && s.host ? `<div class="srv-host" style="white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${s.host}</div>` : ""}
         </div>
         ${certHtml}${msHtml}
         <div class="srv-badge ${s.overall||'pending'}">${(s.overall||"pending").toUpperCase()}</div>
