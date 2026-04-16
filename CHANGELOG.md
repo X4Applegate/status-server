@@ -2,6 +2,8 @@
 
 All notable changes to this project are documented here.
 
+> **AI Assistance:** This project was designed, built, and is maintained by **Richard Applegate**. [Claude](https://claude.ai) by Anthropic is used as a coding assistant to help with bug fixes, updates, security improvements, and code modifications. Claude did not create this project — all product decisions, architecture, and direction are made by the author.
+
 ---
 
 ## [3.1.9] — 2026-04-15

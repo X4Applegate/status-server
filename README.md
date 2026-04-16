@@ -309,3 +309,9 @@ The server detects the `Host` header and serves the correct branded dashboard au
 ## License
 
 Proprietary — see [LICENSE](LICENSE). Source is available for personal and non-commercial reference use only. Modification, commercial use, distribution, and resale are prohibited without prior written permission from the author.
+
+---
+
+## AI Assistance
+
+This project was designed, built, and is maintained by **Richard Applegate**. [Claude](https://claude.ai) by Anthropic is used as a coding assistant to help with bug fixes, feature improvements, security hardening, and code modifications. Claude did not create this project — all product decisions, architecture, and direction are made by the author.
