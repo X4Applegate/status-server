@@ -1005,8 +1005,7 @@ function renderSidebar(){
         <div class="srv-dot ${s.overall||'pending'}"></div>
         <div class="srv-info">
           <div class="srv-name">${s.name}</div>
-          ${s.description ? `<div class="srv-desc">${s.description}</div>` : ""}
-          ${sidebarSession.loggedIn ? `<div class="srv-host">${s.host}</div>` : ""}
+          ${sidebarSession.loggedIn && s.host ? `<div class="srv-host">${s.host}</div>` : ""}
         </div>
         ${certHtml}${msHtml}
         <div class="srv-badge ${s.overall||'pending'}">${(s.overall||"pending").toUpperCase()}</div>
