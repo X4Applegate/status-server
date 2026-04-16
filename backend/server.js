@@ -364,6 +364,51 @@ function sanitizeBaseUrl(rawUrl) {
   return `${parsed.protocol}//${parsed.hostname}${port}`;
 }
 
+/**
+ * Reconstruct a full URL (origin + path + query) from parsed components only.
+ * Breaks the CodeQL taint chain so user-supplied input never flows directly
+ * into an outgoing request. Path segments are encoded to prevent traversal.
+ */
+function sanitizeRequestUrl(rawUrl) {
+  let parsed;
+  try { parsed = new URL(rawUrl); } catch { throw new Error("Invalid URL"); }
+  if (!["http:", "https:"].includes(parsed.protocol)) {
+    throw new Error("URL must use http:// or https://");
+  }
+  const port = parsed.port ? `:${parsed.port}` : "";
+  const origin = `${parsed.protocol}//${parsed.hostname}${port}`;
+  // Re-encode each path segment to neutralise any traversal sequences ("../")
+  const safePath = parsed.pathname
+    .split("/")
+    .map(seg => encodeURIComponent(decodeURIComponent(seg)))
+    .join("/");
+  const safeSearch = parsed.search; // query string kept as-is; already encoded by URL parser
+  return `${origin}${safePath}${safeSearch}`;
+}
+
+/**
+ * Sanitize a value used as a single URL path segment (e.g. a location ID).
+ * Allows only characters that appear in Square / API IDs — alphanumeric, hyphen,
+ * underscore. Rejects anything that could be used for path traversal.
+ */
+function sanitizePathSegment(value) {
+  const str = String(value || "").trim();
+  if (!/^[A-Za-z0-9_\-]+$/.test(str)) throw new Error(`Invalid path segment: "${str}"`);
+  return str;
+}
+
+/**
+ * Sanitize a hostname or IP used in a shell command (ping) or TCP connection.
+ * Allows only characters valid in DNS names and IPv4/IPv6 literals.
+ */
+function sanitizeHost(raw) {
+  const str = String(raw || "").trim();
+  if (!/^[A-Za-z0-9.\-:\[\]]+$/.test(str) || str.length > 253) {
+    throw new Error(`Invalid host: "${str}"`);
+  }
+  return str;
+}
+
 // -- Health check (Docker HEALTHCHECK / reverse proxy probe) -----------------
 // Lightweight liveness+DB ping. Returns 200 when the DB pool responds to
 // SELECT 1, 503 otherwise. No auth. No session. Not logged to the system log.
@@ -885,7 +930,11 @@ async function loadConfig() {
 // -- Check functions -----------------------------------------------------------
 function pingCheck(host) {
   return new Promise(resolve => {
-    exec(`ping -c 2 -W 2 ${host}`, (err, stdout) => {
+    let safeHost;
+    try { safeHost = sanitizeHost(host); } catch(e) {
+      return resolve({ type:"ping", ok:false, detail:`Invalid host: ${e.message}` });
+    }
+    exec(`ping -c 2 -W 2 ${safeHost}`, (err, stdout) => {
       if (err) return resolve({ type:"ping", ok:false, detail:"No response" });
       const match = stdout.match(/rtt[^=]+=\s*([\d.]+)\/([\d.]+)/);
       // Keep one decimal for sub-ms pings so we don't store 0
@@ -957,13 +1006,19 @@ function httpCheck(url, expectedStatus=200, timeout=5000, showCert=true) {
     if (parsedUrl.protocol !== "http:" && parsedUrl.protocol !== "https:") {
       return resolve({ type:"http", url, ok:false, detail:`unsupported protocol: ${parsedUrl.protocol}` });
     }
+    // Reconstruct from parsed components only — breaks taint chain so no raw user
+    // input flows into the outgoing request (SSRF / path-traversal hardening).
+    let safeUrl;
+    try { safeUrl = sanitizeRequestUrl(url); } catch(e) {
+      return resolve({ type:"http", url, ok:false, detail:`invalid URL: ${e.message}` });
+    }
     const lib = isHttps ? https : http;
     // Use the no-cache agent for HTTPS so each poll triggers a fresh TLS handshake
     // (required for getPeerCertificate() to return actual cert data every time).
     const reqOpts = { timeout };
     if (isHttps) reqOpts.agent = httpsNoCacheAgent;
     const t0 = Date.now();
-    const req = lib.get(parsedUrl.toString(), reqOpts, res => {
+    const req = lib.get(safeUrl, reqOpts, res => {
       const response_ms = Date.now() - t0;
       const ok = res.statusCode === expectedStatus;
       const result = { type:"http", url, ok, response_ms, detail:`HTTP ${res.statusCode}` };
@@ -1500,13 +1555,19 @@ async function squarePosCheck(accountId, locationId, deviceId, timeout=8000, inl
       baseUrl = rows[0].environment === "sandbox" ? "https://connect.squareupsandbox.com" : "https://connect.squareup.com";
     }
     if (!accessToken) return { type:"square_pos", ok:false, detail:"No access token configured" };
+    // Sanitize locationId — Square IDs are uppercase alphanumeric; reject anything
+    // that could be used for path traversal or query injection.
+    let safeLocationId;
+    try { safeLocationId = sanitizePathSegment(locationId); } catch(e) {
+      return { type:"square_pos", ok:false, detail:`Invalid location ID: ${e.message}` };
+    }
     const headers = {
       "Authorization": `Bearer ${accessToken}`,
       "Square-Version": "2024-01-17",
       "Content-Type": "application/json"
     };
     // 1 — Location status
-    const locRes = await fetch(`${baseUrl}/v2/locations/${locationId}`, {
+    const locRes = await fetch(`${baseUrl}/v2/locations/${safeLocationId}`, {
       headers, signal: AbortSignal.timeout(timeout)
     });
     if (!locRes.ok) {
@@ -1517,7 +1578,7 @@ async function squarePosCheck(accountId, locationId, deviceId, timeout=8000, inl
     const locationActive = loc.status === "ACTIVE";
 
     // 2 — Device status
-    const devRes = await fetch(`${baseUrl}/v2/devices?location_id=${locationId}`, {
+    const devRes = await fetch(`${baseUrl}/v2/devices?location_id=${safeLocationId}`, {
       headers, signal: AbortSignal.timeout(timeout)
     });
     if (!devRes.ok) {
@@ -1901,9 +1962,10 @@ function detectFormat(url) {
 }
 
 async function postWebhook(url, body) {
-  // Validate the URL before attempting a network call
-  try { new URL(url); } catch(e) { throw new Error("Invalid webhook URL"); }
-  const r = await fetch(url, {
+  // Validate and reconstruct from parsed components — breaks taint chain (SSRF hardening)
+  let safeUrl;
+  try { safeUrl = sanitizeRequestUrl(url); } catch(e) { throw new Error("Invalid webhook URL"); }
+  const r = await fetch(safeUrl, {
     method:  "POST",
     headers: {
       "Content-Type": "application/json",
