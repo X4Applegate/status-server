@@ -6,6 +6,7 @@ const https        = require("https");
 const fs           = require("fs");
 const path         = require("path");
 const crypto       = require("crypto");
+const dns          = require("dns").promises;
 const mysql        = require("mysql2/promise");
 const bcrypt       = require("bcryptjs");
 const session      = require("express-session");
@@ -347,13 +348,62 @@ function isValidEmail(s) {
   return /^[^\s@]{1,64}@[^\s@]{1,253}\.[^\s@]{1,63}$/.test(s);
 }
 
+function isPrivateOrLocalIp(host) {
+  if (net.isIP(host) === 4) {
+    if (host === "127.0.0.1" || host === "0.0.0.0") return true;
+    const p = host.split(".").map(n => parseInt(n, 10));
+    if (p[0] === 10) return true;
+    if (p[0] === 172 && p[1] >= 16 && p[1] <= 31) return true;
+    if (p[0] === 192 && p[1] === 168) return true;
+    if (p[0] === 169 && p[1] === 254) return true;
+    return false;
+  }
+  if (net.isIP(host) === 6) {
+    const h = host.toLowerCase();
+    return h === "::1" || h === "::" || h.startsWith("fc") || h.startsWith("fd") || h.startsWith("fe80:");
+  }
+  return false;
+}
+
+async function assertAllowedControllerHost(hostname) {
+  const host = String(hostname || "").toLowerCase();
+  if (!host) throw new Error("Invalid hostname in controller URL");
+  if (host === "localhost" || host.endsWith(".localhost")) {
+    throw new Error("Controller hostname is not allowed");
+  }
+
+  const allowlist = String(process.env.OMADA_CONTROLLER_HOST_ALLOWLIST || "")
+    .split(",")
+    .map(s => s.trim().toLowerCase())
+    .filter(Boolean);
+  if (allowlist.length > 0) {
+    const ok = allowlist.some(entry => host === entry || host.endsWith(`.${entry}`));
+    if (!ok) throw new Error("Controller hostname not in allow-list");
+  }
+
+  if (isPrivateOrLocalIp(host)) throw new Error("Controller IP is not allowed");
+
+  try {
+    const records = await dns.lookup(host, { all: true });
+    if (!records || records.length === 0) throw new Error("No DNS records found");
+    for (const rec of records) {
+      if (rec && rec.address && isPrivateOrLocalIp(rec.address)) {
+        throw new Error("Controller resolves to a private/local address");
+      }
+    }
+  } catch (e) {
+    if (e && e.message && e.message.includes("private/local")) throw e;
+    throw new Error("Controller hostname could not be validated");
+  }
+}
+
 /**
  * Parse, validate, and reconstruct a controller base URL from its components only.
  * Accepts only http/https. Returns a clean origin string (protocol + host + port)
  * built from parsed fields — never from the raw input — so downstream fetch() calls
  * receive a value that cannot carry attacker-controlled path/query segments.
  */
-function sanitizeBaseUrl(rawUrl) {
+async function sanitizeBaseUrl(rawUrl) {
   let parsed;
   try { parsed = new URL(rawUrl); } catch { throw new Error("Invalid controller URL"); }
   // Only http/https allowed — pick protocol from a fixed allow-list
@@ -398,6 +448,7 @@ function sanitizeBaseUrl(rawUrl) {
     .filter(Boolean)
     .join(".");
   if (!hostname) throw new Error("Invalid hostname in controller URL");
+  await assertAllowedControllerHost(hostname);
   // Coerce port to a plain integer so no string taint carries through
   const port = parsed.port ? `:${parseInt(parsed.port, 10)}` : "";
   return `${proto}//${hostname}${port}`;
