@@ -889,6 +889,17 @@ async function initDB() {
     await db.query("ALTER TABLE status_webhooks MODIFY COLUMN format ENUM('auto','generic','discord','slack','email','teams','telegram','pushover') NOT NULL DEFAULT 'auto'");
   } catch(e) { /* already updated */ }
 
+  // Beta: DB-backed server pins — persists across devices when logged in
+  await db.query(`
+    CREATE TABLE IF NOT EXISTS status_pinned_servers (
+      user_id   INT NOT NULL,
+      server_id VARCHAR(64) NOT NULL,
+      pinned_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+      PRIMARY KEY (user_id, server_id),
+      FOREIGN KEY (user_id) REFERENCES status_users(id) ON DELETE CASCADE
+    )
+  `);
+
   // Settings table — key-value store for app-wide config (SMTP, etc.)
   await db.query(`
     CREATE TABLE IF NOT EXISTS status_settings (
@@ -915,6 +926,14 @@ async function initDB() {
       INDEX idx_audit_action (action)
     )
   `);
+
+  // Beta: geographic coordinates for map view
+  try {
+    await db.query("ALTER TABLE status_servers ADD COLUMN lat DECIMAL(10,7) DEFAULT NULL");
+  } catch(e) { /* column already exists */ }
+  try {
+    await db.query("ALTER TABLE status_servers ADD COLUMN lng DECIMAL(10,7) DEFAULT NULL");
+  } catch(e) { /* column already exists */ }
 
   // Load SMTP config from DB (overrides env vars if set)
   await loadSmtpFromDb();
@@ -987,7 +1006,9 @@ async function loadConfig() {
       failure_threshold: Math.max(1, Math.min(10, r.failure_threshold || 1)),
       group_ids:         groupsByServer[r.id] || [],
       tags:              typeof r.tags   === "string" ? JSON.parse(r.tags)   : (r.tags   || []),
-      checks:            typeof r.checks === "string" ? JSON.parse(r.checks) : (r.checks || [])
+      checks:            typeof r.checks === "string" ? JSON.parse(r.checks) : (r.checks || []),
+      lat: r.lat != null ? parseFloat(r.lat) : null,
+      lng: r.lng != null ? parseFloat(r.lng) : null,
     }));
 
     // Seed uptimeHistory from database for servers that don't have it yet (e.g. after restart)
@@ -1011,7 +1032,7 @@ async function loadConfig() {
         for (const s of needsHistory) {
           if (histByServer[s.id]) {
             if (!serverStatus[s.id]) {
-              serverStatus[s.id] = { id:s.id, name:s.name, host:s.host, description:s.description, category:s.category, sub_category:s.sub_category, group_ids:s.group_ids, tags:s.tags, checks:[], overall:"pending", lastChecked:null, uptimeHistory: histByServer[s.id] };
+              serverStatus[s.id] = { id:s.id, name:s.name, host:s.host, description:s.description, category:s.category, sub_category:s.sub_category, group_ids:s.group_ids, tags:s.tags, checks:[], overall:"pending", lastChecked:null, uptimeHistory: histByServer[s.id], lat:s.lat||null, lng:s.lng||null };
             } else {
               serverStatus[s.id].uptimeHistory = histByServer[s.id];
             }
@@ -1022,7 +1043,7 @@ async function loadConfig() {
 
     serverConfig.forEach(s => {
       if (!serverStatus[s.id]) {
-        serverStatus[s.id] = { id:s.id, name:s.name, host:s.host, description:s.description, category:s.category, sub_category:s.sub_category, group_ids:s.group_ids, tags:s.tags, checks:[], overall:"pending", lastChecked:null, uptimeHistory:[] };
+        serverStatus[s.id] = { id:s.id, name:s.name, host:s.host, description:s.description, category:s.category, sub_category:s.sub_category, group_ids:s.group_ids, tags:s.tags, checks:[], overall:"pending", lastChecked:null, uptimeHistory:[], lat:s.lat||null, lng:s.lng||null };
       } else {
         // Keep group_ids in sync on existing entries
         serverStatus[s.id].group_ids = s.group_ids;
@@ -2391,7 +2412,7 @@ async function pollAll(force = false) {
       }
     }
 
-    serverStatus[def.id] = { id:def.id, name:def.name, host:def.host, description:def.description||"", category:def.category||"", sub_category:def.sub_category||"", group_ids:def.group_ids||[], tags:def.tags||[], checks, overall, lastChecked:now, uptimeHistory:history, failStreak };
+    serverStatus[def.id] = { id:def.id, name:def.name, host:def.host, description:def.description||"", category:def.category||"", sub_category:def.sub_category||"", group_ids:def.group_ids||[], tags:def.tags||[], checks, overall, lastChecked:now, uptimeHistory:history, failStreak, lat:def.lat||null, lng:def.lng||null };
     // Record to DB (non-blocking)
     recordHistory(def, checks, overall).catch(() => {});
   }));
@@ -2648,6 +2669,34 @@ app.get("/api/me", async (req, res) => {
   }
 });
 
+// ── Pin servers (DB-backed for logged-in users) ───────────────────────────────
+app.get("/api/pinned", requireAuth, async (req, res) => {
+  try {
+    const [rows] = await db.query(
+      "SELECT server_id FROM status_pinned_servers WHERE user_id=?",
+      [req.session.userId]
+    );
+    res.json(rows.map(r => r.server_id));
+  } catch(e) { res.status(500).json({ error: "Server error" }); }
+});
+
+app.post("/api/pinned/:serverId", requireAuth, async (req, res) => {
+  try {
+    const sid = req.params.serverId;
+    const [existing] = await db.query(
+      "SELECT 1 FROM status_pinned_servers WHERE user_id=? AND server_id=?",
+      [req.session.userId, sid]
+    );
+    if (existing.length) {
+      await db.query("DELETE FROM status_pinned_servers WHERE user_id=? AND server_id=?", [req.session.userId, sid]);
+      res.json({ pinned: false });
+    } else {
+      await db.query("INSERT INTO status_pinned_servers (user_id, server_id) VALUES (?,?)", [req.session.userId, sid]);
+      res.json({ pinned: true });
+    }
+  } catch(e) { res.status(500).json({ error: "Server error" }); }
+});
+
 // Change password
 app.post("/api/admin/change-password", requireAdmin, async (req, res) => {
   const { currentPassword, newPassword } = req.body;
@@ -2813,6 +2862,8 @@ app.post("/api/admin/servers", requireAuth, async (req, res) => {
   const wantGroups = Array.isArray(group_ids) ? group_ids.map(g => parseInt(g)).filter(Number.isFinite) : [];
   const interval = Math.max(10, Math.min(3600, parseInt(poll_interval_sec) || 30));
   const threshold = Math.max(1, Math.min(10, parseInt(failure_threshold) || 1));
+  const lat = req.body.lat != null && req.body.lat !== "" ? parseFloat(req.body.lat) : null;
+  const lng = req.body.lng != null && req.body.lng !== "" ? parseFloat(req.body.lng) : null;
   // Viewers must put new servers into at least one of their allowed groups
   if (req.session.role !== "admin") {
     const allowed = await getUserAllowedGroupIds(req.session.userId, req.session.role);
@@ -2822,8 +2873,8 @@ app.post("/api/admin/servers", requireAuth, async (req, res) => {
   const id = name.toLowerCase().replace(/[^a-z0-9]+/g,"-").replace(/^-|-$/g,"") + "-" + Date.now();
   try {
     await db.query(
-      "INSERT INTO status_servers (id, name, host, description, category, sub_category, tags, checks, poll_interval_sec, failure_threshold) VALUES (?,?,?,?,?,?,?,?,?,?)",
-      [id, name, host, description||"", (category||"").trim() || null, (sub_category||"").trim() || null, JSON.stringify(tags||[]), JSON.stringify(checks||[{type:"ping"}]), interval, threshold]
+      "INSERT INTO status_servers (id, name, host, description, category, sub_category, tags, checks, poll_interval_sec, failure_threshold, lat, lng) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)",
+      [id, name, host, description||"", (category||"").trim() || null, (sub_category||"").trim() || null, JSON.stringify(tags||[]), JSON.stringify(checks||[{type:"ping"}]), interval, threshold, lat, lng]
     );
     await setServerGroupIds(id, wantGroups);
     await loadConfig();
@@ -2841,6 +2892,8 @@ app.put("/api/admin/servers/:id", requireAuth, async (req, res) => {
   const wantGroups = Array.isArray(group_ids) ? group_ids.map(g => parseInt(g)).filter(Number.isFinite) : [];
   const interval = Math.max(10, Math.min(3600, parseInt(poll_interval_sec) || 30));
   const threshold = Math.max(1, Math.min(10, parseInt(failure_threshold) || 1));
+  const lat = req.body.lat != null && req.body.lat !== "" ? parseFloat(req.body.lat) : null;
+  const lng = req.body.lng != null && req.body.lng !== "" ? parseFloat(req.body.lng) : null;
   try {
     // Viewers: can only edit servers they currently share a group with, and they can only
     // add/remove groups THEY own. Groups on the server they don't own are preserved.
@@ -2871,8 +2924,8 @@ app.put("/api/admin/servers/:id", requireAuth, async (req, res) => {
       }
     }
     const [result] = await db.query(
-      "UPDATE status_servers SET name=?, host=?, description=?, category=?, sub_category=?, tags=?, checks=?, poll_interval_sec=?, failure_threshold=?, updated_at=NOW() WHERE id=?",
-      [name, host, description||"", (category||"").trim() || null, (sub_category||"").trim() || null, JSON.stringify(tags||[]), JSON.stringify(checks||[]), interval, threshold, req.params.id]
+      "UPDATE status_servers SET name=?, host=?, description=?, category=?, sub_category=?, tags=?, checks=?, poll_interval_sec=?, failure_threshold=?, lat=?, lng=?, updated_at=NOW() WHERE id=?",
+      [name, host, description||"", (category||"").trim() || null, (sub_category||"").trim() || null, JSON.stringify(tags||[]), JSON.stringify(checks||[]), interval, threshold, lat, lng, req.params.id]
     );
     if (result.affectedRows === 0) return res.status(404).json({ error:"Server not found" });
     // Admins with undefined group_ids leave groups alone; otherwise replace the full set.
@@ -4021,20 +4074,88 @@ app.get("/api/public/group/:slug", async (req, res) => {
 // Auth: same gate as other public endpoints — server must be in a group (public),
 //       or the request must be from a logged-in viewer/admin.
 
-function makeBadge(label, value, color) {
-  // Coerce to string — req.query params can be arrays if the key is repeated
+function makeBadge(label, value, color, style) {
   const l = String(Array.isArray(label) ? label[0] : (label ?? ""));
   const v = String(Array.isArray(value) ? value[0] : (value ?? ""));
-  // Approximate character width for DejaVu Sans 11px
-  const charW = 6.5;
-  const pad   = 10;
+  const s = String(style || "flat").toLowerCase();
+  const esc = x => String(x).replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/"/g,"&quot;");
+
+  if (s === "for-the-badge") {
+    const L = l.toUpperCase(), V = v.toUpperCase();
+    const charW = 7.5, pad = 16;
+    const lw = Math.ceil(L.length * charW) + pad * 2;
+    const vw = Math.ceil(V.length * charW) + pad * 2;
+    const tw = lw + vw;
+    const lx = (lw / 2).toFixed(1);
+    const vx = (lw + vw / 2).toFixed(1);
+    return `<svg xmlns="http://www.w3.org/2000/svg" width="${tw}" height="28" role="img" aria-label="${esc(L)}: ${esc(V)}">
+<title>${esc(L)}: ${esc(V)}</title>
+<g>
+  <rect width="${lw}" height="28" fill="#555"/>
+  <rect x="${lw}" width="${vw}" height="28" fill="${color}"/>
+</g>
+<g fill="#fff" text-anchor="middle" font-family="DejaVu Sans,Verdana,Geneva,sans-serif" font-size="11" font-weight="bold" letter-spacing="1">
+  <text x="${lx}" y="18">${esc(L)}</text>
+  <text x="${vx}" y="18">${esc(V)}</text>
+</g>
+</svg>`;
+  }
+
+  if (s === "flat-square") {
+    const charW = 6.5, pad = 10;
+    const lw = Math.ceil(l.length * charW) + pad * 2;
+    const vw = Math.ceil(v.length * charW) + pad * 2;
+    const tw = lw + vw;
+    const lx = (lw / 2 + 1).toFixed(1);
+    const vx = (lw + vw / 2).toFixed(1);
+    return `<svg xmlns="http://www.w3.org/2000/svg" width="${tw}" height="20" role="img" aria-label="${esc(l)}: ${esc(v)}">
+<title>${esc(l)}: ${esc(v)}</title>
+<g>
+  <rect width="${lw}" height="20" fill="#555"/>
+  <rect x="${lw}" width="${vw}" height="20" fill="${color}"/>
+</g>
+<g fill="#fff" text-anchor="middle" font-family="DejaVu Sans,Verdana,Geneva,sans-serif" font-size="11">
+  <text x="${lx}" y="15" fill="#010101" fill-opacity=".3">${esc(l)}</text><text x="${lx}" y="14">${esc(l)}</text>
+  <text x="${vx}" y="15" fill="#010101" fill-opacity=".3">${esc(v)}</text><text x="${vx}" y="14">${esc(v)}</text>
+</g>
+</svg>`;
+  }
+
+  if (s === "plastic") {
+    const charW = 6.5, pad = 10;
+    const lw = Math.ceil(l.length * charW) + pad * 2;
+    const vw = Math.ceil(v.length * charW) + pad * 2;
+    const tw = lw + vw;
+    const lx = (lw / 2 + 1).toFixed(1);
+    const vx = (lw + vw / 2).toFixed(1);
+    return `<svg xmlns="http://www.w3.org/2000/svg" width="${tw}" height="18" role="img" aria-label="${esc(l)}: ${esc(v)}">
+<title>${esc(l)}: ${esc(v)}</title>
+<linearGradient id="p" x2="0" y2="100%">
+  <stop offset="0"  stop-color="#fff" stop-opacity=".25"/>
+  <stop offset=".4" stop-color="#fff" stop-opacity=".08"/>
+  <stop offset=".6" stop-color="#000" stop-opacity=".08"/>
+  <stop offset="1"  stop-color="#000" stop-opacity=".18"/>
+</linearGradient>
+<clipPath id="r"><rect width="${tw}" height="18" rx="4" fill="#fff"/></clipPath>
+<g clip-path="url(#r)">
+  <rect width="${lw}" height="18" fill="#444"/>
+  <rect x="${lw}" width="${vw}" height="18" fill="${color}"/>
+  <rect width="${tw}" height="18" fill="url(#p)"/>
+</g>
+<g fill="#fff" text-anchor="middle" font-family="DejaVu Sans,Verdana,Geneva,sans-serif" font-size="11">
+  <text x="${lx}" y="13" fill="#010101" fill-opacity=".4">${esc(l)}</text><text x="${lx}" y="12">${esc(l)}</text>
+  <text x="${vx}" y="13" fill="#010101" fill-opacity=".4">${esc(v)}</text><text x="${vx}" y="12">${esc(v)}</text>
+</g>
+</svg>`;
+  }
+
+  // Default: flat (with subtle gradient — same as current)
+  const charW = 6.5, pad = 10;
   const lw = Math.ceil(l.length * charW) + pad * 2;
   const vw = Math.ceil(v.length * charW) + pad * 2;
   const tw = lw + vw;
   const lx = (lw / 2 + 1).toFixed(1);
   const vx = (lw + vw / 2).toFixed(1);
-  // Escape XML special chars including double-quotes for use in attribute values
-  const esc = s => s.replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/"/g,"&quot;");
   return `<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" width="${tw}" height="20" role="img" aria-label="${esc(l)}: ${esc(v)}">
 <title>${esc(l)}: ${esc(v)}</title>
 <linearGradient id="s" x2="0" y2="100%">
@@ -4048,18 +4169,17 @@ function makeBadge(label, value, color) {
   <rect width="${tw}" height="20" fill="url(#s)"/>
 </g>
 <g fill="#fff" text-anchor="middle" font-family="DejaVu Sans,Verdana,Geneva,sans-serif" font-size="11">
-  <text x="${lx}" y="15" fill="#010101" fill-opacity=".3">${esc(l)}</text>
-  <text x="${lx}" y="14">${esc(l)}</text>
-  <text x="${vx}" y="15" fill="#010101" fill-opacity=".3">${esc(v)}</text>
-  <text x="${vx}" y="14">${esc(v)}</text>
+  <text x="${lx}" y="15" fill="#010101" fill-opacity=".3">${esc(l)}</text><text x="${lx}" y="14">${esc(l)}</text>
+  <text x="${vx}" y="15" fill="#010101" fill-opacity=".3">${esc(v)}</text><text x="${vx}" y="14">${esc(v)}</text>
 </g>
 </svg>`;
 }
 
-function sendBadge(res, label, value, color) {
+function sendBadge(res, label, value, color, req) {
+  const style = req && req.query && req.query.style ? req.query.style : "flat";
   res.set("Content-Type",  "image/svg+xml");
   res.set("Cache-Control", "no-cache, no-store, must-revalidate");
-  res.send(makeBadge(label, value, color));
+  res.send(makeBadge(label, value, color, style));
 }
 
 // ── PWA support ──────────────────────────────────────────────────────────────
@@ -4155,7 +4275,7 @@ app.get("/api/badge/:id/status", allowGroupedOrAuth, (req, res) => {
   const value = overall === "up"
     ? (req.query.upValue   || "up")
     : (req.query.downValue || overall);
-  sendBadge(res, label, value, colorMap[overall] || "#9f9f9f");
+  sendBadge(res, label, value, colorMap[overall] || "#9f9f9f", req);
 });
 
 // Uptime badge: percentage over a time window (?duration=24h|7d|30d)
@@ -4172,10 +4292,10 @@ app.get("/api/badge/:id/uptime", allowGroupedOrAuth, async (req, res) => {
     );
     const total = parseInt(rows[0].total) || 0;
     const up    = parseInt(rows[0].up_count) || 0;
-    if (total === 0) return sendBadge(res, label, "N/A", "#9f9f9f");
+    if (total === 0) return sendBadge(res, label, "N/A", "#9f9f9f", req);
     const pct   = Math.round((up / total) * 1000) / 10;
     const color = pct >= 99 ? "#44cc11" : pct >= 95 ? "#dfb317" : "#e05d44";
-    sendBadge(res, label, `${pct}%`, color);
+    sendBadge(res, label, `${pct}%`, color, req);
   } catch(e) { res.status(500).json({ error: e.message }); }
 });
 
@@ -4188,7 +4308,7 @@ app.get("/api/badge/:id/ping", allowGroupedOrAuth, (req, res) => {
   const ms     = check?.response_ms;
   const value  = ms != null ? `${ms}ms` : "N/A";
   const color  = ms == null ? "#9f9f9f" : ms < 150 ? "#44cc11" : ms < 400 ? "#dfb317" : "#e05d44";
-  sendBadge(res, label, value, color);
+  sendBadge(res, label, value, color, req);
 });
 
 // SSL cert expiry badge: days until certificate expires
@@ -4197,13 +4317,13 @@ app.get("/api/badge/:id/cert-exp", allowGroupedOrAuth, (req, res) => {
   if (!s) return res.status(404).json({ error: "Server not found" });
   const label    = req.query.label || "cert exp";
   const httpChk  = s.checks.find(c => (c.type === "http" || c.type === "https") && c.cert?.valid_to);
-  if (!httpChk) return sendBadge(res, label, "N/A", "#9f9f9f");
+  if (!httpChk) return sendBadge(res, label, "N/A", "#9f9f9f", req);
   const days  = Math.ceil((new Date(httpChk.cert.valid_to) - Date.now()) / 86400000);
   const value = days < 0 ? "expired" : `${days}d`;
   const warnDays = parseInt(req.query.warnDays) || 14;
   const downDays = parseInt(req.query.downDays) || 7;
   const color = days < 0 ? "#e05d44" : days <= downDays ? "#e05d44" : days <= warnDays ? "#dfb317" : "#44cc11";
-  sendBadge(res, label, value, color);
+  sendBadge(res, label, value, color, req);
 });
 
 // ── Beta: Email subscriptions ────────────────────────────────────────────────

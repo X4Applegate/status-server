@@ -618,6 +618,8 @@ body{font-family:var(--sans);background:var(--bg);color:var(--text);min-height:1
         <div class="form-grid">
           <div class="fg"><label class="flabel">Server Name *</label><input class="finput" id="fName" placeholder="e.g. Web Server"></div>
           <div class="fg"><label class="flabel">Host / IP *</label><input class="finput" id="fHost" placeholder="e.g. 10.0.0.2"></div>
+          <div class="fg"><label class="flabel">Latitude <span style="font-weight:400;text-transform:none;letter-spacing:0;color:var(--text-2)">(GPS — e.g. 47.6062, for map view)</span></label><input class="finput" id="fLat" type="number" step="0.0001" min="-90" max="90" placeholder="47.6062"></div>
+          <div class="fg"><label class="flabel">Longitude <span style="font-weight:400;text-transform:none;letter-spacing:0;color:var(--text-2)">(GPS — e.g. -122.3321, for map view)</span></label><input class="finput" id="fLng" type="number" step="0.0001" min="-180" max="180" placeholder="-122.3321"></div>
           <div class="fg full"><label class="flabel">Description</label><input class="finput" id="fDesc" placeholder="Short description"></div>
           <div class="fg full"><label class="flabel">Section <span style="font-weight:400;text-transform:none;letter-spacing:0;color:var(--text-2)">(optional — groups servers under a heading on the dashboard)</span></label><input class="finput" id="fCategory" placeholder="e.g. Omada Network, DNS Servers" list="categoryHints"><datalist id="categoryHints"></datalist></div>
           <div class="fg full"><label class="flabel">Sub-section <span style="font-weight:400;text-transform:none;letter-spacing:0;color:var(--text-2)">(optional — nested heading within the section above)</span></label><input class="finput" id="fSubCategory" placeholder="e.g. WiFi, Switching, Core" list="subCategoryHints"><datalist id="subCategoryHints"></datalist></div>
@@ -1988,6 +1990,8 @@ async function showServerForm(s){
     const subCats = Array.from(new Set((adminServers||[]).map(x => x.sub_category).filter(Boolean))).sort();
     document.getElementById("subCategoryHints").innerHTML = subCats.map(c => `<option value="${c}">`).join("");
   } catch(e) {}
+  document.getElementById("fLat").value  = s?.lat ?? "";
+  document.getElementById("fLng").value  = s?.lng ?? "";
   document.getElementById("fTags").value  = (s?.tags||[]).join(", ");
   document.getElementById("fInterval").value = String(s?.poll_interval_sec || 30);
   document.getElementById("fThreshold").value = String(s?.failure_threshold || 1);
@@ -2249,7 +2253,9 @@ async function submitForm(){
     checks:            currentChecks.map(c => ({...c})),
     group_ids:         Array.from(serverPickedGroups),
     poll_interval_sec: parseInt(document.getElementById("fInterval").value) || 30,
-    failure_threshold: parseInt(document.getElementById("fThreshold").value) || 1
+    failure_threshold: parseInt(document.getElementById("fThreshold").value) || 1,
+    lat: parseFloat(document.getElementById("fLat").value) || null,
+    lng: parseFloat(document.getElementById("fLng").value) || null,
   };
   try {
     const r = await fetch(id ? `/api/admin/servers/${id}` : "/api/admin/servers", {

@@ -6,6 +6,24 @@ All notable changes to this project are documented here.
 
 ---
 
+## [3.3.0-beta.2] — 2026-04-16 *(beta branch)*
+
+### New Features
+- **📌 Pin servers (DB-backed)** — star button on every server card pins it to a permanent **⭐ Pinned** section at the top. Pins now sync to the database for logged-in users so they persist across devices and browsers. Non-logged-in visitors still use `localStorage`.
+- **🎨 Dashboard UI refresh**
+  - **Health banner** — full-width status strip below the topbar: green "All N systems operational", orange for degraded, red for down. Animates in real-time as SSE events arrive.
+  - **Response time pill** — each server card now shows the latest round-trip time (green < 150 ms, yellow < 400 ms, red ≥ 400 ms) next to the status badge.
+- **🎨 Badge styles** — all badge endpoints now accept a `?style=` parameter: `flat` (default), `flat-square`, `plastic`, `for-the-badge`. Example: `/api/badge/my-server/status?style=for-the-badge`
+- **🗺️ Map view** — a **🗺️ Map** button appears in the topbar when any server has coordinates set. Clicking it switches from the list view to a full-width Leaflet map (dark CARTO tiles, no API key needed). Servers appear as coloured circle markers (green/orange/red/grey). Clicking a marker shows a popup with name, status, host, and response time. Set **Latitude** and **Longitude** on any server via Admin → Edit Server.
+
+### Internal
+- New DB table `status_pinned_servers` (`user_id`, `server_id`)
+- New columns `status_servers.lat`, `status_servers.lng` (`DECIMAL(10,7)`)
+- New API routes: `GET /api/pinned`, `POST /api/pinned/:serverId`
+- Leaflet.js 1.9.4 loaded from CDN (unpkg) — only fetched when map view is opened
+
+---
+
 ## [3.3.0-beta.1] — 2026-04-16 *(beta branch)*
 
 ### Beta Features

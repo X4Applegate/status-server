@@ -11,6 +11,7 @@
 <link rel="apple-touch-icon" href="/api/icon/<%= groupSlug %>">
 <meta name="theme-color" content="<%= accentColor || '#2a7fff' %>">
 <% } %>
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY=" crossorigin=""/>
 <script>
 // Pre-paint theme apply: read per-dashboard preference from localStorage if set,
 // otherwise use the server-rendered defaultTheme. Runs before any CSS so no flash.
@@ -214,6 +215,28 @@ body::before{content:'';position:fixed;inset:0;pointer-events:none;background:ra
 .srv-cert-days.expired{color:var(--red)}
 .pin-btn{background:none;border:none;cursor:pointer;color:var(--text-2);font-size:14px;padding:2px 4px;border-radius:4px;transition:color .15s;line-height:1;flex-shrink:0}
 .pin-btn:hover,.pin-btn.pinned{color:var(--orange)}
+/* Health banner */
+.health-banner{display:flex;align-items:center;gap:10px;padding:10px 22px;font-size:13px;font-weight:600;border-bottom:1px solid var(--border);transition:background .3s,color .3s}
+.health-banner.all-up{background:rgba(16,232,138,.07);color:#10e88a}
+.health-banner.has-down{background:rgba(255,61,90,.07);color:var(--red)}
+.health-banner.has-degraded{background:rgba(255,140,42,.07);color:var(--orange)}
+.health-banner-dot{width:8px;height:8px;border-radius:50%;flex-shrink:0;animation:blink 2s ease-in-out infinite}
+.health-banner.all-up .health-banner-dot{background:#10e88a}
+.health-banner.has-down .health-banner-dot{background:var(--red)}
+.health-banner.has-degraded .health-banner-dot{background:var(--orange)}
+/* Response time pill */
+.srv-ms{font-size:10px;font-family:var(--mono);padding:2px 6px;border-radius:3px;font-weight:600;flex-shrink:0;letter-spacing:.01em}
+.srv-ms.fast{color:#10e88a;background:rgba(16,232,138,.1)}
+.srv-ms.ok{color:var(--orange);background:var(--orange-soft)}
+.srv-ms.slow{color:var(--red);background:var(--red-soft)}
+/* Map view */
+.map-view{display:none;flex-direction:column;flex:1;height:calc(100vh - 64px);min-height:0}
+.map-view.active{display:flex}
+#leafletContainer{flex:1;width:100%;min-height:0}
+.map-unmapped{background:var(--bg2);border-top:1px solid var(--border);padding:10px 16px;font-size:12px;color:var(--text-2)}
+/* Map toggle button */
+.map-toggle-btn{padding:5px 12px;border:1px solid var(--border-hi);border-radius:6px;color:var(--text-hi);font-size:12px;font-weight:500;background:none;cursor:pointer;transition:all .15s;white-space:nowrap}
+.map-toggle-btn:hover,.map-toggle-btn.active{background:var(--blue-soft);border-color:var(--blue);color:var(--blue)}
 
 /* -- MAIN AREA (detail view — hidden until a server is selected) -- */
 .main{width:100%;height:100%;overflow-y:auto;padding:28px 32px;display:none}
@@ -492,6 +515,7 @@ function _shade(hex, amount) {
   groupSlug:     groupSlug
 }) %>
 
+<div id="healthBanner" class="health-banner" style="display:none"></div>
 <div class="layout">
   <!-- SIDEBAR -->
   <div class="sidebar">
@@ -513,6 +537,11 @@ function _shade(hex, amount) {
   </div>
 </div>
 
+<div id="mapView" class="map-view">
+  <div id="leafletContainer"></div>
+  <div id="mapUnmapped" class="map-unmapped" style="display:none"></div>
+</div>
+
 <script>
 // -- Group context (injected from server)
 const GROUP_SLUG = <%- JSON.stringify(groupSlug) %>;
@@ -522,15 +551,155 @@ let   currentGroupId = null; // populated from /api/public/group/:slug response
 const PINS_KEY = "sm-pinned-" + (GROUP_SLUG || "_main");
 let pinnedServers = new Set(JSON.parse(localStorage.getItem(PINS_KEY) || "[]"));
 
-function togglePin(id, e) {
+async function togglePin(id, e) {
   e.stopPropagation();
-  if (pinnedServers.has(id)) {
-    pinnedServers.delete(id);
+  if (sidebarSession.loggedIn) {
+    // DB-backed for logged-in users
+    try {
+      const r = await fetch(`/api/pinned/${id}`, { method: "POST" });
+      const data = await r.json();
+      if (data.pinned) pinnedServers.add(id);
+      else pinnedServers.delete(id);
+    } catch(err) {
+      // Fallback to localStorage on network error
+      if (pinnedServers.has(id)) pinnedServers.delete(id);
+      else pinnedServers.add(id);
+    }
   } else {
-    pinnedServers.add(id);
+    if (pinnedServers.has(id)) pinnedServers.delete(id);
+    else pinnedServers.add(id);
   }
   localStorage.setItem(PINS_KEY, JSON.stringify([...pinnedServers]));
   renderSidebar();
+}
+
+async function loadDbPins() {
+  if (!sidebarSession.loggedIn) return;
+  try {
+    const r = await fetch("/api/pinned");
+    if (r.ok) {
+      const ids = await r.json();
+      // Merge DB pins with localStorage pins
+      ids.forEach(id => pinnedServers.add(id));
+      localStorage.setItem(PINS_KEY, JSON.stringify([...pinnedServers]));
+    }
+  } catch(e) { /* use localStorage only */ }
+}
+
+function updateHealthBanner() {
+  const el = document.getElementById("healthBanner");
+  if (!el || !servers.length) return;
+  const total    = servers.length;
+  const down     = servers.filter(s => s.overall === "down").length;
+  const degraded = servers.filter(s => s.overall === "degraded").length;
+  const up       = servers.filter(s => s.overall === "up").length;
+  el.style.display = "";
+  if (down > 0) {
+    el.className = "health-banner has-down";
+    el.innerHTML = `<div class="health-banner-dot"></div><span>${down} service${down>1?"s":""} down${degraded>0?` · ${degraded} degraded`:""}${up>0?` · ${up} operational`:""}</span>`;
+  } else if (degraded > 0) {
+    el.className = "health-banner has-degraded";
+    el.innerHTML = `<div class="health-banner-dot"></div><span>${degraded} service${degraded>1?"s":""} degraded · ${up} operational</span>`;
+  } else {
+    el.className = "health-banner all-up";
+    el.innerHTML = `<div class="health-banner-dot"></div><span>All ${total} system${total>1?"s":""} operational</span>`;
+  }
+}
+
+function updateMapBtnVisibility() {
+  const mapBtn = document.getElementById("topbarMapBtn");
+  if (mapBtn) mapBtn.style.display = servers.some(s => s.lat!=null&&s.lng!=null) ? "" : "none";
+}
+
+// ── Map view (Leaflet) ────────────────────────────────────────────────────────
+let _leafletMap  = null;
+let _mapMarkers  = [];
+let _mapActive   = false;
+
+function toggleMapView() {
+  _mapActive = !_mapActive;
+  const btn    = document.getElementById("topbarMapBtn");
+  const layout = document.querySelector(".layout");
+  const mapDiv = document.getElementById("mapView");
+  if (_mapActive) {
+    if (layout) layout.style.display = "none";
+    if (mapDiv) mapDiv.classList.add("active");
+    if (btn)   { btn.textContent = "📋 List"; btn.classList.add("active"); }
+    if (!_leafletMap) _initMap();
+    else _renderMapMarkers();
+  } else {
+    if (layout) layout.style.display = "";
+    if (mapDiv) mapDiv.classList.remove("active");
+    if (btn)   { btn.textContent = "🗺️ Map"; btn.classList.remove("active"); }
+  }
+}
+
+function _initMap() {
+  if (typeof L === "undefined") {
+    // Leaflet not loaded yet — load it dynamically
+    const script = document.createElement("script");
+    script.src = "https://unpkg.com/leaflet@1.9.4/dist/leaflet.js";
+    script.integrity = "sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV/XN/WLs=";
+    script.crossOrigin = "";
+    script.onload = () => { _createMap(); };
+    document.head.appendChild(script);
+    return;
+  }
+  _createMap();
+}
+
+function _createMap() {
+  _leafletMap = L.map("leafletContainer", { zoomControl: true }).setView([20, 0], 2);
+  L.tileLayer("https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png", {
+    attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors &copy; <a href="https://carto.com/attributions">CARTO</a>',
+    subdomains: "abcd",
+    maxZoom: 19
+  }).addTo(_leafletMap);
+  _renderMapMarkers();
+}
+
+function _renderMapMarkers() {
+  if (!_leafletMap) return;
+  _mapMarkers.forEach(m => { try { m.remove(); } catch(e) {} });
+  _mapMarkers = [];
+  const colorMap = { up:"#10e88a", down:"#ff3d5a", degraded:"#ff8c2a", pending:"#5e8aad" };
+  const mapped   = servers.filter(s => s.lat != null && s.lng != null);
+  const unmapped = servers.filter(s => s.lat == null || s.lng == null);
+  mapped.forEach(s => {
+    const color = colorMap[s.overall] || colorMap.pending;
+    const m = L.circleMarker([s.lat, s.lng], {
+      radius: 9, fillColor: color, color: "#0d1829",
+      weight: 2, opacity: 1, fillOpacity: 0.9
+    }).addTo(_leafletMap);
+    const lastMs = (s.checks||[]).reduce((b,c) => (c.response_ms&&(b===null||c.response_ms<b))?c.response_ms:b, null);
+    m.bindPopup(`<div style="font-family:sans-serif;min-width:160px">
+      <div style="font-weight:700;font-size:14px;margin-bottom:4px">${s.name}</div>
+      <div style="color:${color};font-weight:600;font-size:12px;margin-bottom:4px">${(s.overall||"pending").toUpperCase()}</div>
+      <div style="font-size:11px;color:#666">${s.host||""}</div>
+      ${lastMs!=null?`<div style="font-size:11px;color:#888;margin-top:3px">${lastMs}ms</div>`:""}
+    </div>`);
+    _mapMarkers.push(m);
+  });
+  // Fit map to markers if we have them
+  if (mapped.length > 0 && _mapMarkers.length > 0) {
+    try {
+      const group = L.featureGroup(_mapMarkers);
+      _leafletMap.fitBounds(group.getBounds().pad(0.3));
+    } catch(e) {}
+  }
+  // Show unmapped count
+  const unmappedEl = document.getElementById("mapUnmapped");
+  if (unmappedEl) {
+    if (unmapped.length) {
+      unmappedEl.style.display = "";
+      unmappedEl.textContent = `${unmapped.length} server${unmapped.length>1?"s":""} without coordinates not shown on map. Add lat/lng in Admin → Edit Server.`;
+    } else {
+      unmappedEl.style.display = "none";
+    }
+  }
+  // Show/hide map toggle button based on whether any servers have coords
+  const mapBtn = document.getElementById("topbarMapBtn");
+  if (mapBtn) mapBtn.style.display = servers.some(s => s.lat!=null&&s.lng!=null) ? "" : "none";
 }
 
 // -- Dashboard grouping state (master / view only)
@@ -561,6 +730,8 @@ async function loadDashboardGroups(){
       }
     }
   } catch(e) { /* silent — fall back to flat rendering */ }
+
+  if (sidebarSession.loggedIn) loadDbPins().then(() => { if (servers.length) renderSidebar(); });
 
   // Render login/logout button in topbar
   const authEl = document.getElementById("topbarAuthBtn");
@@ -824,16 +995,20 @@ function renderSidebar(){
       ? `<span class="srv-cert-days ${certDays < 0 ? 'expired' : certDays < 14 ? 'warn' : ''}">🔒 ${certDays}d</span>`
       : "";
     const isPinned = pinnedServers.has(s.id);
+    const latestMs = (s.checks||[]).reduce((best,c) => c.response_ms&&(best===null||c.response_ms<best)?c.response_ms:best, null);
+    const msHtml   = latestMs !== null
+      ? `<span class="srv-ms ${latestMs<150?"fast":latestMs<400?"ok":"slow"}">${latestMs}ms</span>`
+      : "";
     return `
     <div class="srv-row ${s.id===selectedId?"active":""}" onclick="selectServer('${s.id}')">
-      <div style="display:flex;align-items:center;gap:12px;width:100%">
+      <div style="display:flex;align-items:center;gap:8px;width:100%">
         <div class="srv-dot ${s.overall||'pending'}"></div>
-        <div class="srv-info">
+        <div class="srv-info" style="flex:1;min-width:0">
           <div class="srv-name">${s.name}</div>
           ${s.description ? `<div class="srv-desc">${s.description}</div>` : ""}
           ${sidebarSession.loggedIn ? `<div class="srv-host">${s.host}</div>` : ""}
         </div>
-        ${certHtml}
+        ${certHtml}${msHtml}
         <div class="srv-badge ${s.overall||'pending'}">${(s.overall||"pending").toUpperCase()}</div>
         <button class="pin-btn ${isPinned ? 'pinned' : ''}" onclick="togglePin('${s.id}',event)" title="${isPinned ? 'Unpin' : 'Pin to top'}">${isPinned ? '&#9733;' : '&#9734;'}</button>
       </div>
@@ -926,6 +1101,8 @@ function renderSidebar(){
     } else {
       el.innerHTML = _pinnedHtml + servers.map(renderRow).join("");
     }
+    updateHealthBanner();
+    updateMapBtnVisibility();
     return;
   }
 
@@ -1051,6 +1228,8 @@ function renderSidebar(){
 
   if (_pinnedHtml) sections.unshift(_pinnedHtml);
   el.innerHTML = sections.join("");
+  updateHealthBanner();
+  updateMapBtnVisibility();
 }
 
 // -- Select server
@@ -1443,6 +1622,8 @@ async function loadServers(){
     servers = fresh;
     cacheSet(CACHE_KEY_SERVERS, fresh);
     renderSidebar();
+    updateHealthBanner();
+    updateMapBtnVisibility();
     if (GROUP_SLUG && servers.length === 0) {
       document.getElementById("sidebarList").innerHTML = `<div style="padding:16px;color:var(--text-2);font-size:12px">No servers in this dashboard yet</div>`;
       document.getElementById("mainArea").innerHTML = `<div class="empty-main">No servers assigned to this dashboard</div>`;
@@ -1469,6 +1650,8 @@ async function loadServers(){
     servers = data.map(s => ({...s}));
     cacheSet(CACHE_KEY_SERVERS, servers);
     renderSidebar();
+    updateHealthBanner();
+    if (_mapActive) _renderMapMarkers();
     // Refresh detail if selected server updated
     if (selectedId) {
       const updated = servers.find(s => s.id === selectedId);

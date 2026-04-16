@@ -53,6 +53,7 @@
       <a class="topbar-admin" href="<%= adminHref %>">Admin</a>
     <% } %>
     <div id="topbarManageBtn"></div>
+    <button id="topbarMapBtn" class="map-toggle-btn" onclick="toggleMapView()" style="display:none">&#x1F5FA;&#xFE0F; Map</button>
     <% if (typeof groupSlug !== 'undefined' && groupSlug) { %>
     <button id="topbarSubscribeBtn" class="topbar-login" onclick="openSubscribeModal()" style="display:none">&#x1F514; Alerts</button>
     <% } %>
