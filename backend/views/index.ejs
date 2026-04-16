@@ -169,7 +169,7 @@ body::before{content:'';position:fixed;inset:0;pointer-events:none;background:ra
 .srv-group-count{font-size:10px;font-weight:600;color:var(--text-2);padding:2px 7px;border-radius:10px;background:var(--surface);border:1px solid var(--border)}
 .srv-group-chevron{display:flex;align-items:center;justify-content:center;color:var(--text-2);transition:transform .2s}
 .srv-group.collapsed .srv-group-chevron{transform:rotate(-90deg)}
-.srv-group-body{display:grid;grid-template-columns:repeat(auto-fill, minmax(210px, 1fr));gap:8px;max-height:5000px;overflow:hidden;overflow-x:hidden;transition:max-height .25s ease}
+.srv-group-body{display:grid;grid-template-columns:repeat(auto-fill, minmax(240px, 1fr));gap:8px;max-height:5000px;overflow:hidden;overflow-x:hidden;transition:max-height .25s ease}
 .srv-group.collapsed .srv-group-body{max-height:0}
 
 /* Sub-group sections (nested inside a srv-group) */
@@ -1001,15 +1001,19 @@ function renderSidebar(){
       : "";
     return `
     <div class="srv-row ${s.id===selectedId?"active":""}" onclick="selectServer('${s.id}')">
-      <div style="display:flex;align-items:center;gap:8px;width:100%">
-        <div class="srv-dot ${s.overall||'pending'}"></div>
-        <div class="srv-info" style="min-width:0;flex:1;overflow:hidden">
-          <div class="srv-name" style="white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${s.name}</div>
-          ${sidebarSession.loggedIn && s.host ? `<div class="srv-host" style="white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${s.host}</div>` : ""}
+      <div style="display:flex;align-items:center;gap:8px;width:100%;min-width:0">
+        <div class="srv-dot ${s.overall||'pending'}" style="flex-shrink:0"></div>
+        <div style="min-width:0;flex:1;overflow:hidden">
+          <div style="display:flex;align-items:center;gap:6px;min-width:0">
+            <div class="srv-name" style="white-space:nowrap;overflow:hidden;text-overflow:ellipsis;flex:1;min-width:0">${s.name}</div>
+            <div class="srv-badge ${s.overall||'pending'}" style="flex-shrink:0">${(s.overall||"pending").toUpperCase()}</div>
+            <button class="pin-btn ${isPinned ? 'pinned' : ''}" onclick="togglePin('${s.id}',event)" title="${isPinned ? 'Unpin' : 'Pin to top'}" style="flex-shrink:0">${isPinned ? '&#9733;' : '&#9734;'}</button>
+          </div>
+          <div style="display:flex;align-items:center;gap:6px;margin-top:3px;min-width:0">
+            ${sidebarSession.loggedIn && s.host ? `<span class="srv-host" style="white-space:nowrap;overflow:hidden;text-overflow:ellipsis;flex:1;min-width:0">${s.host}</span>` : `<span style="flex:1"></span>`}
+            ${certHtml}${msHtml}
+          </div>
         </div>
-        ${certHtml}${msHtml}
-        <div class="srv-badge ${s.overall||'pending'}">${(s.overall||"pending").toUpperCase()}</div>
-        <button class="pin-btn ${isPinned ? 'pinned' : ''}" onclick="togglePin('${s.id}',event)" title="${isPinned ? 'Unpin' : 'Pin to top'}">${isPinned ? '&#9733;' : '&#9734;'}</button>
       </div>
       <div class="srv-hb-bar">${dots}</div>
     </div>`;
