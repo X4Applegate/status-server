@@ -1,34 +1,34 @@
 services:
   status-server:
-    build: ./backend
+    image: applegater/status-server:latest
     container_name: status-server
     restart: unless-stopped
-    networks:
-      - mariadb_mariadb   # your existing MariaDB network
-      - caddy             # your reverse-proxy network
     ports:
       - "3000:3000"
+    volumes:
+      - ./servers.json:/config/servers.json
     environment:
       - PORT=3000
       - CHECK_INTERVAL=30000
+      - CONFIG_PATH=/config/servers.json
 
-      # MariaDB connection — point at your existing MariaDB container or host
+      # Database — points at the mariadb service below
       - DB_HOST=mariadb
       - DB_PORT=3306
       - DB_USER=statusadmin
-      - DB_PASSWORD=CHANGE_ME
+      - DB_PASSWORD=changeme
       - DB_NAME=status_monitor
 
-      # Session signing secret — generate a long random string
-      - SESSION_SECRET=CHANGE_ME_TO_A_RANDOM_STRING
+      # Session signing secret — change to a long random string
+      - SESSION_SECRET=changeme_use_a_long_random_string
 
-      # Fallback URL for dashboard links in webhook alerts (optional)
-      # - EXTERNAL_URL=https://uptime.example.com
+      # Base URL used for dashboard links in webhook alerts
+      - EXTERNAL_URL=https://status.yourdomain.com
 
-      # Container timezone (optional — defaults to UTC)
+      # Container timezone
       - TZ=America/Los_Angeles
 
-      # SMTP for email notifications (optional — required for email webhook format)
+      # SMTP for email notifications (optional)
       # - SMTP_HOST=smtp.gmail.com
       # - SMTP_PORT=587
       # - SMTP_USER=you@gmail.com
@@ -36,20 +36,30 @@ services:
       # - SMTP_FROM=monitor@yourdomain.com
       # - SMTP_SECURE=false
 
-      # Branding for legal pages and update notifications (optional)
-      - APP_OWNER=Your Name
-      - APP_CONTACT_EMAIL=you@example.com
-      - APP_HOME_URL=/
+      # Branding (optional)
+      # - APP_OWNER=Your Name
+      # - APP_CONTACT_EMAIL=you@example.com
+      # - APP_HOME_URL=/
 
-    # NET_RAW is required for ICMP ping checks
+    # Required for ICMP ping checks
     cap_add:
       - NET_RAW
-
+    depends_on:
+      - mariadb
     labels:
       - "com.status-server.description=Self-hosted status monitor"
 
-networks:
-  mariadb_mariadb:
-    external: true
-  caddy:
-    external: true
+  mariadb:
+    image: mariadb:11
+    container_name: mariadb
+    restart: unless-stopped
+    environment:
+      - MYSQL_ROOT_PASSWORD=rootpassword
+      - MYSQL_DATABASE=status_monitor
+      - MYSQL_USER=statusadmin
+      - MYSQL_PASSWORD=changeme
+    volumes:
+      - mariadb_data:/var/lib/mysql
+
+volumes:
+  mariadb_data:
