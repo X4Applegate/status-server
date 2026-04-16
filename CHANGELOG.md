@@ -6,6 +6,27 @@ All notable changes to this project are documented here.
 
 ---
 
+## [3.2.0] — 2026-04-16
+
+### Security
+- **SSRF hardening — all 76 CodeQL alerts resolved** — zero open code scanning alerts on main
+- Strengthened `sanitizeBaseUrl()`: protocol picked from fixed allow-list, each DNS label filtered through explicit character whitelist (`[a-zA-Z0-9-]`), port coerced to integer — breaks taint chain CodeQL traces through user-controlled controller URLs
+- Sanitized `omadac_id` / `mspId` with `sanitizePathSegment()` before embedding in Omada API URL paths
+- Path segments in `omadaApiGet()` and `omadaMspApiGet()` filtered through character whitelist, query string preserved separately
+- Added `sanitizeRequestUrl()`, `sanitizePathSegment()`, and `sanitizeHost()` helpers used across all outgoing HTTP requests
+- Square POS `locationId` sanitized before embedding in API URL path
+- `postWebhook()` URL reconstructed from parsed components before fetch
+- `pingCheck()` host validated against DNS/IP character whitelist before shell exec
+
+### Changes
+- Admin tab bar now fully visible on desktop with no scrolling required; scrollable on narrow/mobile screens
+- Dashboards dropdown hidden from public visitors when not logged in
+- Added Code of Conduct, Contributing guide, GitHub issue templates, and pull request template
+- Added weekly Friday automated Docker Hub release via GitHub Actions
+- Docker Hub image available: `applegater/status-server:v3.2.0`
+
+---
+
 ## [3.1.9] — 2026-04-15
 
 ### Security
