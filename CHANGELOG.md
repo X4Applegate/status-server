@@ -6,6 +6,16 @@ All notable changes to this project are documented here.
 
 ---
 
+## [3.2.1] — 2026-04-16
+
+### Fixed
+- **Omada integration restored** — GitHub Copilot's autofix made `sanitizeBaseUrl()` an `async` function but did not update the 4 call sites to use `await`, causing every Omada URL to resolve as `[object Promise]` and break all Omada checks. Added `await` to all call sites. Apologies for the disruption.
+
+### Dependencies
+- **undici** bumped from `7.24.8` → `8.1.0` (Dependabot)
+
+---
+
 ## [3.2.0] — 2026-04-16
 
 ### Security
