@@ -7,6 +7,10 @@ on:
   workflow_dispatch:
     # Allow manual trigger from GitHub Actions tab
 
+permissions:
+  contents: read
+  pull-requests: write
+
 jobs:
   build-and-push:
     name: Build & Push to Docker Hub
