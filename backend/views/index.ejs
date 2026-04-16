@@ -212,6 +212,8 @@ body::before{content:'';position:fixed;inset:0;pointer-events:none;background:ra
 .srv-cert-days{font-size:10px;font-weight:500;color:var(--text-2);letter-spacing:.02em;flex-shrink:0;white-space:nowrap}
 .srv-cert-days.warn{color:var(--orange)}
 .srv-cert-days.expired{color:var(--red)}
+.pin-btn{background:none;border:none;cursor:pointer;color:var(--text-2);font-size:14px;padding:2px 4px;border-radius:4px;transition:color .15s;line-height:1;flex-shrink:0}
+.pin-btn:hover,.pin-btn.pinned{color:var(--orange)}
 
 /* -- MAIN AREA (detail view — hidden until a server is selected) -- */
 .main{width:100%;height:100%;overflow-y:auto;padding:28px 32px;display:none}
@@ -486,7 +488,8 @@ function _shade(hex, amount) {
   groupName:     groupName,
   groupSubtitle: groupSubtitle,
   logoText:      logoText,
-  logoImage:     logoImage
+  logoImage:     logoImage,
+  groupSlug:     groupSlug
 }) %>
 
 <div class="layout">
@@ -514,6 +517,21 @@ function _shade(hex, amount) {
 // -- Group context (injected from server)
 const GROUP_SLUG = <%- JSON.stringify(groupSlug) %>;
 let   currentGroupId = null; // populated from /api/public/group/:slug response
+
+// Pinned servers (localStorage)
+const PINS_KEY = "sm-pinned-" + (GROUP_SLUG || "_main");
+let pinnedServers = new Set(JSON.parse(localStorage.getItem(PINS_KEY) || "[]"));
+
+function togglePin(id, e) {
+  e.stopPropagation();
+  if (pinnedServers.has(id)) {
+    pinnedServers.delete(id);
+  } else {
+    pinnedServers.add(id);
+  }
+  localStorage.setItem(PINS_KEY, JSON.stringify([...pinnedServers]));
+  renderSidebar();
+}
 
 // -- Dashboard grouping state (master / view only)
 // dashboardGroups holds the metadata (id, name, slug, accent_color) for the groups the
@@ -805,6 +823,7 @@ function renderSidebar(){
     const certHtml = certDays !== null
       ? `<span class="srv-cert-days ${certDays < 0 ? 'expired' : certDays < 14 ? 'warn' : ''}">🔒 ${certDays}d</span>`
       : "";
+    const isPinned = pinnedServers.has(s.id);
     return `
     <div class="srv-row ${s.id===selectedId?"active":""}" onclick="selectServer('${s.id}')">
       <div style="display:flex;align-items:center;gap:12px;width:100%">
@@ -816,10 +835,25 @@ function renderSidebar(){
         </div>
         ${certHtml}
         <div class="srv-badge ${s.overall||'pending'}">${(s.overall||"pending").toUpperCase()}</div>
+        <button class="pin-btn ${isPinned ? 'pinned' : ''}" onclick="togglePin('${s.id}',event)" title="${isPinned ? 'Unpin' : 'Pin to top'}">${isPinned ? '&#9733;' : '&#9734;'}</button>
       </div>
       <div class="srv-hb-bar">${dots}</div>
     </div>`;
   };
+
+  // Build pinned section HTML (used in both branches below)
+  const _pinned = servers.filter(s => pinnedServers.has(s.id));
+  let _pinnedHtml = "";
+  if (_pinned.length) {
+    _pinnedHtml = `<div class="srv-group">
+      <div class="srv-group-head" style="color:var(--orange);border-color:rgba(255,140,42,0.2)">
+        <span class="srv-group-dot" style="background:var(--orange)"></span>
+        <span class="srv-group-name">&#9733; Pinned</span>
+        <span class="srv-group-count">${_pinned.length}</span>
+      </div>
+      <div class="srv-group-body">${_pinned.map(renderRow).join("")}</div>
+    </div>`;
+  }
 
   // On public dashboard pages OR when we don't have groups loaded yet
   if (GROUP_SLUG || !dashboardGroups.length) {
@@ -837,7 +871,7 @@ function renderSidebar(){
         if (!byCat[cat].bySubCat[key]) { byCat[cat].bySubCat[key] = []; byCat[cat].order.push(key); }
         byCat[cat].bySubCat[key].push(s);
       }
-      el.innerHTML = catOrder.map(cat => {
+      el.innerHTML = _pinnedHtml + catOrder.map(cat => {
         const { order: subOrder, bySubCat } = byCat[cat];
         const allItems = subOrder.flatMap(k => bySubCat[k]);
         const downCount = allItems.filter(s => s.overall === "down").length;
@@ -890,7 +924,7 @@ function renderSidebar(){
           </div>`;
       }).join("");
     } else {
-      el.innerHTML = servers.map(renderRow).join("");
+      el.innerHTML = _pinnedHtml + servers.map(renderRow).join("");
     }
     return;
   }
@@ -1015,6 +1049,7 @@ function renderSidebar(){
       </div>`);
   }
 
+  if (_pinnedHtml) sections.unshift(_pinnedHtml);
   el.innerHTML = sections.join("");
 }
 
@@ -1400,7 +1435,11 @@ async function loadServers(){
     const r = await fetch(url);
     const data = await r.json();
     const fresh = GROUP_SLUG ? data.servers : data;
-    if (GROUP_SLUG && data.group) currentGroupId = data.group.id;
+    if (GROUP_SLUG && data.group) {
+      currentGroupId = data.group.id;
+      const subBtn = document.getElementById("topbarSubscribeBtn");
+      if (subBtn) subBtn.style.display = "";
+    }
     servers = fresh;
     cacheSet(CACHE_KEY_SERVERS, fresh);
     renderSidebar();
@@ -1488,5 +1527,70 @@ if (<%- JSON.stringify(!!groupSlug) %> && "serviceWorker" in navigator) {
   <span style="opacity:.3">·</span>
   <a href="https://github.com/X4Applegate/status-server" target="_blank" rel="noopener" style="color:var(--text-2);text-decoration:none;margin:0 10px;display:inline-flex;align-items:center;gap:5px" onmouseover="this.style.color='var(--text-hi)'" onmouseout="this.style.color='var(--text-2)'"><svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor"><path d="M12 0C5.37 0 0 5.37 0 12c0 5.3 3.438 9.8 8.205 11.385.6.113.82-.258.82-.577 0-.285-.01-1.04-.015-2.04-3.338.724-4.042-1.61-4.042-1.61-.546-1.387-1.333-1.756-1.333-1.756-1.089-.745.083-.729.083-.729 1.205.084 1.839 1.237 1.839 1.237 1.07 1.834 2.807 1.304 3.492.997.107-.775.418-1.305.762-1.604-2.665-.305-5.467-1.334-5.467-5.931 0-1.311.469-2.381 1.236-3.221-.124-.303-.535-1.524.117-3.176 0 0 1.008-.322 3.301 1.23A11.509 11.509 0 0 1 12 5.803c1.02.005 2.047.138 3.006.404 2.291-1.552 3.297-1.23 3.297-1.23.653 1.653.242 2.874.118 3.176.77.84 1.235 1.911 1.235 3.221 0 4.609-2.807 5.624-5.479 5.929.43.372.823 1.102.823 2.222 0 1.606-.015 2.896-.015 3.286 0 .315.216.694.825.576C20.565 21.795 24 17.295 24 12c0-6.63-5.37-12-12-12z"/></svg>GitHub</a>
 </footer>
+
+<% if (typeof groupSlug !== 'undefined' && groupSlug) { %>
+<div id="subscribeModal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.6);z-index:900;align-items:center;justify-content:center">
+  <div style="background:var(--surface);border:1px solid var(--border-hi);border-radius:16px;padding:28px;max-width:360px;width:calc(100% - 32px);position:relative">
+    <button onclick="closeSubscribeModal()" style="position:absolute;top:12px;right:14px;background:none;border:none;color:var(--text-2);cursor:pointer;font-size:18px">&#x2715;</button>
+    <h3 style="margin:0 0 6px;color:var(--text-hi)">&#x1F514; Alert Subscriptions</h3>
+    <p style="margin:0 0 16px;font-size:12px;color:var(--text-2)" id="subModalDesc">Get email alerts when servers go down or recover.</p>
+    <div id="subModalForm">
+      <div style="margin-bottom:10px">
+        <label style="font-size:11px;color:var(--text-2);display:block;margin-bottom:4px">Email address</label>
+        <input id="subEmail" type="email" placeholder="you@example.com" style="width:100%;background:var(--input-bg,#0d1829);border:1px solid var(--border-hi);border-radius:6px;color:var(--text-hi);font-size:13px;padding:8px 12px;outline:none;box-sizing:border-box">
+      </div>
+      <div style="display:flex;gap:16px;margin-bottom:14px;font-size:12px;color:var(--text-hi)">
+        <label style="display:flex;align-items:center;gap:5px;cursor:pointer">
+          <input type="checkbox" id="subDown" checked> Down alerts
+        </label>
+        <label style="display:flex;align-items:center;gap:5px;cursor:pointer">
+          <input type="checkbox" id="subRecovery" checked> Recovery alerts
+        </label>
+      </div>
+      <span id="subErr" style="font-size:11px;color:var(--red);display:block;min-height:16px;margin-bottom:8px"></span>
+      <button onclick="submitSubscription()" style="width:100%;background:var(--blue,#2a7fff);color:#fff;border:none;border-radius:8px;padding:10px 20px;font-size:13px;font-weight:600;cursor:pointer">Subscribe</button>
+    </div>
+    <div id="subModalSuccess" style="display:none;text-align:center;padding:12px 0">
+      <div style="font-size:32px;margin-bottom:8px">&#x2705;</div>
+      <div style="color:var(--green);font-weight:600">Subscribed!</div>
+      <div style="font-size:12px;color:var(--text-2);margin-top:4px">You'll receive alerts for this dashboard.</div>
+    </div>
+  </div>
+</div>
+
+<script>
+function openSubscribeModal(){
+  document.getElementById("subscribeModal").style.display = "flex";
+  document.getElementById("subModalForm").style.display   = "";
+  document.getElementById("subModalSuccess").style.display = "none";
+  document.getElementById("subErr").textContent = "";
+}
+function closeSubscribeModal(){
+  document.getElementById("subscribeModal").style.display = "none";
+}
+async function submitSubscription(){
+  const email    = document.getElementById("subEmail").value.trim();
+  const errEl    = document.getElementById("subErr");
+  const notifyDown     = document.getElementById("subDown").checked;
+  const notifyRecovery = document.getElementById("subRecovery").checked;
+  if (!email) { errEl.textContent = "Please enter your email address."; return; }
+  if (!currentGroupId) { errEl.textContent = "Could not determine dashboard group."; return; }
+  errEl.textContent = "";
+  try {
+    const r = await fetch("/api/public/subscribe", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ email, group_id: currentGroupId, notify_down: notifyDown, notify_recovery: notifyRecovery })
+    });
+    const data = await r.json();
+    if (!r.ok) { errEl.textContent = data.error || "Subscription failed."; return; }
+    document.getElementById("subModalForm").style.display    = "none";
+    document.getElementById("subModalSuccess").style.display = "";
+  } catch(e) {
+    errEl.textContent = "Network error — please try again.";
+  }
+}
+</script>
+<% } %>
 </body>
 </html>

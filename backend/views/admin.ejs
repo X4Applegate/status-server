@@ -785,6 +785,16 @@ body{font-family:var(--sans);background:var(--bg);color:var(--text);min-height:1
               <option value="light">Light</option>
             </select>
           </div>
+          <div class="fg full" style="display:flex;align-items:center;justify-content:space-between;padding:10px 14px;background:var(--surface2);border:1px solid var(--border);border-radius:var(--r-sm)">
+            <div>
+              <div style="font-size:13px;font-weight:600;color:var(--text-hi)">Public Status Page <span style="background:var(--blue-soft);color:var(--blue);font-size:10px;padding:2px 7px;border-radius:4px;font-weight:600;letter-spacing:.02em;vertical-align:middle;margin-left:6px">BETA</span></div>
+              <div style="font-size:11px;color:var(--text-2);margin-top:2px">Enable a public <code>/status/&lt;slug&gt;</code> page — no login required. Share it externally or embed in docs.</div>
+              <div id="gPublicUrl" style="font-size:11px;color:var(--blue);margin-top:4px;display:none"></div>
+            </div>
+            <label style="cursor:pointer;flex-shrink:0;margin-left:16px" title="Enable public status page">
+              <input type="checkbox" id="gPublicEnabled" onchange="onPublicToggle()" style="width:16px;height:16px;cursor:pointer">
+            </label>
+          </div>
           <div class="fg full"><label class="flabel">Custom Domain <span style="font-weight:400;text-transform:none;letter-spacing:0;color:var(--text-2)">(optional — e.g. status.example.com — lets this dashboard live at a domain instead of /dashboard/&lt;slug&gt;)</span></label><input class="finput" id="gCustomDomain" placeholder="status.example.com"></div>
           <div class="fg full" style="background:var(--surface2);border:1px solid var(--border);border-radius:var(--r-sm);padding:10px 12px;font-size:11px;color:var(--text-2);line-height:1.5">
             <strong style="color:var(--text-hi)">Caddy setup required:</strong> after saving, add a block to your Caddyfile that proxies your custom domain to <span style="font-family:var(--mono);color:var(--blue)">status-server:3000</span>, then recreate Caddy. Example:
@@ -2950,6 +2960,8 @@ async function showGroupForm(g){
   renderGroupLogoPreview(g?.logo_image || "");
   _slugDirty = !!g; // editing => don't auto-overwrite slug
   pickedServers = new Set(g?.server_ids || []);
+  document.getElementById("gPublicEnabled").checked = !!(g?.public_enabled);
+  onPublicToggle();
   // View link only on edit
   const link = document.getElementById("gViewLink");
   if (g) { link.href = `/dashboard/${g.slug}`; link.textContent = `View /dashboard/${g.slug} →`; link.style.display = "inline"; }
@@ -2961,8 +2973,8 @@ async function showGroupForm(g){
   renderGroupServerPicker();
   // Hide server picker for viewers — they can only change appearance, not server assignments
   document.getElementById("gServerPickerRow").style.display = isAdmin() ? "" : "none";
-  // Mark slug field as dirty if user edits manually
-  document.getElementById("gSlug").oninput = () => { _slugDirty = true; };
+  // Mark slug field as dirty if user edits manually; also refresh public URL hint
+  document.getElementById("gSlug").oninput = () => { _slugDirty = true; onPublicToggle(); };
 }
 
 // Render the chosen/existing logo image inside the small 48x48 preview tile
@@ -3035,6 +3047,7 @@ async function submitGroupForm(){
     custom_domain:  document.getElementById("gCustomDomain").value.trim(),
     privacy_text:   document.getElementById("gPrivacyText").value.trim() || null,
     terms_text:     document.getElementById("gTermsText").value.trim()   || null,
+    public_enabled: document.getElementById("gPublicEnabled").checked ? 1 : 0,
     server_ids:     Array.from(pickedServers)
   };
   try {
@@ -3050,6 +3063,18 @@ async function submitGroupForm(){
     toast(id ? "Group updated" : "Group created", "success");
     showList();
   } catch(e) { document.getElementById("gErr").textContent = "Error: " + e.message; }
+}
+
+function onPublicToggle(){
+  const enabled = document.getElementById("gPublicEnabled").checked;
+  const urlEl   = document.getElementById("gPublicUrl");
+  const slug    = document.getElementById("gSlug").value.trim();
+  if (enabled && slug) {
+    urlEl.textContent = `Public URL: ${location.origin}/status/${slug}`;
+    urlEl.style.display = "";
+  } else {
+    urlEl.style.display = "none";
+  }
 }
 
 function askDelGroup(id, name){

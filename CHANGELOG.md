@@ -6,6 +6,22 @@ All notable changes to this project are documented here.
 
 ---
 
+## [3.3.0-beta.1] — 2026-04-16 *(beta branch)*
+
+### Beta Features
+- **📷 Public status page per group** — admins can enable a `/status/<slug>` URL per dashboard that requires no login. Toggle the new **Public Status Page** switch in the Groups tab of the admin panel. When enabled, anyone with the link can view that group's servers without an account.
+- **📧 Email alert subscriptions** — visitors on any group dashboard can click the 🔔 Alerts button in the topbar to subscribe their email address to down and/or recovery notifications for that group. Subscriptions are stored in a new `status_email_subscriptions` table; emails are sent via the existing SMTP configuration. An unsubscribe link is included in every alert email.
+- **📌 Pin / favourite servers** — a star button on every server card lets users pin critical servers to the top of the sidebar in a permanent **⭐ Pinned** section. Pins are stored per-browser in `localStorage` — no account required.
+
+### Internal
+- New DB table: `status_email_subscriptions` (email, group_id, notify_down/recovery, unsubscribe_token)
+- New column: `status_groups.public_enabled` (TINYINT, default 0)
+- New API routes: `POST /api/public/subscribe`, `GET /api/public/unsubscribe`, `GET /api/public/subscription-status`
+- New page route: `GET /status/:slug`
+- `fireSubscriberEmails()` fires after every `fireWebhooks()` call to deliver subscription emails
+
+---
+
 ## [3.2.1] — 2026-04-16
 
 ### Fixed

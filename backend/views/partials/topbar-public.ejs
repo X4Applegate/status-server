@@ -53,6 +53,9 @@
       <a class="topbar-admin" href="<%= adminHref %>">Admin</a>
     <% } %>
     <div id="topbarManageBtn"></div>
+    <% if (typeof groupSlug !== 'undefined' && groupSlug) { %>
+    <button id="topbarSubscribeBtn" class="topbar-login" onclick="openSubscribeModal()" style="display:none">&#x1F514; Alerts</button>
+    <% } %>
     <div id="topbarAuthBtn"></div>
   </div>
 </div>

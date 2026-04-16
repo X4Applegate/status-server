@@ -841,6 +841,27 @@ async function initDB() {
     await db.query("ALTER TABLE status_groups ADD COLUMN terms_text MEDIUMTEXT DEFAULT NULL");
   } catch(e) { /* column already exists */ }
 
+  // Beta: public status page toggle per group
+  try {
+    await db.query("ALTER TABLE status_groups ADD COLUMN public_enabled TINYINT(1) NOT NULL DEFAULT 0");
+  } catch(e) { /* column already exists */ }
+
+  // Beta: email subscriptions — allow public visitors to opt in to down/recovery alerts
+  await db.query(`
+    CREATE TABLE IF NOT EXISTS status_email_subscriptions (
+      id                INT AUTO_INCREMENT PRIMARY KEY,
+      email             VARCHAR(255) NOT NULL,
+      group_id          INT NOT NULL,
+      notify_down       TINYINT(1) NOT NULL DEFAULT 1,
+      notify_recovery   TINYINT(1) NOT NULL DEFAULT 1,
+      unsubscribe_token VARCHAR(64) NOT NULL,
+      confirmed         TINYINT(1) NOT NULL DEFAULT 1,
+      created_at        TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+      UNIQUE KEY uq_email_group (email, group_id),
+      FOREIGN KEY (group_id) REFERENCES status_groups(id) ON DELETE CASCADE
+    )
+  `);
+
   // Add group_id column to status_servers if upgrading from older version
   try {
     await db.query("ALTER TABLE status_servers ADD COLUMN group_id INT NULL");
@@ -2169,6 +2190,63 @@ async function fireWebhooks(evt) {
   }
 }
 
+async function fireSubscriberEmails(evt) {
+  if (!smtpTransport) return; // SMTP not configured — silently skip
+  if (!Array.isArray(evt.serverGroupIds) || !evt.serverGroupIds.length) return;
+  try {
+    const field = evt.isRecovery ? "notify_recovery" : "notify_down";
+    const [subs] = await db.query(
+      `SELECT s.email, s.unsubscribe_token, g.name AS group_name, g.slug
+       FROM status_email_subscriptions s
+       JOIN status_groups g ON g.id = s.group_id
+       WHERE s.group_id IN (?) AND s.${field} = 1`,
+      [evt.serverGroupIds]
+    );
+    if (!subs.length) return;
+    const emoji  = evt.isRecovery ? "\u2705" : "\uD83D\uDD34";
+    const verb   = evt.isRecovery ? "recovered" : "is down";
+    const subject = `${emoji} ${evt.server} ${verb}`;
+    for (const sub of subs) {
+      const unsubUrl = EXTERNAL_URL
+        ? `${EXTERNAL_URL}/api/public/unsubscribe?token=${sub.unsubscribe_token}`
+        : `/api/public/unsubscribe?token=${sub.unsubscribe_token}`;
+      const dashUrl = EXTERNAL_URL ? `${EXTERNAL_URL}/dashboard/${sub.slug}` : `/dashboard/${sub.slug}`;
+      const html = `<!DOCTYPE html><html><head><meta charset="utf-8"></head><body style="font-family:sans-serif;background:#f4f7fb;padding:20px">
+        <div style="max-width:520px;margin:0 auto;background:#fff;border-radius:12px;border:1px solid #dce6f0;overflow:hidden">
+          <div style="background:${evt.isRecovery?"#10b87a":"#ef3d5a"};padding:18px 24px">
+            <h2 style="margin:0;color:#fff;font-size:18px">${emoji} ${evt.server} ${verb}</h2>
+          </div>
+          <div style="padding:20px 24px">
+            <p style="margin:0 0 12px;color:#5a6a7e">A status change was detected on <strong>${sub.group_name}</strong>.</p>
+            <table style="width:100%;border-collapse:collapse;font-size:13px;color:#2d3a4a">
+              <tr><td style="padding:6px 0;color:#8fa0b5;width:100px">Service</td><td>${evt.server}</td></tr>
+              <tr><td style="padding:6px 0;color:#8fa0b5">Host</td><td>${evt.host || "\u2014"}</td></tr>
+              <tr><td style="padding:6px 0;color:#8fa0b5">Status</td><td><strong>${evt.isRecovery?"UP":"DOWN"}</strong></td></tr>
+              <tr><td style="padding:6px 0;color:#8fa0b5">Time</td><td>${new Date(evt.time).toLocaleString()}</td></tr>
+              ${evt.cause ? `<tr><td style="padding:6px 0;color:#8fa0b5">Detail</td><td>${evt.cause}</td></tr>` : ""}
+            </table>
+            <div style="margin-top:20px">
+              <a href="${dashUrl}" style="display:inline-block;padding:10px 20px;background:#2a7fff;color:#fff;text-decoration:none;border-radius:6px;font-size:13px;font-weight:600">View Dashboard</a>
+            </div>
+          </div>
+          <div style="padding:12px 24px;background:#f4f7fb;border-top:1px solid #dce6f0;font-size:11px;color:#8fa0b5">
+            You're receiving this because you subscribed to alerts for ${sub.group_name}.
+            <a href="${unsubUrl}" style="color:#8fa0b5">Unsubscribe</a>
+          </div>
+        </div>
+      </body></html>`;
+      try {
+        await sendEmailAlert(sub.email, { subject, text: `${evt.server} ${verb}. View dashboard: ${dashUrl}`, html });
+        addLog({ level:"info", server:"subscriptions", message:`Alert email sent to ${sub.email} for ${evt.server}` });
+      } catch(e) {
+        addLog({ level:"warn", server:"subscriptions", message:`Failed to email ${sub.email}: ${e.message}` });
+      }
+    }
+  } catch(e) {
+    addLog({ level:"error", server:"subscriptions", message:`fireSubscriberEmails error: ${e.message}` });
+  }
+}
+
 // -- Poll ----------------------------------------------------------------------
 // Tracks last-polled epoch (ms) per server, so per-server intervals work.
 // `pollAll(force=true)` ignores the schedule and polls every server (used by /api/refresh).
@@ -2249,13 +2327,14 @@ async function pollAll(force = false) {
             pendingDownAlerts.delete(def.id);
             sentDownAlerts.add(def.id);
             fireWebhooks(evt).catch(() => {});
+            fireSubscriberEmails(evt).catch(() => {});
             addLog({ level:"error", server:def.name, serverId:def.id, check:"ALERT", message:`Alert fired — Square POS down for 5+ minutes`, ok:false });
           }, 5 * 60 * 1000);
           pendingDownAlerts.set(def.id, { timer, evt });
           addLog({ level:"warn", server:def.name, serverId:def.id, check:"ALERT", message:`Square POS DOWN — holding alert for 5-minute confirmation window`, ok:false });
         } else {
           // All other check types: alert immediately as normal
-          fireWebhooks({
+          const _alertEvtDown = {
             server:         def.name,
             host:           def.host,
             status:         overall,
@@ -2265,7 +2344,9 @@ async function pollAll(force = false) {
             time:           now,
             isRecovery:     false,
             serverGroupIds: def.group_ids || []
-          }).catch(() => {});
+          };
+          fireWebhooks(_alertEvtDown).catch(() => {});
+          fireSubscriberEmails(_alertEvtDown).catch(() => {});
         }
       }
 
@@ -2278,7 +2359,7 @@ async function pollAll(force = false) {
         } else if (isSquare && sentDownAlerts.has(def.id)) {
           // Square was genuinely down (alert was sent) — send recovery
           sentDownAlerts.delete(def.id);
-          fireWebhooks({
+          const _alertEvtSqRec = {
             server:         def.name,
             host:           def.host,
             status:         overall,
@@ -2288,10 +2369,12 @@ async function pollAll(force = false) {
             time:           now,
             isRecovery:     true,
             serverGroupIds: def.group_ids || []
-          }).catch(() => {});
+          };
+          fireWebhooks(_alertEvtSqRec).catch(() => {});
+          fireSubscriberEmails(_alertEvtSqRec).catch(() => {});
         } else if (!isSquare) {
           // Non-Square recovery: alert immediately as normal
-          fireWebhooks({
+          const _alertEvtRec = {
             server:         def.name,
             host:           def.host,
             status:         overall,
@@ -2301,7 +2384,9 @@ async function pollAll(force = false) {
             time:           now,
             isRecovery:     true,
             serverGroupIds: def.group_ids || []
-          }).catch(() => {});
+          };
+          fireWebhooks(_alertEvtRec).catch(() => {});
+          fireSubscriberEmails(_alertEvtRec).catch(() => {});
         }
       }
     }
@@ -3317,6 +3402,7 @@ app.put("/api/admin/groups/:id", requireAuth, async (req, res) => {
       return res.status(403).json({ error: "Forbidden – you can only edit your own dashboards" });
   }
   const { name, slug, description, logo_text, logo_image, logo_size, accent_color, bg_color, default_theme, custom_domain, privacy_text, terms_text } = req.body;
+  const public_enabled = req.body.public_enabled ? 1 : 0;
   // Only admins may change server assignments
   const server_ids = req.session.role === "admin" ? req.body.server_ids : undefined;
   if (!name) return res.status(400).json({ error: "Name is required" });
@@ -3338,8 +3424,8 @@ app.put("/api/admin/groups/:id", requireAuth, async (req, res) => {
   const cleanLogoSize = Math.max(20, Math.min(120, parseInt(logo_size) || 42));
   try {
     const [result] = await db.query(
-      "UPDATE status_groups SET slug=?, name=?, description=?, logo_text=?, logo_image=?, logo_size=?, accent_color=?, bg_color=?, default_theme=?, custom_domain=?, privacy_text=?, terms_text=? WHERE id=?",
-      [finalSlug, name, description || "", logo_text || "", cleanLogo, cleanLogoSize, accent_color || "#2a7fff", cleanBg, cleanTheme, cleanDomain, privacy_text || null, terms_text || null, gid]
+      "UPDATE status_groups SET slug=?, name=?, description=?, logo_text=?, logo_image=?, logo_size=?, accent_color=?, bg_color=?, default_theme=?, custom_domain=?, privacy_text=?, terms_text=?, public_enabled=? WHERE id=?",
+      [finalSlug, name, description || "", logo_text || "", cleanLogo, cleanLogoSize, accent_color || "#2a7fff", cleanBg, cleanTheme, cleanDomain, privacy_text || null, terms_text || null, public_enabled, gid]
     );
     if (result.affectedRows === 0) return res.status(404).json({ error: "Group not found" });
     if (Array.isArray(server_ids)) {
@@ -4120,6 +4206,74 @@ app.get("/api/badge/:id/cert-exp", allowGroupedOrAuth, (req, res) => {
   sendBadge(res, label, value, color);
 });
 
+// ── Beta: Email subscriptions ────────────────────────────────────────────────
+app.post("/api/public/subscribe", pageLimiter, async (req, res) => {
+  try {
+    const { email, group_id, notify_down, notify_recovery } = req.body;
+    if (!email || !group_id) return res.status(400).json({ error: "email and group_id required" });
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email))
+      return res.status(400).json({ error: "Invalid email address" });
+    // Verify group exists
+    const [gRows] = await db.query("SELECT id, name FROM status_groups WHERE id=?", [group_id]);
+    if (!gRows.length)
+      return res.status(404).json({ error: "Group not found" });
+    const token = crypto.randomBytes(32).toString("hex");
+    await db.query(
+      `INSERT INTO status_email_subscriptions (email, group_id, notify_down, notify_recovery, unsubscribe_token)
+       VALUES (?,?,?,?,?)
+       ON DUPLICATE KEY UPDATE
+         notify_down=VALUES(notify_down),
+         notify_recovery=VALUES(notify_recovery),
+         unsubscribe_token=VALUES(unsubscribe_token)`,
+      [email.trim().toLowerCase(), group_id,
+       notify_down !== false ? 1 : 0,
+       notify_recovery !== false ? 1 : 0,
+       token]
+    );
+    addLog({ level:"info", server:"subscriptions", message:`New email subscription: ${email} → group ${gRows[0].name}` });
+    res.json({ ok: true, message: "Subscribed successfully" });
+  } catch(e) {
+    addLog({ level:"error", server:"subscriptions", message:`Subscribe error: ${e.message}` });
+    res.status(500).json({ error: "Server error" });
+  }
+});
+
+app.get("/api/public/unsubscribe", pageLimiter, async (req, res) => {
+  try {
+    const { token } = req.query;
+    if (!token) return res.status(400).send("Missing token");
+    const [rows] = await db.query(
+      "SELECT s.id, s.email, g.name AS group_name FROM status_email_subscriptions s JOIN status_groups g ON g.id=s.group_id WHERE s.unsubscribe_token=?",
+      [token]
+    );
+    if (!rows.length) return res.status(404).send("Subscription not found or already removed");
+    await db.query("DELETE FROM status_email_subscriptions WHERE unsubscribe_token=?", [token]);
+    addLog({ level:"info", server:"subscriptions", message:`Unsubscribed: ${rows[0].email} from ${rows[0].group_name}` });
+    res.send(`<!DOCTYPE html><html><head><meta charset="utf-8"><title>Unsubscribed</title>
+      <style>body{font-family:sans-serif;display:flex;align-items:center;justify-content:center;min-height:100vh;margin:0;background:#060c18;color:#94b8d8}
+      .box{text-align:center;padding:40px;background:#0d1829;border-radius:12px;border:1px solid rgba(30,100,200,.15)}
+      h2{color:#10e88a;margin:0 0 12px}p{margin:0;color:#5e8aad}</style></head>
+      <body><div class="box"><h2>&#x2705; Unsubscribed</h2><p>You have been removed from alerts for <strong>${rows[0].group_name}</strong>.</p></div></body></html>`);
+  } catch(e) {
+    res.status(500).send("Server error");
+  }
+});
+
+app.get("/api/public/subscription-status", pageLimiter, async (req, res) => {
+  try {
+    const { email, group_id } = req.query;
+    if (!email || !group_id) return res.json({ subscribed: false });
+    const [rows] = await db.query(
+      "SELECT notify_down, notify_recovery FROM status_email_subscriptions WHERE email=? AND group_id=?",
+      [email.trim().toLowerCase(), group_id]
+    );
+    if (!rows.length) return res.json({ subscribed: false });
+    res.json({ subscribed: true, notify_down: !!rows[0].notify_down, notify_recovery: !!rows[0].notify_recovery });
+  } catch(e) {
+    res.json({ subscribed: false });
+  }
+});
+
 // All EJS page responses: tell the browser not to cache the HTML (CSS is inlined
 // in the template, so stale HTML = stale CSS). Prevents "my fix isn't showing up"
 // after a rebuild when the browser re-uses a cached page.
@@ -4205,6 +4359,33 @@ app.get("/admin",  requireAuthPage, (req, res) => res.render("admin"));
 app.get("/login",   (req, res) => res.render("login", { googleEnabled: !!googleOAuth }));
 app.get("/privacy", (req, res) => res.render("privacy"));
 app.get("/terms",   (req, res) => res.render("terms"));
+
+// Beta: Public status page — only accessible when group has public_enabled=1
+app.get("/status/:slug", pageLimiter, async (req, res) => {
+  try {
+    const [rows] = await db.query("SELECT * FROM status_groups WHERE slug=?", [req.params.slug]);
+    if (!rows.length || !rows[0].public_enabled) return res.status(404).render("404", { slug: req.params.slug });
+    const g = rows[0];
+    res.render("index", {
+      adminHref:     "/admin",
+      groupSlug:     g.slug,
+      groupName:     g.name,
+      groupSubtitle: g.description || "",
+      accentColor:   g.accent_color || "#2a7fff",
+      bgColor:       g.bg_color || null,
+      logoText:      g.logo_text || "",
+      logoImage:     g.logo_image || null,
+      logoSize:      g.logo_size || 42,
+      defaultTheme:  g.default_theme || "dark",
+      pageTitle:     `${g.name} — Status`,
+      privacyUrl:    g.privacy_text ? `/dashboard/${g.slug}/privacy` : "/privacy",
+      termsUrl:      g.terms_text   ? `/dashboard/${g.slug}/terms`   : "/terms",
+      isPublicPage:  true,
+    });
+  } catch(e) {
+    res.status(500).send("Server error");
+  }
+});
 
 // Per-group dashboard
 app.get("/dashboard/:slug", pageLimiter, async (req, res) => {
