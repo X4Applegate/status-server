@@ -3182,7 +3182,7 @@ app.get("/api/mapbox-token", requireAuth, (req, res) => {
 
 // Geocoding proxy — tries Nominatim first, falls back to Photon if no results.
 // Admin-only; used by the server edit form to resolve an address to lat/lng.
-app.get("/api/admin/geocode", requireAdmin, async (req, res) => {
+app.get("/api/admin/geocode", requireAuth, async (req, res) => {
   const q = (req.query.q || "").trim();
   if (!q) return res.status(400).json({ error: "Missing query" });
   const headers = {
