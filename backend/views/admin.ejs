@@ -220,6 +220,9 @@ body{font-family:var(--sans);background:var(--bg);color:var(--text);min-height:1
 #adminMapContainer{flex:1;width:100%;min-height:0}
 #adminMapContainer .maplibregl-map{width:100%!important;height:100%!important}
 .admin-map-unmapped{background:var(--bg2);border-top:1px solid var(--border);padding:8px 16px;font-size:12px;color:var(--text-2);flex-shrink:0}
+.geo-pick-row{display:flex;align-items:center;gap:10px;padding:8px 12px;cursor:pointer;border-bottom:1px solid var(--border);background:var(--surface);overflow:hidden}
+.geo-pick-row:last-child{border-bottom:none}
+.geo-pick-row:hover{background:var(--surface2);color:var(--text-white)}
 .map-toggle-btn{padding:5px 12px;border:1px solid var(--border-hi);border-radius:6px;color:var(--text-hi);font-size:12px;font-weight:500;background:none;cursor:pointer;transition:all .15s;white-space:nowrap}
 .map-toggle-btn:hover,.map-toggle-btn.active{background:var(--blue-soft);border-color:var(--blue);color:var(--blue)}
 .maplibregl-popup-content{background:#0d1829!important;border:1px solid #1e2d45!important;border-radius:10px!important;padding:10px 14px!important;box-shadow:0 8px 28px rgba(0,0,0,.6)!important;color:#e8eaf0!important}
@@ -642,8 +645,14 @@ body{font-family:var(--sans);background:var(--bg);color:var(--text);min-height:1
               <button type="button" class="btn" id="fGeoBtn" onclick="geocodeAddress()" style="flex-shrink:0;white-space:nowrap">Look up</button>
             </div>
             <div id="fGeoResult" style="margin-top:5px;font-size:11px;color:var(--text-2);min-height:16px"></div>
-            <input type="hidden" id="fLat">
-            <input type="hidden" id="fLng">
+            <div id="fGeoList" style="display:none;margin-top:4px;border:1px solid var(--border-hi);border-radius:var(--r-sm);overflow:hidden"></div>
+            <div style="display:flex;gap:8px;margin-top:8px">
+              <div style="flex:1"><label class="flabel" style="font-size:10px;margin-bottom:3px">Latitude</label>
+                <input class="finput" id="fLat" placeholder="e.g. 47.6062" style="font-family:var(--mono);font-size:12px" oninput="onManualCoord()"></div>
+              <div style="flex:1"><label class="flabel" style="font-size:10px;margin-bottom:3px">Longitude</label>
+                <input class="finput" id="fLng" placeholder="e.g. -122.3321" style="font-family:var(--mono);font-size:12px" oninput="onManualCoord()"></div>
+              <div style="display:flex;align-items:flex-end"><button type="button" class="btn btn-sm" onclick="clearCoords()" style="margin-bottom:0" title="Clear location">✕ Clear</button></div>
+            </div>
           </div>
           <div class="fg full"><label class="flabel">Description</label><input class="finput" id="fDesc" placeholder="Short description"></div>
           <div class="fg full"><label class="flabel">Section <span style="font-weight:400;text-transform:none;letter-spacing:0;color:var(--text-2)">(optional — groups servers under a heading on the dashboard)</span></label><input class="finput" id="fCategory" placeholder="e.g. Omada Network, DNS Servers" list="categoryHints"><datalist id="categoryHints"></datalist></div>
@@ -2032,10 +2041,12 @@ async function showServerForm(s){
     const subCats = Array.from(new Set((adminServers||[]).map(x => x.sub_category).filter(Boolean))).sort();
     document.getElementById("subCategoryHints").innerHTML = subCats.map(c => `<option value="${c}">`).join("");
   } catch(e) {}
-  document.getElementById("fLat").value  = s?.lat ?? "";
-  document.getElementById("fLng").value  = s?.lng ?? "";
+  document.getElementById("fLat").value  = s?.lat != null ? String(s.lat) : "";
+  document.getElementById("fLng").value  = s?.lng != null ? String(s.lng) : "";
   document.getElementById("fAddress").value = "";
-  document.getElementById("fGeoResult").textContent = (s?.lat && s?.lng) ? `📍 ${parseFloat(s.lat).toFixed(4)}, ${parseFloat(s.lng).toFixed(4)}` : "";
+  document.getElementById("fGeoResult").textContent = (s?.lat && s?.lng) ? `📍 ${parseFloat(s.lat).toFixed(5)}, ${parseFloat(s.lng).toFixed(5)}` : "";
+  document.getElementById("fGeoResult").style.color = "var(--text-2)";
+  document.getElementById("fGeoList").style.display = "none";
   document.getElementById("fTags").value  = (s?.tags||[]).join(", ");
   document.getElementById("fInterval").value = String(s?.poll_interval_sec || 30);
   document.getElementById("fThreshold").value = String(s?.failure_threshold || 1);
@@ -2288,25 +2299,65 @@ function changeCT(i,t){
 }
 function upCk(i,k,v)  { currentChecks[i][k] = v; }
 
+function _pickGeoResult(lat, lon, display_name) {
+  document.getElementById("fLat").value = parseFloat(lat).toFixed(6);
+  document.getElementById("fLng").value = parseFloat(lon).toFixed(6);
+  document.getElementById("fGeoResult").innerHTML =
+    `✅ &nbsp;<span style="opacity:.8">${display_name}</span>`;
+  document.getElementById("fGeoResult").style.color = "var(--green)";
+  document.getElementById("fGeoList").style.display = "none";
+}
+
+function onManualCoord() {
+  const lat = parseFloat(document.getElementById("fLat").value);
+  const lng = parseFloat(document.getElementById("fLng").value);
+  const res = document.getElementById("fGeoResult");
+  if (!isNaN(lat) && !isNaN(lng)) {
+    res.textContent = `📍 ${lat.toFixed(5)}, ${lng.toFixed(5)}`;
+    res.style.color = "var(--text-2)";
+  } else {
+    res.textContent = "";
+  }
+  document.getElementById("fGeoList").style.display = "none";
+}
+
+function clearCoords() {
+  document.getElementById("fLat").value = "";
+  document.getElementById("fLng").value = "";
+  document.getElementById("fGeoResult").textContent = "";
+  document.getElementById("fGeoList").style.display = "none";
+  document.getElementById("fAddress").value = "";
+}
+
 async function geocodeAddress() {
   const query = document.getElementById("fAddress").value.trim();
   if (!query) return;
-  const btn = document.getElementById("fGeoBtn");
+  const btn    = document.getElementById("fGeoBtn");
   const result = document.getElementById("fGeoResult");
+  const list   = document.getElementById("fGeoList");
   btn.disabled = true; btn.textContent = "Looking up…";
   result.textContent = ""; result.style.color = "var(--text-2)";
+  list.style.display = "none"; list.innerHTML = "";
   try {
-    const r = await fetch(`/api/admin/geocode?q=${encodeURIComponent(query)}`);
+    const r    = await fetch(`/api/admin/geocode?q=${encodeURIComponent(query)}`);
     const data = await r.json();
     if (!data.length) {
-      result.textContent = "Address not found — try a more specific location.";
+      result.textContent = "Address not found — try a more specific query, or enter coordinates manually below.";
       result.style.color = "var(--red)";
+    } else if (data.length === 1) {
+      // Single result — auto-select it
+      _pickGeoResult(data[0].lat, data[0].lon, data[0].display_name);
     } else {
-      const { lat, lon, display_name } = data[0];
-      document.getElementById("fLat").value = lat;
-      document.getElementById("fLng").value = lon;
-      result.innerHTML = `📍 ${parseFloat(lat).toFixed(4)}, ${parseFloat(lon).toFixed(4)} &nbsp;<span style="opacity:.7">${display_name}</span>`;
-      result.style.color = "var(--green)";
+      // Multiple results — let user pick the right one
+      result.textContent = `${data.length} results found — pick the correct one:`;
+      result.style.color = "var(--text-2)";
+      list.style.display = "block";
+      list.innerHTML = data.map((d, i) =>
+        `<div class="geo-pick-row" onclick="_pickGeoResult('${d.lat}','${d.lon}',${JSON.stringify(d.display_name)})">
+          <span style="font-family:var(--mono);font-size:11px;color:var(--blue);white-space:nowrap">${parseFloat(d.lat).toFixed(4)}, ${parseFloat(d.lon).toFixed(4)}</span>
+          <span style="color:var(--text-hi);font-size:12px;flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${d.display_name}</span>
+        </div>`
+      ).join("");
     }
   } catch(e) {
     result.textContent = "Geocoding failed — check your connection.";
