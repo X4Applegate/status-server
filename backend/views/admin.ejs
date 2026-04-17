@@ -2733,6 +2733,7 @@ async function doDeleteUser(){
 
 // ── Webhook list ──────────────────────────────────────────────────────────────
 let _webhookStore = {};
+let _apiKeyStore = {};
 let pendDelWebhook = null;
 
 function renderAdminWebhookList(hooks){
@@ -4604,6 +4605,8 @@ async function loadApiKeyList() {
     const r = await fetch("/api/admin/api-keys");
     if (!r.ok) { const d = await r.json().catch(()=>({})); el.innerHTML = `<div class="empty-state">Failed to load: ${d.error || r.statusText}</div>`; return; }
     const keys = await r.json();
+    _apiKeyStore = {};
+    keys.forEach(k => { _apiKeyStore[k.id] = k; });
     document.getElementById("aCount").textContent = `${keys.length} key${keys.length===1?"":"s"}`;
     if (!keys.length) {
       el.innerHTML = `<div class="empty-state">No API keys yet. Click <strong>Generate Key</strong> to create one.</div>
@@ -4635,12 +4638,12 @@ async function loadApiKeyList() {
           </tr></thead>
           <tbody>${keys.map(k => `
             <tr style="border-bottom:1px solid var(--border)">
-              <td style="padding:8px 8px;font-weight:500;color:var(--text-hi)">${k.name}</td>
-              <td style="padding:8px 8px;font-family:var(--mono);font-size:11px;color:var(--text-2)">${k.key_prefix}…</td>
-              <td style="padding:8px 8px"><span style="font-size:10px;font-weight:600;padding:2px 7px;border-radius:4px;${k.scope==="write"?"background:var(--orange-soft);color:var(--orange)":"background:var(--green-soft);color:var(--green)"}">${k.scope.toUpperCase()}</span></td>
+              <td style="padding:8px 8px;font-weight:500;color:var(--text-hi)">${_escHtml(k.name)}</td>
+              <td style="padding:8px 8px;font-family:var(--mono);font-size:11px;color:var(--text-2)">${_escHtml(k.key_prefix)}…</td>
+              <td style="padding:8px 8px"><span style="font-size:10px;font-weight:600;padding:2px 7px;border-radius:4px;${k.scope==="write"?"background:var(--orange-soft);color:var(--orange)":"background:var(--green-soft);color:var(--green)"}">${_escHtml(k.scope.toUpperCase())}</span></td>
               <td style="padding:8px 8px;color:var(--text-2)">${fmtDate(k.last_used_at)}</td>
               <td style="padding:8px 8px;color:var(--text-2)">${fmtDate(k.created_at)}</td>
-              <td style="padding:8px 8px;text-align:right"><button class="btn btn-danger" style="font-size:11px;padding:3px 9px" onclick="askDelApiKey(${k.id},'${k.name.replace(/'/g,"\\'")}')">Revoke</button></td>
+              <td style="padding:8px 8px;text-align:right"><button class="btn btn-danger" style="font-size:11px;padding:3px 9px" onclick="askDelApiKey(${k.id})">Revoke</button></td>
             </tr>`).join("")}
           </tbody>
         </table>
@@ -4676,7 +4679,8 @@ async function createApiKey(name, scope) {
   } catch(e) { toast(e.message, "error"); }
 }
 
-async function askDelApiKey(id, name) {
+async function askDelApiKey(id) {
+  const name = (_apiKeyStore && _apiKeyStore[id] && _apiKeyStore[id].name) || "this key";
   if (!confirm(`Revoke API key "${name}"?\n\nAny integrations using this key will immediately lose access.`)) return;
   try {
     const r = await fetch(`/api/admin/api-keys/${id}`, { method:"DELETE" });

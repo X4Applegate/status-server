@@ -5391,7 +5391,7 @@ app.post("/api/public/subscribe", pageLimiter, async (req, res) => {
   try {
     const { email, group_id, notify_down, notify_recovery } = req.body;
     if (!email || !group_id) return res.status(400).json({ error: "email and group_id required" });
-    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email))
+    if (!isValidEmail(email))
       return res.status(400).json({ error: "Invalid email address" });
     // Verify group exists
     const [gRows] = await db.query("SELECT id, name FROM status_groups WHERE id=?", [group_id]);
@@ -5748,7 +5748,13 @@ app.post("/api/admin/import", requireAdmin, async (req, res) => {
 });
 
 // ── API Key Authentication ──────────────────────────────────────────────────────
-// Key format: ssk_<64 hex chars>   Stored as SHA-256 hash (no salt needed — 256-bit random)
+// Key format: ssk_<64 hex chars>. Stored as HMAC-SHA256(SESSION_SECRET, rawKey).
+// HMAC (not plain SHA) means a leaked DB alone can't be used to validate keys — the
+// attacker also needs the server-side SESSION_SECRET pepper. Deterministic lookup
+// is preserved (same key always hashes the same), unlike bcrypt/scrypt.
+function hashApiKey(rawKey) {
+  return require("crypto").createHmac("sha256", SESSION_SECRET).update(rawKey).digest("hex");
+}
 function requireApiKey(scope = "read") {
   return async (req, res, next) => {
     const auth  = (req.headers["authorization"] || "").trim();
@@ -5756,7 +5762,7 @@ function requireApiKey(scope = "read") {
     const rawKey = auth.startsWith("Bearer ") ? auth.slice(7).trim() : xKey;
     if (!rawKey) return res.status(401).json({ error: "API key required. Pass Authorization: Bearer <key> or X-API-Key: <key>" });
     try {
-      const hash  = require("crypto").createHash("sha256").update(rawKey).digest("hex");
+      const hash  = hashApiKey(rawKey);
       const [rows] = await db.query("SELECT * FROM status_api_keys WHERE key_hash=?", [hash]);
       if (!rows.length) return res.status(401).json({ error: "Invalid API key" });
       const key = rows[0];
@@ -5816,7 +5822,7 @@ app.post("/api/admin/api-keys", requireAdmin, async (req, res) => {
   if (!["read","write"].includes(scope)) return res.status(400).json({ error:"scope must be read or write" });
   try {
     const rawKey   = "ssk_" + require("crypto").randomBytes(32).toString("hex");
-    const hash     = require("crypto").createHash("sha256").update(rawKey).digest("hex");
+    const hash     = hashApiKey(rawKey);
     const prefix   = rawKey.slice(0, 12);
     await db.query("INSERT INTO status_api_keys (name,key_hash,key_prefix,scope,created_by) VALUES (?,?,?,?,?)",
       [name, hash, prefix, scope, req.session.userId]);

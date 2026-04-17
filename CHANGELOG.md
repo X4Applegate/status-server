@@ -6,6 +6,20 @@ All notable changes to this project are documented here.
 
 ---
 
+## [3.3.1] — 2026-04-17 *(security patch)*
+
+Resolves three CodeQL high-severity alerts surfaced against 3.3.0.
+
+### Security fixes
+- **CodeQL #79 — Polynomial regex on uncontrolled data** (`js/polynomial-redos`). `POST /api/public/subscribe` was validating emails with an unbounded-quantifier regex (`^[^\s@]+@[^\s@]+\.[^\s@]+$`), vulnerable to ReDoS via crafted inputs. Now uses the existing `isValidEmail()` helper with bounded quantifiers (local ≤64, domain ≤253, TLD ≤63).
+- **CodeQL #78 — Incomplete string escaping** (`js/incomplete-sanitization`). The API Keys table was interpolating `k.name` into an `onclick="askDelApiKey(id,'<name>')"` attribute with only single-quote escaping, missing backslashes and HTML metacharacters. Rewritten to pass only the key id; the name is looked up client-side from `_apiKeyStore`. All name/prefix fields in the table are now HTML-escaped via `_escHtml()`.
+- **CodeQL #77 — Insufficient password hash computational effort** (`js/insufficient-password-hash`). API key storage switched from `SHA-256(rawKey)` to `HMAC-SHA256(SESSION_SECRET, rawKey)`. Deterministic lookup is preserved, but a DB dump alone is no longer sufficient to validate keys — the server-side pepper (`SESSION_SECRET`) is also required.
+
+### Breaking (minor)
+- **API keys created under 3.3.0 must be regenerated.** The new HMAC scheme produces a different hash; old keys will fail validation with `Invalid API key`. Regenerate in Admin → API Keys. (Keys created ≥3.3.1 are portable across restarts as long as `SESSION_SECRET` is stable.)
+
+---
+
 ## [3.3.0] — 2026-04-17 *(stable)*
 
 Major release consolidating the 3.3.0-beta line into stable, plus three new production-ready features.
