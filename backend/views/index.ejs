@@ -706,7 +706,7 @@ function _renderMainMarkers() {
 
     // Marker element — show a count badge when more than one server
     const el = document.createElement("div");
-    el.style.cssText = `position:relative;width:${group.length>1?22:16}px;height:${group.length>1?22:16}px;border-radius:50%;background:${color};border:2px solid #0d1829;box-shadow:0 0 6px ${color}88;cursor:pointer;display:flex;align-items:center;justify-content:center`;
+    el.style.cssText = `width:${group.length>1?22:16}px;height:${group.length>1?22:16}px;border-radius:50%;background:${color};border:2px solid #0d1829;box-shadow:0 0 6px ${color}88;cursor:pointer;display:flex;align-items:center;justify-content:center`;
     if (group.length > 1) {
       el.innerHTML = `<span style="font-size:10px;font-weight:700;color:#0d1829;line-height:1">${group.length}</span>`;
     }
