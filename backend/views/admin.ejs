@@ -2356,6 +2356,19 @@ async function submitForm(){
       }
     } catch(e) { cacheDel("admin-servers"); }
     cacheDel("admin-groups");
+    // Patch liveServers so the sidebar reflects the new name/host immediately
+    // without waiting for the next SSE tick
+    try {
+      const saveId = id || d.id;
+      if (saveId != null && Array.isArray(liveServers)) {
+        const lIdx = liveServers.findIndex(x => x.id == saveId);
+        if (lIdx >= 0) {
+          liveServers[lIdx] = { ...liveServers[lIdx], name: body.name, host: body.host, description: body.description || "" };
+          cacheSet("servers", liveServers);
+          renderSidebarList(liveServers);
+        }
+      }
+    } catch(e) {}
     toast(id ? "Server updated" : "Server added", "success");
     // If we came from the Omada sites browser, return there instead of the Servers tab
     if (serverFormReturn && serverFormReturn.type === "omada-sites" && serverFormReturn.controller) {
