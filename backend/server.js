@@ -2978,15 +2978,13 @@ app.put("/api/admin/servers/:id", requireAuth, async (req, res) => {
       if (!Array.isArray(allowed) || !existingGroups.some(gid => allowed.includes(gid))) {
         return res.status(403).json({ error:"You don't have access to this server" });
       }
-      // Every group the viewer REQUESTED to add must be in their allowed list
-      const invalidRequested = wantGroups.filter(g => !allowed.includes(g));
-      if (invalidRequested.length) {
-        return res.status(403).json({ error:"You don't have access to group(s): " + invalidRequested.join(",") });
-      }
+      // Strip groups the viewer doesn't own from their request — they're re-added
+      // via preserved below, so the server stays in those groups automatically.
+      const viewerGroups = wantGroups.filter(g => allowed.includes(g));
       // Preserve groups the viewer doesn't own (protected from accidental removal)
       const preserved = existingGroups.filter(g => !allowed.includes(g));
       // Merge: viewer-controlled set + preserved set (de-duplicated)
-      const merged = new Set([...wantGroups, ...preserved]);
+      const merged = new Set([...viewerGroups, ...preserved]);
       finalGroups = Array.from(merged);
       // The viewer must leave the server in AT LEAST ONE of their own groups
       // (otherwise they've effectively removed themselves from it — silent ownership loss)
