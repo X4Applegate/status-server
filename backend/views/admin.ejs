@@ -1089,9 +1089,6 @@ function isViewer(){ return sessionRole === "viewer"; }
         setTimeout(() => autoOpenServerEdit(editId), 0);
       } else if (newGroup) {
         setTimeout(() => autoOpenNewGroup(), 0);
-      } else if (isViewer()) {
-        // Viewers come here specifically to manage servers — open the drawer immediately
-        setTimeout(() => openAdmin(), 0);
       }
       // Version update check (admin only — non-blocking)
       if (isAdmin()) {
