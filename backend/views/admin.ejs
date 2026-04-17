@@ -618,8 +618,16 @@ body{font-family:var(--sans);background:var(--bg);color:var(--text);min-height:1
         <div class="form-grid">
           <div class="fg"><label class="flabel">Server Name *</label><input class="finput" id="fName" placeholder="e.g. Web Server"></div>
           <div class="fg"><label class="flabel">Host / IP *</label><input class="finput" id="fHost" placeholder="e.g. 10.0.0.2"></div>
-          <div class="fg"><label class="flabel">Latitude <span style="font-weight:400;text-transform:none;letter-spacing:0;color:var(--text-2)">(GPS — e.g. 47.6062, for map view)</span></label><input class="finput" id="fLat" type="number" step="0.0001" min="-90" max="90" placeholder="47.6062"></div>
-          <div class="fg"><label class="flabel">Longitude <span style="font-weight:400;text-transform:none;letter-spacing:0;color:var(--text-2)">(GPS — e.g. -122.3321, for map view)</span></label><input class="finput" id="fLng" type="number" step="0.0001" min="-180" max="180" placeholder="-122.3321"></div>
+          <div class="fg full">
+            <label class="flabel">Location <span style="font-weight:400;text-transform:none;letter-spacing:0;color:var(--text-2)">(address or place name — pins server on map view)</span></label>
+            <div style="display:flex;gap:8px">
+              <input class="finput" id="fAddress" placeholder="e.g. 1600 Pennsylvania Ave NW, Washington DC" style="flex:1" onkeydown="if(event.key==='Enter'){event.preventDefault();geocodeAddress()}">
+              <button type="button" class="btn" id="fGeoBtn" onclick="geocodeAddress()" style="flex-shrink:0;white-space:nowrap">Look up</button>
+            </div>
+            <div id="fGeoResult" style="margin-top:5px;font-size:11px;color:var(--text-2);min-height:16px"></div>
+            <input type="hidden" id="fLat">
+            <input type="hidden" id="fLng">
+          </div>
           <div class="fg full"><label class="flabel">Description</label><input class="finput" id="fDesc" placeholder="Short description"></div>
           <div class="fg full"><label class="flabel">Section <span style="font-weight:400;text-transform:none;letter-spacing:0;color:var(--text-2)">(optional — groups servers under a heading on the dashboard)</span></label><input class="finput" id="fCategory" placeholder="e.g. Omada Network, DNS Servers" list="categoryHints"><datalist id="categoryHints"></datalist></div>
           <div class="fg full"><label class="flabel">Sub-section <span style="font-weight:400;text-transform:none;letter-spacing:0;color:var(--text-2)">(optional — nested heading within the section above)</span></label><input class="finput" id="fSubCategory" placeholder="e.g. WiFi, Switching, Core" list="subCategoryHints"><datalist id="subCategoryHints"></datalist></div>
@@ -1992,6 +2000,8 @@ async function showServerForm(s){
   } catch(e) {}
   document.getElementById("fLat").value  = s?.lat ?? "";
   document.getElementById("fLng").value  = s?.lng ?? "";
+  document.getElementById("fAddress").value = "";
+  document.getElementById("fGeoResult").textContent = (s?.lat && s?.lng) ? `📍 ${parseFloat(s.lat).toFixed(4)}, ${parseFloat(s.lng).toFixed(4)}` : "";
   document.getElementById("fTags").value  = (s?.tags||[]).join(", ");
   document.getElementById("fInterval").value = String(s?.poll_interval_sec || 30);
   document.getElementById("fThreshold").value = String(s?.failure_threshold || 1);
@@ -2238,6 +2248,36 @@ function changeCT(i,t){
   currentChecks[i] = {type:t}; renderCrows();
 }
 function upCk(i,k,v)  { currentChecks[i][k] = v; }
+
+async function geocodeAddress() {
+  const query = document.getElementById("fAddress").value.trim();
+  if (!query) return;
+  const btn = document.getElementById("fGeoBtn");
+  const result = document.getElementById("fGeoResult");
+  btn.disabled = true; btn.textContent = "Looking up…";
+  result.textContent = ""; result.style.color = "var(--text-2)";
+  try {
+    const r = await fetch(`https://nominatim.openstreetmap.org/search?format=json&limit=1&q=${encodeURIComponent(query)}`, {
+      headers: { "Accept-Language": "en", "User-Agent": "status-server-admin" }
+    });
+    const data = await r.json();
+    if (!data.length) {
+      result.textContent = "Address not found — try a more specific location.";
+      result.style.color = "var(--red)";
+    } else {
+      const { lat, lon, display_name } = data[0];
+      document.getElementById("fLat").value = lat;
+      document.getElementById("fLng").value = lon;
+      result.innerHTML = `📍 ${parseFloat(lat).toFixed(4)}, ${parseFloat(lon).toFixed(4)} &nbsp;<span style="opacity:.7">${display_name}</span>`;
+      result.style.color = "var(--green)";
+    }
+  } catch(e) {
+    result.textContent = "Geocoding failed — check your connection.";
+    result.style.color = "var(--red)";
+  } finally {
+    btn.disabled = false; btn.textContent = "Look up";
+  }
+}
 
 async function submitForm(){
   const name = document.getElementById("fName").value.trim();
@@ -2534,15 +2574,17 @@ async function loadSettings(){
   document.getElementById("aCount").textContent = "Settings";
   el.innerHTML = `<div style="padding:20px;color:var(--text-2);font-size:12px">Loading…</div>`;
   try {
-    const [smtpRes, tsRes, goRes] = await Promise.all([
+    const [smtpRes, tsRes, goRes, mbRes] = await Promise.all([
       fetch("/api/admin/settings/smtp"),
       fetch("/api/admin/settings/turnstile"),
-      fetch("/api/admin/settings/google-oauth")
+      fetch("/api/admin/settings/google-oauth"),
+      fetch("/api/admin/settings/mapbox")
     ]);
     if (!smtpRes.ok) { el.innerHTML = `<div class="empty-state">Admin role required.</div>`; return; }
     const s  = await smtpRes.json();
     const t  = tsRes.ok ? await tsRes.json() : { enabled:false, site_key:"", secret_key:"" };
     const go = goRes.ok ? await goRes.json() : { enabled:false, client_id:"", client_secret:"", callback_url:"" };
+    const mb = mbRes.ok ? await mbRes.json() : { token:"" };
     el.innerHTML = `
       <div style="padding:24px;max-width:640px">
         <div style="margin-bottom:20px">
@@ -2595,9 +2637,61 @@ async function loadSettings(){
           <button class="btn btn-primary" onclick="saveGoogleOAuthSettings()">Save Google OAuth Settings</button>
         </div>
         <div id="setGoMsg" style="margin-top:14px;font-size:12px"></div>
+
+        <div style="height:1px;background:var(--border);margin:32px 0"></div>
+
+        <div style="margin-bottom:20px">
+          <div style="font-size:14px;font-weight:600;color:var(--text-hi);margin-bottom:4px">Mapbox (private map tiles)</div>
+          <div style="font-size:12px;color:var(--text-2);line-height:1.6">Use Mapbox tiles on the map view for signed-in users only. The token is never sent to anonymous visitors on public dashboards. Create a token at <a href="https://account.mapbox.com/access-tokens/" target="_blank" rel="noopener" style="color:var(--accent)">account.mapbox.com → Access tokens</a>. ${mb.token ? '<span style="color:var(--green)">● Configured</span>' : '<span style="color:var(--orange)">● Not configured</span>'}</div>
+        </div>
+        <div class="form-grid">
+          <div class="fg full"><label class="flabel">Access Token</label><input class="finput" id="setMbToken" type="password" placeholder="${mb.token ? '(leave blank to keep current)' : 'pk.eyJ1...'}" value=""></div>
+        </div>
+        <div style="display:flex;gap:10px;margin-top:20px;flex-wrap:wrap">
+          <button class="btn btn-primary" onclick="saveMapboxSettings()">Save Mapbox Settings</button>
+          <button class="btn" onclick="clearMapboxToken()">Clear Token</button>
+        </div>
+        <div id="setMbMsg" style="margin-top:14px;font-size:12px"></div>
       </div>`;
   } catch(e) {
     el.innerHTML = `<div class="empty-state">Failed to load settings: ${e.message}</div>`;
+  }
+}
+
+async function saveMapboxSettings(){
+  const msg = document.getElementById("setMbMsg");
+  msg.textContent = "Saving…"; msg.style.color = "var(--text-2)";
+  const body = { token: document.getElementById("setMbToken").value };
+  try {
+    const r = await fetch("/api/admin/settings/mapbox", {
+      method: "POST", headers: {"Content-Type":"application/json"}, body: JSON.stringify(body)
+    });
+    const d = await r.json();
+    if (!r.ok) { msg.textContent = "Error: " + (d.error || "Failed"); msg.style.color = "var(--red)"; return; }
+    msg.textContent = d.configured ? "Saved — Mapbox tiles will load for signed-in users" : "Saved — Mapbox token cleared";
+    msg.style.color = "var(--green)";
+    toast("Mapbox settings saved", "success");
+    document.getElementById("setMbToken").value = "";
+  } catch(e) {
+    msg.textContent = "Error: " + e.message; msg.style.color = "var(--red)";
+  }
+}
+
+async function clearMapboxToken(){
+  if (!confirm("Clear the Mapbox token? The map will fall back to OpenStreetMap tiles.")) return;
+  const msg = document.getElementById("setMbMsg");
+  msg.textContent = "Clearing…"; msg.style.color = "var(--text-2)";
+  try {
+    const r = await fetch("/api/admin/settings/mapbox", {
+      method: "POST", headers: {"Content-Type":"application/json"}, body: JSON.stringify({ token: "" })
+    });
+    const d = await r.json();
+    if (!r.ok) { msg.textContent = "Error: " + (d.error || "Failed"); msg.style.color = "var(--red)"; return; }
+    msg.textContent = "Mapbox token cleared"; msg.style.color = "var(--green)";
+    toast("Mapbox token cleared", "success");
+    loadSettings();
+  } catch(e) {
+    msg.textContent = "Error: " + e.message; msg.style.color = "var(--red)";
   }
 }
 
