@@ -6,6 +6,24 @@ All notable changes to this project are documented here.
 
 ---
 
+## [3.4.0-beta.1] — 2026-04-17 *(beta branch)*
+
+### New Features
+- **🔑 API key authentication** — generate named API keys in Admin → API Keys tab. Supports `read` scope (`GET /api/v1/status`, `GET /api/v1/status/:id`) and `write` scope (`POST /api/v1/servers/:id/push-status` for CI/CD pipelines). Pass keys via `Authorization: Bearer <key>` or `X-API-Key: <key>`. Keys are stored as SHA-256 hashes; the raw key is shown once at creation only.
+- **📤 Import / Export** — two new buttons in the Servers tab toolbar (admin only). **⬇ Export** downloads all servers + checks as a timestamped JSON file. **⬆ Import** uploads a JSON file and bulk-creates servers, with a skip-or-overwrite choice for name conflicts.
+- **📦 Script check type** — new check type available to admins: **Script (exit code)**. Enter any shell command (no shell metacharacters allowed); exit 0 = up, non-zero = down. stdout/stderr captured as the check detail. Uses `spawn` (not `exec`) to prevent shell injection.
+- **🗺️ MapLibre GL JS** — replaced Leaflet + Mapbox raster-tile workaround with MapLibre GL JS (Mapbox GL–compatible open-source renderer). Mapbox dark-v11 now loads natively when a token is configured; free CARTO dark GL style is the fallback. Both the full map view and the server detail mini-map use the same engine.
+- **📍 Address geocoding** — server location field replaced with a free-text address input + **Look up** button. Coordinates are resolved via OpenStreetMap Nominatim and stored automatically on save.
+- **🔒 Map privacy** — map view and detail mini-map are hidden for logged-out users.
+
+### Internal
+- New DB table `status_api_keys` (`id`, `name`, `key_hash`, `key_prefix`, `scope`, `last_used_at`, `created_by`, `created_at`)
+- New API routes: `GET /api/admin/api-keys`, `POST /api/admin/api-keys`, `DELETE /api/admin/api-keys/:id`, `GET /api/v1/status`, `GET /api/v1/status/:id`, `POST /api/v1/servers/:id/push-status`, `GET /api/admin/export`, `POST /api/admin/import`
+- `requireApiKey(scope)` middleware factory for machine-to-machine auth
+- `scriptCheck(command, timeout)` — uses `child_process.spawn`, validates no shell metacharacters at save time
+
+---
+
 ## [3.3.0-beta.2] — 2026-04-16 *(beta branch)*
 
 ### New Features

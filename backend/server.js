@@ -940,6 +940,19 @@ async function initDB() {
     )
   `);
 
+  await db.query(`
+    CREATE TABLE IF NOT EXISTS status_api_keys (
+      id           INT AUTO_INCREMENT PRIMARY KEY,
+      name         VARCHAR(150) NOT NULL,
+      key_hash     VARCHAR(64)  NOT NULL UNIQUE,
+      key_prefix   VARCHAR(12)  NOT NULL,
+      scope        VARCHAR(20)  NOT NULL DEFAULT 'read',
+      last_used_at TIMESTAMP    NULL DEFAULT NULL,
+      created_by   INT          NOT NULL,
+      created_at   TIMESTAMP    DEFAULT CURRENT_TIMESTAMP
+    )
+  `);
+
   // Beta: geographic coordinates for map view
   try {
     await db.query("ALTER TABLE status_servers ADD COLUMN lat DECIMAL(10,7) DEFAULT NULL");
@@ -1769,6 +1782,32 @@ async function squarePosCheck(accountId, locationId, deviceId, timeout=8000, inl
   }
 }
 
+// Script check — runs a user-defined command; exit 0 = up, non-zero = down.
+// Uses spawn (not exec) to avoid shell injection. Command must be pre-validated
+// (no shell metacharacters) at save time.
+function scriptCheck(command, timeout=5000) {
+  const { spawn } = require("child_process");
+  return new Promise(resolve => {
+    const t0 = Date.now();
+    const parts = (command||"").trim().split(/\s+/);
+    const [bin, ...args] = parts;
+    let stdout = "", stderr = "", done = false;
+    const child = spawn(bin, args, { timeout, stdio: ["ignore","pipe","pipe"] });
+    child.stdout.on("data", d => { stdout += d.toString().slice(0, 500); });
+    child.stderr.on("data", d => { stderr += d.toString().slice(0, 200); });
+    child.on("close", code => {
+      if (done) return; done = true;
+      const ok = code === 0;
+      const detail = (stdout.trim() || stderr.trim() || `exit ${code ?? "timeout"}`).slice(0, 255);
+      resolve({ type:"script", ok, response_ms: Date.now()-t0, detail });
+    });
+    child.on("error", e => {
+      if (done) return; done = true;
+      resolve({ type:"script", ok:false, response_ms: Date.now()-t0, detail: e.message });
+    });
+  });
+}
+
 async function runChecks(def) {
   return Promise.all((def.checks||[{type:"ping"}]).map(async c => {
     // Wrap every check in a try/catch so one malformed check (bad URL, etc.)
@@ -1783,6 +1822,7 @@ async function runChecks(def) {
       if (c.type==="omada_lte")     return await omadaLteCheck(c.controller_id, c.site_id, c.customer_id, c.site_name, c.customer_name, c.probe_ip || null);
       if (c.type==="omada_device")  return await omadaDeviceCheck(c.controller_id, c.site_id, c.customer_id, c.site_name, c.customer_name, c.device_mac, c.device_name);
       if (c.type==="square_pos")   return await squarePosCheck(c.account_id||0, c.location_id, c.device_id||"", c.timeout, c.access_token||"");
+      if (c.type==="script")       return await scriptCheck(c.command, c.timeout);
       return { type:c.type, ok:false, detail:"unknown check type" };
     } catch(e) {
       return { type:c.type, ok:false, detail:`check error: ${e.message}` };
@@ -1813,6 +1853,7 @@ async function recordHistory(def, checks, overall) {
                   : ch.type === "omada_lte"     ? "omada_lte"
                   : ch.type === "omada_device"  ? `omada_device:${ch.device_name||ch.device_mac||"?"}`
                   : ch.type === "square_pos"    ? `square_pos:${ch.location_id||"?"}`
+                  : ch.type === "script"        ? `script`
                   : ch.type;
       await db.query(
         "INSERT INTO status_history (server_id, check_type, ok, response_ms, detail, checked_at) VALUES (?,?,?,?,?,?)",
@@ -2873,6 +2914,14 @@ app.get("/api/admin/servers", requireAuth, async (req, res) => {
 app.post("/api/admin/servers", requireAuth, async (req, res) => {
   const { name, host, description, category, sub_category, tags, checks, group_ids, poll_interval_sec, failure_threshold } = req.body;
   if (!name || !host) return res.status(400).json({ error:"name and host are required" });
+  if (Array.isArray(checks)) {
+    for (const c of checks) {
+      if (c.type === "script") {
+        if (req.session.role !== "admin") return res.status(403).json({ error:"Only admins can create script checks" });
+        if (!c.command || /[|&;$`<>(){}!\\\n\r]/.test(c.command)) return res.status(400).json({ error:"Script command contains disallowed characters" });
+      }
+    }
+  }
   const wantGroups = Array.isArray(group_ids) ? group_ids.map(g => parseInt(g)).filter(Number.isFinite) : [];
   const interval = Math.max(10, Math.min(3600, parseInt(poll_interval_sec) || 30));
   const threshold = Math.max(1, Math.min(10, parseInt(failure_threshold) || 1));
@@ -2903,6 +2952,14 @@ app.post("/api/admin/servers", requireAuth, async (req, res) => {
 app.put("/api/admin/servers/:id", requireAuth, async (req, res) => {
   const { name, host, description, category, sub_category, tags, checks, group_ids, poll_interval_sec, failure_threshold } = req.body;
   if (!name || !host) return res.status(400).json({ error:"name and host are required" });
+  if (Array.isArray(checks)) {
+    for (const c of checks) {
+      if (c.type === "script") {
+        if (req.session.role !== "admin") return res.status(403).json({ error:"Only admins can create script checks" });
+        if (!c.command || /[|&;$`<>(){}!\\\n\r]/.test(c.command)) return res.status(400).json({ error:"Script command contains disallowed characters" });
+      }
+    }
+  }
   const wantGroups = Array.isArray(group_ids) ? group_ids.map(g => parseInt(g)).filter(Number.isFinite) : [];
   const interval = Math.max(10, Math.min(3600, parseInt(poll_interval_sec) || 30));
   const threshold = Math.max(1, Math.min(10, parseInt(failure_threshold) || 1));
@@ -4643,6 +4700,165 @@ app.use((err, req, res, next) => {
 });
 
 // -- Boot ----------------------------------------------------------------------
+// ── Import / Export ────────────────────────────────────────────────────────────
+app.get("/api/admin/export", requireAdmin, async (req, res) => {
+  try {
+    const [servers] = await db.query("SELECT * FROM status_servers ORDER BY sort_order, created_at");
+    const [groupMap] = await db.query("SELECT server_id, group_id FROM status_server_group_map");
+    const gByServer = {};
+    for (const row of groupMap) {
+      if (!gByServer[row.server_id]) gByServer[row.server_id] = [];
+      gByServer[row.server_id].push(row.group_id);
+    }
+    const exported = servers.map(s => ({
+      name:              s.name,
+      host:              s.host,
+      description:       s.description || "",
+      category:          s.category || "",
+      sub_category:      s.sub_category || "",
+      tags:              (() => { try { return JSON.parse(s.tags||"[]"); } catch(e) { return []; } })(),
+      checks:            (() => { try { return JSON.parse(s.checks||"[]"); } catch(e) { return [{type:"ping"}]; } })(),
+      poll_interval_sec: s.poll_interval_sec || 30,
+      failure_threshold: s.failure_threshold || 1,
+      lat:               s.lat || null,
+      lng:               s.lng || null,
+      group_ids:         gByServer[s.id] || []
+    }));
+    const date = new Date().toISOString().slice(0, 10);
+    res.setHeader("Content-Disposition", `attachment; filename="servers-export-${date}.json"`);
+    res.json({ version: "1.0", exported_at: new Date().toISOString(), servers: exported });
+  } catch(e) { res.status(500).json({ error: e.message }); }
+});
+
+app.post("/api/admin/import", requireAdmin, async (req, res) => {
+  const { servers, mode = "skip" } = req.body;
+  if (!Array.isArray(servers)) return res.status(400).json({ error: "Expected { servers: [...] }" });
+  let added = 0, skipped = 0, errors = [];
+  for (const s of servers) {
+    if (!s.name || !s.host) { errors.push(`Skipped: missing name or host`); continue; }
+    try {
+      const [existing] = await db.query("SELECT id FROM status_servers WHERE name=?", [s.name]);
+      const interval  = Math.max(10, Math.min(3600, parseInt(s.poll_interval_sec)||30));
+      const threshold = Math.max(1,  Math.min(10,   parseInt(s.failure_threshold)||1));
+      const tags    = JSON.stringify(Array.isArray(s.tags) ? s.tags : []);
+      const checks  = JSON.stringify(Array.isArray(s.checks) && s.checks.length ? s.checks : [{type:"ping"}]);
+      const lat     = s.lat ? parseFloat(s.lat) : null;
+      const lng     = s.lng ? parseFloat(s.lng) : null;
+      const cat     = (s.category||"").trim() || null;
+      const subCat  = (s.sub_category||"").trim() || null;
+      if (existing.length) {
+        if (mode === "skip") { skipped++; continue; }
+        const id = existing[0].id;
+        await db.query(
+          "UPDATE status_servers SET host=?,description=?,category=?,sub_category=?,tags=?,checks=?,poll_interval_sec=?,failure_threshold=?,lat=?,lng=?,updated_at=NOW() WHERE id=?",
+          [s.host, s.description||"", cat, subCat, tags, checks, interval, threshold, lat, lng, id]
+        );
+        if (Array.isArray(s.group_ids) && s.group_ids.length) await setServerGroupIds(id, s.group_ids);
+        added++;
+      } else {
+        const id = s.name.toLowerCase().replace(/[^a-z0-9]+/g,"-").replace(/^-|-$/g,"") + "-" + Date.now() + "-" + Math.floor(Math.random()*9999);
+        await db.query(
+          "INSERT INTO status_servers (id,name,host,description,category,sub_category,tags,checks,poll_interval_sec,failure_threshold,lat,lng) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)",
+          [id, s.name, s.host, s.description||"", cat, subCat, tags, checks, interval, threshold, lat, lng]
+        );
+        if (Array.isArray(s.group_ids) && s.group_ids.length) await setServerGroupIds(id, s.group_ids);
+        added++;
+      }
+    } catch(e) { errors.push(`${s.name}: ${e.message}`); }
+  }
+  await loadConfig();
+  addAuditLog({ userId: req.session.userId, username: req.session.username, action:"servers.import", resourceType:"server", detail:`imported ${added}, skipped ${skipped}`, ip: req.ip });
+  res.json({ ok:true, added, skipped, errors });
+});
+
+// ── API Key Authentication ──────────────────────────────────────────────────────
+// Key format: ssk_<64 hex chars>   Stored as SHA-256 hash (no salt needed — 256-bit random)
+function requireApiKey(scope = "read") {
+  return async (req, res, next) => {
+    const auth  = (req.headers["authorization"] || "").trim();
+    const xKey  = (req.headers["x-api-key"] || "").trim();
+    const rawKey = auth.startsWith("Bearer ") ? auth.slice(7).trim() : xKey;
+    if (!rawKey) return res.status(401).json({ error: "API key required. Pass Authorization: Bearer <key> or X-API-Key: <key>" });
+    try {
+      const hash  = require("crypto").createHash("sha256").update(rawKey).digest("hex");
+      const [rows] = await db.query("SELECT * FROM status_api_keys WHERE key_hash=?", [hash]);
+      if (!rows.length) return res.status(401).json({ error: "Invalid API key" });
+      const key = rows[0];
+      if (scope === "write" && key.scope !== "write") return res.status(403).json({ error: "This key has read-only scope" });
+      db.query("UPDATE status_api_keys SET last_used_at=NOW() WHERE id=?", [key.id]).catch(() => {});
+      req.apiKey = key;
+      next();
+    } catch(e) { res.status(500).json({ error: e.message }); }
+  };
+}
+
+// v1 read endpoint — returns current status of all visible servers
+app.get("/api/v1/status", requireApiKey("read"), (req, res) => {
+  const out = Object.entries(serverStatus).map(([id, s]) => ({
+    id,
+    name:         s.name,
+    status:       s.overall,
+    last_checked: s.lastChecked,
+    checks:       (s.checks||[]).map(c => ({ type:c.type, ok:c.ok, detail:c.detail||null, response_ms:c.response_ms||null }))
+  }));
+  res.json(out);
+});
+
+// v1 read endpoint — single server
+app.get("/api/v1/status/:id", requireApiKey("read"), (req, res) => {
+  const s = serverStatus[req.params.id];
+  if (!s) return res.status(404).json({ error: "Server not found" });
+  res.json({ id: req.params.id, name: s.name, status: s.overall, last_checked: s.lastChecked,
+    checks: (s.checks||[]).map(c => ({ type:c.type, ok:c.ok, detail:c.detail||null, response_ms:c.response_ms||null })) });
+});
+
+// v1 write endpoint — CI/CD pipelines push external status
+app.post("/api/v1/servers/:id/push-status", requireApiKey("write"), async (req, res) => {
+  const { status, detail } = req.body;
+  if (!["up","down","degraded"].includes(status)) return res.status(400).json({ error:"status must be up|down|degraded" });
+  const def = serverConfig.find(s => s.id === req.params.id);
+  if (!def) return res.status(404).json({ error:"Server not found" });
+  const result = { type:"external", ok: status==="up", detail: (detail||`pushed via API: ${status}`).slice(0,255), response_ms:null };
+  serverStatus[def.id] = { ...(serverStatus[def.id]||{}), overall:status, checks:[result], lastChecked: new Date().toISOString() };
+  await recordHistory(def, [result], status).catch(() => {});
+  const all = Object.values(serverStatus);
+  sseClients.filter(r => !r.writableEnded).forEach(r => { try { r.write(`data: ${JSON.stringify(all)}\n\n`); } catch(_) {} });
+  res.json({ ok:true });
+});
+
+// Admin API key management
+app.get("/api/admin/api-keys", requireAdmin, async (req, res) => {
+  try {
+    const [rows] = await db.query("SELECT id,name,key_prefix,scope,last_used_at,created_at FROM status_api_keys ORDER BY created_at DESC");
+    res.json(rows);
+  } catch(e) { res.status(500).json({ error:e.message }); }
+});
+
+app.post("/api/admin/api-keys", requireAdmin, async (req, res) => {
+  const { name, scope = "read" } = req.body;
+  if (!name) return res.status(400).json({ error:"Name is required" });
+  if (!["read","write"].includes(scope)) return res.status(400).json({ error:"scope must be read or write" });
+  try {
+    const rawKey   = "ssk_" + require("crypto").randomBytes(32).toString("hex");
+    const hash     = require("crypto").createHash("sha256").update(rawKey).digest("hex");
+    const prefix   = rawKey.slice(0, 12);
+    await db.query("INSERT INTO status_api_keys (name,key_hash,key_prefix,scope,created_by) VALUES (?,?,?,?,?)",
+      [name, hash, prefix, scope, req.session.userId]);
+    addAuditLog({ userId:req.session.userId, username:req.session.username, action:"api_key.create", resourceType:"api_key", resourceName:name, detail:scope, ip:req.ip });
+    res.json({ ok:true, key: rawKey }); // shown once only
+  } catch(e) { res.status(500).json({ error:e.message }); }
+});
+
+app.delete("/api/admin/api-keys/:id", requireAdmin, async (req, res) => {
+  try {
+    const [rows] = await db.query("SELECT name FROM status_api_keys WHERE id=?", [req.params.id]);
+    if (!rows.length) return res.status(404).json({ error:"API key not found" });
+    await db.query("DELETE FROM status_api_keys WHERE id=?", [req.params.id]);
+    addAuditLog({ userId:req.session.userId, username:req.session.username, action:"api_key.delete", resourceType:"api_key", resourceName:rows[0].name, ip:req.ip });
+    res.json({ ok:true });
+  } catch(e) { res.status(500).json({ error:e.message }); }
+});
+
 (async () => {
   await initDB();
   await loadConfig();

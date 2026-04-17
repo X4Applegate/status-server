@@ -585,9 +585,12 @@ body{font-family:var(--sans);background:var(--bg);color:var(--text);min-height:1
   </div>
   <div id="aListView" class="admin-section">
     <div class="drawer-toolbar">
-      <div class="admin-tabs"><button class="admin-tab active" id="tabServers" onclick="switchTab('servers')">Servers</button><button class="admin-tab" id="tabGroups" onclick="switchTab('groups')">Groups</button><button class="admin-tab" id="tabOmada" onclick="switchTab('omada')">Omada</button><button class="admin-tab" id="tabSquare" onclick="switchTab('square')">Square</button><button class="admin-tab" id="tabUsers" onclick="switchTab('users')">Users</button><button class="admin-tab" id="tabWebhooks" onclick="switchTab('webhooks')">Webhooks</button><button class="admin-tab" id="tabSettings" onclick="switchTab('settings')">Settings</button><button class="admin-tab" id="tabAudit" onclick="switchTab('audit')">Audit</button></div>
+      <div class="admin-tabs"><button class="admin-tab active" id="tabServers" onclick="switchTab('servers')">Servers</button><button class="admin-tab" id="tabGroups" onclick="switchTab('groups')">Groups</button><button class="admin-tab" id="tabOmada" onclick="switchTab('omada')">Omada</button><button class="admin-tab" id="tabSquare" onclick="switchTab('square')">Square</button><button class="admin-tab" id="tabApiKeys" onclick="switchTab('apikeys')">API Keys</button><button class="admin-tab" id="tabUsers" onclick="switchTab('users')">Users</button><button class="admin-tab" id="tabWebhooks" onclick="switchTab('webhooks')">Webhooks</button><button class="admin-tab" id="tabSettings" onclick="switchTab('settings')">Settings</button><button class="admin-tab" id="tabAudit" onclick="switchTab('audit')">Audit</button></div>
       <span style="font-size:11px;color:var(--text-2)" id="aCount"></span>
       <div class="drawer-spacer"></div>
+      <button class="btn" id="importBtn" onclick="triggerImport()" style="font-size:11px;padding:5px 11px;display:none" title="Import servers from JSON">⬆ Import</button>
+      <input type="file" id="importFileInput" accept=".json" style="display:none" onchange="handleImportFile(this)">
+      <button class="btn" id="exportBtn" onclick="exportServers()" style="font-size:11px;padding:5px 11px;display:none" title="Export all servers to JSON">⬇ Export</button>
       <button class="btn btn-primary" id="addBtn" onclick="showServerForm(null)" style="font-size:11px;padding:5px 11px"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" style="width:12px;height:12px"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg><span id="addBtnLabel">Add Server</span></button>
     </div>
     <div class="drawer-stat-bar" id="drawerStatBar">
@@ -755,6 +758,13 @@ body{font-family:var(--sans);background:var(--bg);color:var(--text);min-height:1
       </div>
     </div>
   </div>
+  <!-- API Keys panel -->
+  <div id="aApiKeysView" class="admin-section" style="display:none">
+    <div class="drawer-body" id="apiKeysBody" style="padding:20px">
+      <div class="empty-state">Loading…</div>
+    </div>
+  </div>
+
   <div id="aGroupFormView" class="admin-section" style="display:none">
     <div class="drawer-body">
       <div class="form-wrap">
@@ -1119,7 +1129,7 @@ function isViewer(){ return sessionRole === "viewer"; }
 // Users tab stays admin-only.
 function applyRoleVisibility(){
   if (isAdmin()) return;  // admins see everything; nothing to hide
-  ["tabUsers", "tabSettings", "tabAudit"].forEach(id => {
+  ["tabUsers", "tabSettings", "tabAudit", "tabApiKeys"].forEach(id => {
     const el = document.getElementById(id);
     if (el) el.style.display = "none";
   });
@@ -1782,33 +1792,38 @@ function closeAdmin(){
 }
 
 async function switchTab(tab){
-  // Viewers can access Servers, Omada, Square, Webhooks, and Groups. Users + Settings + Audit tabs bounce back.
+  // Viewers can access Servers, Omada, Square, Webhooks, and Groups. Admin-only tabs bounce back.
   if (!isAdmin() && !["servers","omada","square","webhooks","groups"].includes(tab)) tab = "servers";
   currentTab = tab;
-  serverFormReturn = null;  // switching tabs clears any pending return target
+  serverFormReturn = null;
   document.getElementById("tabServers").classList.toggle("active",  tab === "servers");
   document.getElementById("tabGroups").classList.toggle("active",   tab === "groups");
   document.getElementById("tabOmada").classList.toggle("active",    tab === "omada");
   document.getElementById("tabSquare").classList.toggle("active",   tab === "square");
+  document.getElementById("tabApiKeys").classList.toggle("active",  tab === "apikeys");
   document.getElementById("tabUsers").classList.toggle("active",    tab === "users");
   document.getElementById("tabWebhooks").classList.toggle("active", tab === "webhooks");
   document.getElementById("tabSettings").classList.toggle("active", tab === "settings");
   document.getElementById("tabAudit").classList.toggle("active",    tab === "audit");
-  const labels = { servers: "Add Server", groups: "Add Group", omada: "Add Controller", square: "Add Account", users: "Add User", webhooks: "Add Webhook", settings: "", audit: "" };
-  document.getElementById("addBtnLabel").textContent  = labels[tab] || "";
-  // Hide Add button for viewers on admin-only-create tabs, Settings, and Audit
-  const hideAdd = (!isAdmin() && (tab === "groups" || tab === "users")) || tab === "settings" || tab === "audit";
+  const labels = { servers:"Add Server", groups:"Add Group", omada:"Add Controller", square:"Add Account", apikeys:"Generate Key", users:"Add User", webhooks:"Add Webhook", settings:"", audit:"" };
+  document.getElementById("addBtnLabel").textContent = labels[tab] || "";
+  const hideAdd = (!isAdmin() && (tab==="groups"||tab==="users")) || tab==="settings" || tab==="audit";
   document.getElementById("addBtn").style.display = hideAdd ? "none" : "";
-  document.getElementById("addBtn").onclick           =
+  document.getElementById("addBtn").onclick =
     tab === "servers"  ? () => showServerForm(null) :
     tab === "groups"   ? () => showGroupForm(null)  :
-    tab === "omada"    ? () => showOmadaForm(null)   :
+    tab === "omada"    ? () => showOmadaForm(null)  :
     tab === "square"   ? () => showSquareForm(null) :
+    tab === "apikeys"  ? () => showApiKeyForm()     :
     tab === "users"    ? () => showUserForm(null)   :
-    tab === "settings" ? () => {} :
-    tab === "audit"    ? () => {} :
+    tab === "settings" ? () => {}                   :
+    tab === "audit"    ? () => {}                   :
                          () => showWebhookForm(null);
-  // Show list view, hide forms
+  // Show/hide import+export buttons (servers tab only, admin only)
+  const showIE = tab === "servers" && isAdmin();
+  document.getElementById("importBtn").style.display = showIE ? "" : "none";
+  document.getElementById("exportBtn").style.display = showIE ? "" : "none";
+  // Show list view, hide all forms
   document.getElementById("aListView").style.display        = "flex";
   document.getElementById("aFormView").style.display        = "none";
   document.getElementById("aUserFormView").style.display    = "none";
@@ -1817,7 +1832,7 @@ async function switchTab(tab){
   document.getElementById("aOmadaFormView").style.display   = "none";
   document.getElementById("aOmadaSitesView").style.display  = "none";
   document.getElementById("aSquareFormView").style.display  = "none";
-  // Show search bar and stat bar only on servers tab; reset when switching away
+  document.getElementById("aApiKeysView").style.display     = "none";
   const searchBar = document.getElementById("serverSearchBar");
   const statBar   = document.getElementById("drawerStatBar");
   if (tab === "servers") {
@@ -1828,16 +1843,15 @@ async function switchTab(tab){
     statBar.classList.remove("visible");
     clearServerSearch();
   }
-  // Load content
   if      (tab === "servers")  await loadServerList();
   else if (tab === "groups")   await loadGroupList();
   else if (tab === "omada")    await loadOmadaList();
   else if (tab === "square")   await loadSquareList();
+  else if (tab === "apikeys")  await loadApiKeyList();
   else if (tab === "users")    await loadUserList();
   else if (tab === "settings") await loadSettings();
   else if (tab === "audit")    await loadAuditLog();
   else                         await loadWebhookList();
-  // Double-RAF ensures the browser has finished layout before checking scroll state
   requestAnimationFrame(() => requestAnimationFrame(updatePanelScrollBtns));
 }
 
@@ -2140,6 +2154,10 @@ function renderCrows(){
       detail = sqSelect
              + `<input class="finput" placeholder="Location ID" value="${ck.location_id||""}" oninput="upCk(${i},'location_id',this.value)">`
              + `<input class="finput" placeholder="Device ID (optional — blank = any device)" value="${ck.device_id||""}" oninput="upCk(${i},'device_id',this.value)">`;
+    } else if (ck.type === "script") {
+      detail = `<div style="width:100%"><div style="display:flex;align-items:center;gap:6px;background:var(--orange-soft);border:1px solid rgba(255,140,42,.3);border-radius:6px;padding:5px 9px;margin-bottom:6px;font-size:11px;color:var(--orange)">⚠️ Script checks run commands on the monitor host. Admin only.</div>`
+             + `<input class="finput" placeholder="Command  e.g. /opt/checks/my-check.sh" value="${ck.command||""}" oninput="upCk(${i},'command',this.value)" style="font-family:var(--mono);font-size:11px">`
+             + `<input class="finput" type="number" placeholder="Timeout ms (default 5000)" value="${ck.timeout||""}" oninput="upCk(${i},'timeout',parseInt(this.value)||5000)" style="max-width:200px"></div>`;
     }
     return "<div class=\"crow\">"
       + "<select class=\"fselect\" onchange=\"changeCT(" + i + ",this.value)\">"
@@ -2152,6 +2170,7 @@ function renderCrows(){
       + "<option value=\"omada_lte\" "     + sel("omada_lte")     + ">Omada LTE / Cellular</option>"
       + "<option value=\"omada_device\" "  + sel("omada_device")  + ">Omada AP / Switch</option>"
       + "<option value=\"square_pos\" "    + sel("square_pos")    + ">Square POS</option>"
+      + (isAdmin() ? "<option value=\"script\" " + sel("script") + ">Script (exit code)</option>" : "")
       + "</select>"
       + "<div class=\"crow-detail\">" + detail + "</div>"
       + "<button class=\"rm-check\" onclick=\"rmCk(" + i + ")\">x</button>"
@@ -3645,6 +3664,127 @@ async function askDelSquare(id, name){
     adminSquare = [];
     await loadSquareList();
   } catch(e) { showToast(e.message, "error"); }
+}
+
+// ── Import / Export ───────────────────────────────────────────────────────────
+function exportServers() {
+  const a = document.createElement("a");
+  a.href = "/api/admin/export";
+  a.download = "";
+  a.click();
+}
+function triggerImport() { document.getElementById("importFileInput").click(); }
+async function handleImportFile(input) {
+  const file = input.files[0];
+  if (!file) return;
+  input.value = "";
+  let data;
+  try { data = JSON.parse(await file.text()); } catch(e) { toast("Invalid JSON file", "error"); return; }
+  const servers = data.servers || (Array.isArray(data) ? data : null);
+  if (!servers) { toast("No servers array found in file", "error"); return; }
+  const mode = confirm(`Import ${servers.length} server(s)?\n\nOK = skip existing names\nCancel = overwrite existing`) ? "skip" : "overwrite";
+  try {
+    const r = await fetch("/api/admin/import", { method:"POST", headers:{"Content-Type":"application/json"}, body: JSON.stringify({ servers, mode }) });
+    const d = await r.json();
+    if (!r.ok) { toast(d.error || "Import failed", "error"); return; }
+    const msg = `Imported ${d.added} server${d.added!==1?"s":""}, skipped ${d.skipped}${d.errors.length?" ("+d.errors.length+" errors)":""}`;
+    toast(msg, d.errors.length ? "warn" : "success");
+    cacheDel("admin-servers"); adminServers = [];
+    await loadServerList();
+  } catch(e) { toast(e.message, "error"); }
+}
+
+// ── API Keys ──────────────────────────────────────────────────────────────────
+async function loadApiKeyList() {
+  const el = document.getElementById("apiKeysBody");
+  document.getElementById("aApiKeysView").style.display = "";
+  document.getElementById("aListView").style.display    = "none";
+  document.getElementById("addBtn").style.display       = "";
+  el.innerHTML = `<div class="empty-state">Loading…</div>`;
+  try {
+    const r = await fetch("/api/admin/api-keys");
+    if (!r.ok) { el.innerHTML = `<div class="empty-state">Failed to load.</div>`; return; }
+    const keys = await r.json();
+    if (!keys.length) {
+      el.innerHTML = `<div class="empty-state">No API keys yet. Click <strong>Generate Key</strong> to create one.</div>
+        <div style="padding:0 20px 20px">
+          <div style="font-size:12px;color:var(--text-2);line-height:1.7">
+            Use API keys for machine-to-machine access:<br>
+            <code style="background:var(--surface2);padding:2px 6px;border-radius:4px;font-size:11px">GET /api/v1/status</code> — read server status<br>
+            <code style="background:var(--surface2);padding:2px 6px;border-radius:4px;font-size:11px">POST /api/v1/servers/:id/push-status</code> — push status from CI/CD (write scope)
+          </div>
+        </div>`;
+      return;
+    }
+    const fmtDate = d => d ? new Date(d).toLocaleString() : "Never";
+    el.innerHTML = `
+      <div style="padding:16px 20px">
+        <div style="font-size:12px;color:var(--text-2);margin-bottom:16px;line-height:1.7">
+          Endpoints: <code style="background:var(--surface2);padding:1px 5px;border-radius:4px">GET /api/v1/status</code> &nbsp;
+          <code style="background:var(--surface2);padding:1px 5px;border-radius:4px">POST /api/v1/servers/:id/push-status</code> (write scope).<br>
+          Pass key as <code style="background:var(--surface2);padding:1px 5px;border-radius:4px">Authorization: Bearer &lt;key&gt;</code> or <code style="background:var(--surface2);padding:1px 5px;border-radius:4px">X-API-Key: &lt;key&gt;</code>.
+        </div>
+        <table style="width:100%;border-collapse:collapse;font-size:12px">
+          <thead><tr style="color:var(--text-2);text-align:left">
+            <th style="padding:6px 8px;border-bottom:1px solid var(--border)">Name</th>
+            <th style="padding:6px 8px;border-bottom:1px solid var(--border)">Prefix</th>
+            <th style="padding:6px 8px;border-bottom:1px solid var(--border)">Scope</th>
+            <th style="padding:6px 8px;border-bottom:1px solid var(--border)">Last Used</th>
+            <th style="padding:6px 8px;border-bottom:1px solid var(--border)">Created</th>
+            <th style="padding:6px 8px;border-bottom:1px solid var(--border)"></th>
+          </tr></thead>
+          <tbody>${keys.map(k => `
+            <tr style="border-bottom:1px solid var(--border)">
+              <td style="padding:8px 8px;font-weight:500;color:var(--text-hi)">${k.name}</td>
+              <td style="padding:8px 8px;font-family:var(--mono);font-size:11px;color:var(--text-2)">${k.key_prefix}…</td>
+              <td style="padding:8px 8px"><span style="font-size:10px;font-weight:600;padding:2px 7px;border-radius:4px;${k.scope==="write"?"background:var(--orange-soft);color:var(--orange)":"background:var(--green-soft);color:var(--green)"}">${k.scope.toUpperCase()}</span></td>
+              <td style="padding:8px 8px;color:var(--text-2)">${fmtDate(k.last_used_at)}</td>
+              <td style="padding:8px 8px;color:var(--text-2)">${fmtDate(k.created_at)}</td>
+              <td style="padding:8px 8px;text-align:right"><button class="btn btn-danger" style="font-size:11px;padding:3px 9px" onclick="askDelApiKey(${k.id},'${k.name.replace(/'/g,"\\'")}')">Revoke</button></td>
+            </tr>`).join("")}
+          </tbody>
+        </table>
+      </div>`;
+  } catch(e) { el.innerHTML = `<div class="empty-state">Error: ${e.message}</div>`; }
+}
+
+function showApiKeyForm() {
+  const name  = prompt("Key name (e.g. GitHub Actions, Monitoring Bot):");
+  if (!name || !name.trim()) return;
+  const write = confirm(`Grant write scope to "${name.trim()}"?\n\nOK = write (can push status)\nCancel = read-only`);
+  createApiKey(name.trim(), write ? "write" : "read");
+}
+
+async function createApiKey(name, scope) {
+  try {
+    const r = await fetch("/api/admin/api-keys", { method:"POST", headers:{"Content-Type":"application/json"}, body:JSON.stringify({ name, scope }) });
+    const d = await r.json();
+    if (!r.ok) { toast(d.error || "Failed to create key", "error"); return; }
+    // Show the full key once in a modal-style alert
+    const box = document.createElement("div");
+    box.style.cssText = "position:fixed;inset:0;background:rgba(0,5,20,.6);backdrop-filter:blur(4px);z-index:9999;display:flex;align-items:center;justify-content:center";
+    box.innerHTML = `<div style="background:var(--surface);border:1px solid var(--border-hi);border-radius:12px;padding:28px;max-width:520px;width:90%;box-shadow:0 20px 60px rgba(0,0,0,.5)">
+      <div style="font-size:16px;font-weight:700;color:var(--text-hi);margin-bottom:8px">🔑 API Key Generated</div>
+      <div style="font-size:12px;color:var(--orange);background:var(--orange-soft);border-radius:6px;padding:8px 12px;margin-bottom:16px">⚠️ Copy this key now — it won't be shown again.</div>
+      <div style="font-family:var(--mono);font-size:12px;background:var(--surface2);border:1px solid var(--border);border-radius:6px;padding:12px;word-break:break-all;color:var(--text-hi);margin-bottom:16px;user-select:all">${d.key}</div>
+      <div style="display:flex;gap:10px;justify-content:flex-end">
+        <button class="btn" onclick="navigator.clipboard.writeText('${d.key}').then(()=>toast('Copied!','success'))">Copy</button>
+        <button class="btn btn-primary" onclick="this.closest('div[style*=fixed]').remove();loadApiKeyList()">Done</button>
+      </div>
+    </div>`;
+    document.body.appendChild(box);
+  } catch(e) { toast(e.message, "error"); }
+}
+
+async function askDelApiKey(id, name) {
+  if (!confirm(`Revoke API key "${name}"?\n\nAny integrations using this key will immediately lose access.`)) return;
+  try {
+    const r = await fetch(`/api/admin/api-keys/${id}`, { method:"DELETE" });
+    const d = await r.json();
+    if (!r.ok) { toast(d.error || "Delete failed", "error"); return; }
+    toast(`Key "${name}" revoked`, "success");
+    await loadApiKeyList();
+  } catch(e) { toast(e.message, "error"); }
 }
 
 // ── Audit log ────────────────────────────────────────────────────────────────
