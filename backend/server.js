@@ -4502,9 +4502,13 @@ function sendBadge(res, label, value, color, req) {
 app.get("/sw.js", (req, res) => {
   res.setHeader("Content-Type", "application/javascript");
   res.setHeader("Cache-Control", "no-cache");
+  // No fetch handler = SW does not intercept anything. Browser still treats the
+  // page as installable (install + activate + manifest satisfy the PWA criteria),
+  // but API calls, SSE streams, and navigations hit the network directly with
+  // zero SW involvement — so a network glitch never surfaces as a "service
+  // worker rejected the promise" error in the console.
   res.send(`self.addEventListener("install",  e => self.skipWaiting());
-self.addEventListener("activate", e => e.waitUntil(clients.claim()));
-self.addEventListener("fetch",    e => e.respondWith(fetch(e.request)));`);
+self.addEventListener("activate", e => e.waitUntil(clients.claim()));`);
 });
 
 // Group icon — used by manifest.json and as apple-touch-icon.
@@ -4885,29 +4889,6 @@ app.get("/status.html", (req, res) => res.redirect(301, "/status"));
 app.get("/admin.html",  (req, res) => res.redirect(301, "/admin"));
 app.get("/login.html",  (req, res) => res.redirect(301, "/login"));
 
-// Catch-all: redirect any non-API non-page route to /login (authed users will then bounce to /)
-app.get("/{*path}", (req, res) => {
-  if (req.path.startsWith("/api/")) {
-    return res.status(404).json({ error: "Not found" });
-  }
-  res.redirect("/login");
-});
-
-// -- Error handler (last resort) ---------------------------------------------
-// Express 4: the 4-arg signature is what marks this as an error handler.
-// Any `next(err)` or thrown error that bubbles out of a route lands here.
-// We log server-side and return a generic message so stack traces never
-// leak to the browser.
-app.use((err, req, res, next) => {
-  const msg = (err && err.message) || String(err);
-  addLog({ level:"error", server:"system", message:`Unhandled error on ${req.method} ${req.path}: ${msg}` });
-  if (res.headersSent) return next(err);
-  if (req.path && req.path.startsWith("/api/")) {
-    return res.status(500).json({ error: "Internal server error" });
-  }
-  res.status(500).send("Internal server error");
-});
-
 // -- Boot ----------------------------------------------------------------------
 // ── Import / Export ────────────────────────────────────────────────────────────
 app.get("/api/admin/export", requireAdmin, async (req, res) => {
@@ -5066,6 +5047,31 @@ app.delete("/api/admin/api-keys/:id", requireAdmin, async (req, res) => {
     addAuditLog({ userId:req.session.userId, username:req.session.username, action:"api_key.delete", resourceType:"api_key", resourceName:rows[0].name, ip:req.ip });
     res.json({ ok:true });
   } catch(e) { res.status(500).json({ error:e.message }); }
+});
+
+// Catch-all: redirect any non-API non-page route to /login (authed users will then bounce to /)
+// MUST be registered after ALL routes — Express matches in order, so any route declared
+// below this point would be shadowed by this catch-all.
+app.get("/{*path}", (req, res) => {
+  if (req.path.startsWith("/api/")) {
+    return res.status(404).json({ error: "Not found" });
+  }
+  res.redirect("/login");
+});
+
+// -- Error handler (last resort) ---------------------------------------------
+// Express 4: the 4-arg signature is what marks this as an error handler.
+// Any `next(err)` or thrown error that bubbles out of a route lands here.
+// We log server-side and return a generic message so stack traces never
+// leak to the browser.
+app.use((err, req, res, next) => {
+  const msg = (err && err.message) || String(err);
+  addLog({ level:"error", server:"system", message:`Unhandled error on ${req.method} ${req.path}: ${msg}` });
+  if (res.headersSent) return next(err);
+  if (req.path && req.path.startsWith("/api/")) {
+    return res.status(500).json({ error: "Internal server error" });
+  }
+  res.status(500).send("Internal server error");
 });
 
 (async () => {
