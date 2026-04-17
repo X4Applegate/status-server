@@ -2343,8 +2343,8 @@ async function submitForm(){
       serverFormReturn = null;
       showOmadaSites(ctrl);
     } else if (_editOpenedFromUrl) {
-      // Opened via ?edit= URL param (e.g. from the status page Edit button) — go back to /admin
-      window.location.href = "/admin";
+      // Opened via ?edit= URL param (e.g. from the status page Edit button) — go back to status page
+      window.location.href = "/";
     } else {
       showList();
     }
