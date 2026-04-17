@@ -238,6 +238,19 @@ async function loadTurnstileFromDb() {
   } catch(e) { /* settings table may not exist yet */ }
 }
 
+// -- Mapbox (map tiles for authenticated users only) --------------------------
+// Token is served only to logged-in users via /api/mapbox-token. The public
+// /dashboard/<slug> pages never see it.
+let mapboxConfig = { token: "" };
+
+async function loadMapboxFromDb() {
+  if (!db) return;
+  try {
+    const [rows] = await db.query("SELECT value FROM status_settings WHERE key_name='mapbox_token'");
+    mapboxConfig = { token: (rows[0] && rows[0].value) || "" };
+  } catch(e) { /* settings table may not exist yet */ }
+}
+
 async function verifyTurnstile(token, remoteIp) {
   if (!turnstileConfig.enabled) return { ok: true };
   if (!turnstileConfig.secret_key) return { ok: false, error: "Turnstile is enabled but not configured" };
@@ -939,6 +952,7 @@ async function initDB() {
   await loadSmtpFromDb();
   await loadTurnstileFromDb();
   await loadGoogleOAuthFromDb();
+  await loadMapboxFromDb();
 
   // No longer auto-creates admin — first user signs up via /login
 
@@ -3083,6 +3097,32 @@ app.post("/api/admin/settings/google-oauth", requireAdmin, async (req, res) => {
     addLog({ level:"info", server:"admin", message:`Google OAuth ${newEnabled ? "enabled" : "disabled"} by ${req.session.username}` });
     res.json({ ok: true, enabled: newEnabled });
   } catch(e) { res.status(500).json({ error: e.message }); }
+});
+
+// Mapbox token — admin reads masked value, writes plain; only conditionally
+// overwrites when the posted value is not the mask.
+app.get("/api/admin/settings/mapbox", requireAdmin, async (req, res) => {
+  res.json({ token: mapboxConfig.token ? "********" : "" });
+});
+
+app.post("/api/admin/settings/mapbox", requireAdmin, async (req, res) => {
+  const { token } = req.body;
+  try {
+    const finalToken = (token && token !== "********") ? String(token).trim() : mapboxConfig.token;
+    await db.query(
+      "INSERT INTO status_settings (key_name, value) VALUES (?, ?) ON DUPLICATE KEY UPDATE value=VALUES(value)",
+      ["mapbox_token", finalToken || ""]
+    );
+    mapboxConfig = { token: finalToken || "" };
+    addLog({ level:"info", server:"admin", message:`Mapbox token ${finalToken ? "updated" : "cleared"} by ${req.session.username}` });
+    res.json({ ok: true, configured: !!mapboxConfig.token });
+  } catch(e) { res.status(500).json({ error: e.message }); }
+});
+
+// Authenticated-only token fetch for the map tile layer. Viewers + admins may
+// read it; anonymous visitors on /dashboard/<slug> get 401 and fall back to OSM.
+app.get("/api/mapbox-token", requireAuth, (req, res) => {
+  res.json({ token: mapboxConfig.token || "" });
 });
 
 app.post("/api/admin/settings/smtp/test", requireAdmin, async (req, res) => {
