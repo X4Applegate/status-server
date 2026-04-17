@@ -675,7 +675,8 @@ async function _initMainMap() {
       container: "mapMainContainer",
       style,
       center: [0, 20],
-      zoom: 2
+      zoom: 2,
+      validateStyle: false
     });
     _mainMap.addControl(new maplibregl.NavigationControl(), "top-right");
     _mainMap.on("load", () => { _renderMainMarkers(); setTimeout(() => _mainMap.resize(), 50); });
@@ -766,7 +767,8 @@ async function _initDetailMap(lat, lng, name, status) {
       style,
       center: [lng, lat],
       zoom: 13,
-      attributionControl: false
+      attributionControl: false,
+      validateStyle: false
     });
     _detailMap.addControl(new maplibregl.NavigationControl(), "top-right");
     _detailMap.on("load", () => {

@@ -3992,7 +3992,7 @@ async function toggleAdminMap() {
     _loadAdminMapLibre(async () => {
       const style = await _getAdminMapStyle();
       if (!_adminMap) {
-        _adminMap = new maplibregl.Map({ container: "adminMapContainer", style, center: [0, 20], zoom: 2 });
+        _adminMap = new maplibregl.Map({ container: "adminMapContainer", style, center: [0, 20], zoom: 2, validateStyle: false });
         _adminMap.addControl(new maplibregl.NavigationControl(), "top-right");
         _adminMap.on("load", () => { _adminMap.resize(); _renderAdminMapMarkers(); });
       } else {
