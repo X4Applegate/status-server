@@ -1775,12 +1775,14 @@ let _adminMap = null, _adminMarkers = [], _adminMapActive = false;
   es.onerror   = () => { es.close(); setTimeout(connectStatus, 5000); };
 })();
 
-// SSE - logs
-(function connectLogs(){
-  const es = new EventSource("/api/log-events");
-  es.onmessage = e => addLog(JSON.parse(e.data));
-  es.onerror   = () => { es.close(); setTimeout(connectLogs, 5000); };
-})();
+// SSE - logs (admin only — /api/log-events returns 403 for viewers)
+if (isAdmin()) {
+  (function connectLogs(){
+    const es = new EventSource("/api/log-events");
+    es.onmessage = e => addLog(JSON.parse(e.data));
+    es.onerror   = () => { es.close(); setTimeout(connectLogs, 5000); };
+  })();
+}
 
 async function triggerRefresh(){
   const b = document.getElementById("rfBtn");
