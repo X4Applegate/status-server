@@ -3971,14 +3971,9 @@ function _loadAdminMapLibre(cb) {
   document.head.appendChild(s);
 }
 
-async function _getAdminMapStyle() {
-  try {
-    const r = await fetch("/api/mapbox-token");
-    if (r.ok) {
-      const d = await r.json();
-      if (d.token) return `https://api.mapbox.com/styles/v1/mapbox/dark-v11?access_token=${d.token}`;
-    }
-  } catch(e) {}
+function _getAdminMapStyle() {
+  // MapLibre GL JS does not support mapbox:// URL schemes, so we always use
+  // a native MapLibre-compatible style. Carto dark-matter is free and requires no API key.
   return "https://basemaps.cartocdn.com/gl/dark-matter-gl-style/style.json";
 }
 
@@ -3990,7 +3985,7 @@ async function toggleAdminMap() {
     if (mapView) mapView.classList.add("active");
     if (btn)     { btn.textContent = "📋 List"; btn.classList.add("active"); }
     _loadAdminMapLibre(async () => {
-      const style = await _getAdminMapStyle();
+      const style = _getAdminMapStyle();
       if (!_adminMap) {
         _adminMap = new maplibregl.Map({ container: "adminMapContainer", style, center: [0, 20], zoom: 2, validateStyle: false });
         _adminMap.addControl(new maplibregl.NavigationControl(), "top-right");

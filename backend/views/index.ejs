@@ -627,17 +627,9 @@ let _mainMap    = null;
 let _mainMarkers = [];
 let _mapActive  = false;
 
-// Resolve which style URL to use — Mapbox dark if token set, CARTO GL otherwise
-async function _getMapStyle() {
-  if (sidebarSession.loggedIn && !GROUP_SLUG) {
-    try {
-      const r = await fetch("/api/mapbox-token");
-      if (r.ok) {
-        const d = await r.json();
-        if (d && d.token) return `https://api.mapbox.com/styles/v1/mapbox/dark-v11?access_token=${encodeURIComponent(d.token)}`;
-      }
-    } catch(e) {}
-  }
+// MapLibre GL JS does not support mapbox:// URL schemes used inside Mapbox-hosted
+// styles, so we always use a native MapLibre-compatible style.
+function _getMapStyle() {
   return "https://basemaps.cartocdn.com/gl/dark-matter-gl-style/style.json";
 }
 
@@ -670,7 +662,7 @@ function toggleMapView() {
 
 async function _initMainMap() {
   _loadMapLibre(async () => {
-    const style = await _getMapStyle();
+    const style = _getMapStyle();
     _mainMap = new maplibregl.Map({
       container: "mapMainContainer",
       style,
@@ -761,7 +753,7 @@ async function _initDetailMap(lat, lng, name, status) {
   if (!container) return;
   if (_detailMap) { try { _detailMap.remove(); } catch(e) {} _detailMap = null; }
   _loadMapLibre(async () => {
-    const style = await _getMapStyle();
+    const style = _getMapStyle();
     _detailMap = new maplibregl.Map({
       container,
       style,
