@@ -267,6 +267,12 @@ body::before{content:'';position:fixed;inset:0;pointer-events:none;background:ra
 .detail-map-wrap{border-radius:10px;overflow:hidden;height:180px;border:1px solid var(--border);margin-bottom:24px;position:relative}
 .detail-map-wrap .maplibregl-map{width:100%;height:180px}
 
+/* -- MAP POPUP DARK THEME -- */
+.maplibregl-popup-content{background:#0d1829!important;border:1px solid #1e2d45!important;border-radius:10px!important;padding:10px 14px!important;box-shadow:0 8px 28px rgba(0,0,0,.6)!important;color:#e8eaf0!important}
+.maplibregl-popup-tip{border-top-color:#0d1829!important;border-bottom-color:#0d1829!important}
+.maplibregl-popup-close-button{color:#5e7a99!important;font-size:16px!important;line-height:1!important;top:6px!important;right:8px!important}
+.maplibregl-popup-close-button:hover{color:#e8eaf0!important;background:none!important}
+
 /* -- SERVER DETAIL -- */
 .detail-header{display:flex;align-items:flex-start;justify-content:space-between;margin-bottom:24px;gap:16px;flex-wrap:wrap}
 .detail-name{font-size:22px;font-weight:700;color:var(--text-white);letter-spacing:-.02em}
@@ -706,15 +712,15 @@ function _renderMainMarkers() {
     }
 
     // Popup HTML — single row per server
-    const rows = group.map(s => {
+    const rows = group.map((s, idx) => {
       const c = colorMap[s.overall] || colorMap.pending;
       const lastMs = (s.checks||[]).reduce((b,ck) => (ck.response_ms&&(b===null||ck.response_ms<b))?ck.response_ms:b, null);
-      return `<div style="padding:6px 0;${group.length>1?"border-top:1px solid #1e2d45":""}">
-        <div style="font-weight:700;font-size:13px;color:#e8eaf0;margin-bottom:2px">${s.name}</div>
-        <div style="display:flex;align-items:center;gap:8px">
-          <span style="color:${c};font-weight:600;font-size:11px">${(s.overall||"pending").toUpperCase()}</span>
-          ${sidebarSession.loggedIn && s.host ? `<span style="font-size:11px;color:#888">${s.host}</span>` : ""}
-          ${lastMs!=null?`<span style="font-size:11px;color:#888">${lastMs}ms</span>`:""}
+      return `<div style="padding:${idx===0?"2px 0 6px":"6px 0"};${idx>0?"border-top:1px solid #1e2d45":""}">
+        <div style="font-weight:600;font-size:13px;color:#ffffff;margin-bottom:3px;line-height:1.3">${s.name}</div>
+        <div style="display:flex;align-items:center;gap:10px">
+          <span style="color:${c};font-weight:700;font-size:11px;letter-spacing:.04em">${(s.overall||"pending").toUpperCase()}</span>
+          ${sidebarSession.loggedIn && s.host ? `<span style="font-size:11px;color:#7a9abf">${s.host}</span>` : ""}
+          ${lastMs!=null?`<span style="font-size:11px;color:#7a9abf">${lastMs}ms</span>`:""}
         </div>
       </div>`;
     }).join("");
