@@ -1189,9 +1189,14 @@ document.addEventListener("click", (e) => {
   }
 });
 
+// Set when the edit form was opened via ?edit= URL param — tells submitForm to
+// redirect back to /admin after save instead of showing the server list.
+let _editOpenedFromUrl = false;
+
 // Auto-open the admin drawer with a specific server pre-filled for editing.
 // Used when /admin is opened with ?edit=<server_id> (from the sidebar edit button).
 async function autoOpenServerEdit(serverId){
+  _editOpenedFromUrl = true;
   try {
     openDrawer("adminDrawer");
     await switchTab("servers");
@@ -2337,6 +2342,9 @@ async function submitForm(){
       const ctrl = serverFormReturn.controller;
       serverFormReturn = null;
       showOmadaSites(ctrl);
+    } else if (_editOpenedFromUrl) {
+      // Opened via ?edit= URL param (e.g. from the status page Edit button) — go back to /admin
+      window.location.href = "/admin";
     } else {
       showList();
     }
