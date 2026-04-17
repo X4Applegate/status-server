@@ -11,7 +11,7 @@
 <link rel="apple-touch-icon" href="/api/icon/<%= groupSlug %>">
 <meta name="theme-color" content="<%= accentColor || '#2a7fff' %>">
 <% } %>
-<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY=" crossorigin=""/>
+<link href="https://unpkg.com/maplibre-gl@4/dist/maplibre-gl.css" rel="stylesheet">
 <script>
 // Pre-paint theme apply: read per-dashboard preference from localStorage if set,
 // otherwise use the server-rendered defaultTheme. Runs before any CSS so no flash.
@@ -232,7 +232,8 @@ body::before{content:'';position:fixed;inset:0;pointer-events:none;background:ra
 /* Map view */
 .map-view{display:none;flex-direction:column;flex:1;height:calc(100vh - 64px);min-height:0}
 .map-view.active{display:flex}
-#leafletContainer{flex:1;width:100%;min-height:0}
+#mapMainContainer{flex:1;width:100%;min-height:0}
+#mapMainContainer .maplibregl-map{width:100%;height:100%}
 .map-unmapped{background:var(--bg2);border-top:1px solid var(--border);padding:10px 16px;font-size:12px;color:var(--text-2)}
 /* Map toggle button */
 .map-toggle-btn{padding:5px 12px;border:1px solid var(--border-hi);border-radius:6px;color:var(--text-hi);font-size:12px;font-weight:500;background:none;cursor:pointer;transition:all .15s;white-space:nowrap}
@@ -263,8 +264,8 @@ body::before{content:'';position:fixed;inset:0;pointer-events:none;background:ra
 @keyframes fadeIn{from{opacity:0}to{opacity:1}}
 
 /* -- DETAIL MAP -- */
-.detail-map-wrap{border-radius:10px;overflow:hidden;height:180px;border:1px solid var(--border);margin-bottom:24px}
-.detail-map-wrap .leaflet-container{height:180px;background:var(--surface)}
+.detail-map-wrap{border-radius:10px;overflow:hidden;height:180px;border:1px solid var(--border);margin-bottom:24px;position:relative}
+.detail-map-wrap .maplibregl-map{width:100%;height:180px}
 
 /* -- SERVER DETAIL -- */
 .detail-header{display:flex;align-items:flex-start;justify-content:space-between;margin-bottom:24px;gap:16px;flex-wrap:wrap}
@@ -542,7 +543,7 @@ function _shade(hex, amount) {
 </div>
 
 <div id="mapView" class="map-view">
-  <div id="leafletContainer"></div>
+  <div id="mapMainContainer"></div>
   <div id="mapUnmapped" class="map-unmapped" style="display:none"></div>
 </div>
 
@@ -615,10 +616,33 @@ function updateMapBtnVisibility() {
   if (mapBtn) mapBtn.style.display = servers.some(s => s.lat!=null&&s.lng!=null) ? "" : "none";
 }
 
-// ── Map view (Leaflet) ────────────────────────────────────────────────────────
-let _leafletMap  = null;
-let _mapMarkers  = [];
-let _mapActive   = false;
+// ── Map view (MapLibre GL JS) ─────────────────────────────────────────────────
+let _mainMap    = null;
+let _mainMarkers = [];
+let _mapActive  = false;
+
+// Resolve which style URL to use — Mapbox dark if token set, CARTO GL otherwise
+async function _getMapStyle() {
+  if (sidebarSession.loggedIn && !GROUP_SLUG) {
+    try {
+      const r = await fetch("/api/mapbox-token");
+      if (r.ok) {
+        const d = await r.json();
+        if (d && d.token) return `https://api.mapbox.com/styles/v1/mapbox/dark-v11?access_token=${encodeURIComponent(d.token)}`;
+      }
+    } catch(e) {}
+  }
+  return "https://basemaps.cartocdn.com/gl/dark-matter-gl-style/style.json";
+}
+
+// Load MapLibre GL JS dynamically (CSS already in <head>)
+function _loadMapLibre(cb) {
+  if (typeof maplibregl !== "undefined") { cb(); return; }
+  const s = document.createElement("script");
+  s.src = "https://unpkg.com/maplibre-gl@4/dist/maplibre-gl.js";
+  s.onload = cb;
+  document.head.appendChild(s);
+}
 
 function toggleMapView() {
   _mapActive = !_mapActive;
@@ -629,10 +653,8 @@ function toggleMapView() {
     if (layout) layout.style.display = "none";
     if (mapDiv) mapDiv.classList.add("active");
     if (btn)   { btn.textContent = "📋 List"; btn.classList.add("active"); }
-    if (!_leafletMap) _initMap();
-    else { _renderMapMarkers(); }
-    // Recalculate size after the container becomes visible in the DOM
-    setTimeout(() => { if (_leafletMap) _leafletMap.invalidateSize(); }, 100);
+    if (!_mainMap) _initMainMap();
+    else { _renderMainMarkers(); setTimeout(() => _mainMap.resize(), 50); }
   } else {
     if (layout) layout.style.display = "";
     if (mapDiv) mapDiv.classList.remove("active");
@@ -640,127 +662,90 @@ function toggleMapView() {
   }
 }
 
-function _initMap() {
-  if (typeof L === "undefined") {
-    // Leaflet not loaded yet — load it dynamically
-    const script = document.createElement("script");
-    script.src = "https://unpkg.com/leaflet@1.9.4/dist/leaflet.js";
-    script.integrity = "sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV/XN/WLs=";
-    script.crossOrigin = "";
-    script.onload = () => { _createMap(); };
-    document.head.appendChild(script);
-    return;
-  }
-  _createMap();
-}
-
-function _createMap() {
-  _leafletMap = L.map("leafletContainer", { zoomControl: true }).setView([20, 0], 2);
-  _addMapTileLayer();
-  _renderMapMarkers();
-}
-
-// Shared tile-layer helper — CARTO always loads first, then Mapbox replaces it
-// if a valid token exists. tileerror on Mapbox auto-reverts to CARTO.
-function _addTileLayer(map) {
-  const cartoUrl = "https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png";
-  const cartoOpts = {
-    attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> &copy; <a href="https://carto.com/attributions">CARTO</a>',
-    subdomains: "abcd", maxZoom: 19
-  };
-  const cartoLayer = L.tileLayer(cartoUrl, cartoOpts).addTo(map);
-  if (!sidebarSession.loggedIn || GROUP_SLUG) return;
-  fetch("/api/mapbox-token").then(r => r.ok ? r.json() : null).then(d => {
-    const token = d && d.token;
-    if (!token) return;
-    const mbLayer = L.tileLayer(
-      `https://api.mapbox.com/styles/v1/mapbox/dark-v11/tiles/256/{z}/{x}/{y}?access_token=${encodeURIComponent(token)}`,
-      { tileSize: 256, maxZoom: 19,
-        attribution: '&copy; <a href="https://www.mapbox.com/about/maps/">Mapbox</a>' }
-    );
-    let swapped = false;
-    mbLayer.on("tileload", () => {
-      if (!swapped) { swapped = true; cartoLayer.remove(); mbLayer.addTo(map); }
+async function _initMainMap() {
+  _loadMapLibre(async () => {
+    const style = await _getMapStyle();
+    _mainMap = new maplibregl.Map({
+      container: "mapMainContainer",
+      style,
+      center: [0, 20],
+      zoom: 2
     });
-    mbLayer.on("tileerror", () => { mbLayer.remove(); }); // keep CARTO on error
-    mbLayer.addTo(map);
-  }).catch(() => {}); // CARTO already added above
+    _mainMap.addControl(new maplibregl.NavigationControl(), "top-right");
+    _mainMap.on("load", () => { _renderMainMarkers(); setTimeout(() => _mainMap.resize(), 50); });
+  });
 }
 
-function _addMapTileLayer() { _addTileLayer(_leafletMap); }
-
-function _renderMapMarkers() {
-  if (!_leafletMap) return;
-  _mapMarkers.forEach(m => { try { m.remove(); } catch(e) {} });
-  _mapMarkers = [];
+function _renderMainMarkers() {
+  if (!_mainMap || !_mainMap.isStyleLoaded()) return;
+  _mainMarkers.forEach(m => m.remove());
+  _mainMarkers = [];
   const colorMap = { up:"#10e88a", down:"#ff3d5a", degraded:"#ff8c2a", pending:"#5e8aad" };
   const mapped   = servers.filter(s => s.lat != null && s.lng != null);
   const unmapped = servers.filter(s => s.lat == null || s.lng == null);
   mapped.forEach(s => {
     const color = colorMap[s.overall] || colorMap.pending;
-    const m = L.circleMarker([s.lat, s.lng], {
-      radius: 9, fillColor: color, color: "#0d1829",
-      weight: 2, opacity: 1, fillOpacity: 0.9
-    }).addTo(_leafletMap);
+    const el = document.createElement("div");
+    el.style.cssText = `width:16px;height:16px;border-radius:50%;background:${color};border:2px solid #0d1829;box-shadow:0 0 6px ${color}88;cursor:pointer`;
     const lastMs = (s.checks||[]).reduce((b,c) => (c.response_ms&&(b===null||c.response_ms<b))?c.response_ms:b, null);
-    m.bindPopup(`<div style="font-family:sans-serif;min-width:160px">
-      <div style="font-weight:700;font-size:14px;margin-bottom:4px">${s.name}</div>
-      <div style="color:${color};font-weight:600;font-size:12px;margin-bottom:4px">${(s.overall||"pending").toUpperCase()}</div>
-      <div style="font-size:11px;color:#666">${s.host||""}</div>
-      ${lastMs!=null?`<div style="font-size:11px;color:#888;margin-top:3px">${lastMs}ms</div>`:""}
-    </div>`);
-    _mapMarkers.push(m);
+    const popup  = new maplibregl.Popup({ offset: 12 }).setHTML(`
+      <div style="font-family:sans-serif;min-width:160px;padding:4px">
+        <div style="font-weight:700;font-size:14px;margin-bottom:4px">${s.name}</div>
+        <div style="color:${color};font-weight:600;font-size:12px;margin-bottom:4px">${(s.overall||"pending").toUpperCase()}</div>
+        ${sidebarSession.loggedIn && s.host ? `<div style="font-size:11px;color:#888">${s.host}</div>` : ""}
+        ${lastMs!=null?`<div style="font-size:11px;color:#888;margin-top:3px">${lastMs}ms</div>`:""}
+      </div>`);
+    const marker = new maplibregl.Marker({ element: el })
+      .setLngLat([s.lng, s.lat])
+      .setPopup(popup)
+      .addTo(_mainMap);
+    _mainMarkers.push(marker);
   });
-  // Fit map to markers if we have them
-  if (mapped.length > 0 && _mapMarkers.length > 0) {
+  if (mapped.length > 0) {
     try {
-      const group = L.featureGroup(_mapMarkers);
-      _leafletMap.fitBounds(group.getBounds().pad(0.3));
+      const bounds = new maplibregl.LngLatBounds();
+      mapped.forEach(s => bounds.extend([s.lng, s.lat]));
+      _mainMap.fitBounds(bounds, { padding: 60, maxZoom: 14, duration: 500 });
     } catch(e) {}
   }
-  // Show unmapped count
   const unmappedEl = document.getElementById("mapUnmapped");
   if (unmappedEl) {
-    if (unmapped.length) {
-      unmappedEl.style.display = "";
-      unmappedEl.textContent = `${unmapped.length} server${unmapped.length>1?"s":""} without coordinates not shown on map. Add lat/lng in Admin → Edit Server.`;
-    } else {
-      unmappedEl.style.display = "none";
-    }
+    unmappedEl.style.display = unmapped.length ? "" : "none";
+    if (unmapped.length) unmappedEl.textContent = `${unmapped.length} server${unmapped.length>1?"s":""} without a location are not shown. Add one in Admin → Edit Server.`;
   }
-  // Show/hide map toggle button based on whether any servers have coords
   const mapBtn = document.getElementById("topbarMapBtn");
   if (mapBtn) mapBtn.style.display = servers.some(s => s.lat!=null&&s.lng!=null) ? "" : "none";
 }
 
-// ── Detail panel mini-map ────────────────────────────────────────────────────
+// ── Detail panel mini-map ─────────────────────────────────────────────────────
 let _detailMap = null;
 
-function _initDetailMap(lat, lng, name, status) {
+async function _initDetailMap(lat, lng, name, status) {
   const container = document.getElementById("detailMapContainer");
   if (!container) return;
-  // Destroy previous instance if any
   if (_detailMap) { try { _detailMap.remove(); } catch(e) {} _detailMap = null; }
-  const doCreate = () => {
-    _detailMap = L.map(container, { zoomControl: true, attributionControl: false }).setView([lat, lng], 13);
-    // Force Leaflet to recalculate container dimensions after DOM paint
-    setTimeout(() => { if (_detailMap) _detailMap.invalidateSize(); }, 100);
-    _addTileLayer(_detailMap);
-    const colorMap = { up:"#10e88a", down:"#ff3d5a", degraded:"#ff8c2a", pending:"#5e8aad" };
-    const color = colorMap[status] || colorMap.pending;
-    L.circleMarker([lat, lng], {
-      radius: 10, fillColor: color, color: "#0d1829",
-      weight: 2, opacity: 1, fillOpacity: 0.9
-    }).addTo(_detailMap).bindPopup(`<div style="font-family:sans-serif;font-weight:600">${name}</div>`);
-  };
-  if (typeof L === "undefined") {
-    const script = document.createElement("script");
-    script.src = "https://unpkg.com/leaflet@1.9.4/dist/leaflet.js";
-    script.integrity = "sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV/XN/WLs=";
-    script.crossOrigin = "";
-    script.onload = doCreate;
-    document.head.appendChild(script);
-  } else { doCreate(); }
+  _loadMapLibre(async () => {
+    const style = await _getMapStyle();
+    _detailMap = new maplibregl.Map({
+      container,
+      style,
+      center: [lng, lat],
+      zoom: 13,
+      attributionControl: false
+    });
+    _detailMap.addControl(new maplibregl.NavigationControl(), "top-right");
+    _detailMap.on("load", () => {
+      const colorMap = { up:"#10e88a", down:"#ff3d5a", degraded:"#ff8c2a", pending:"#5e8aad" };
+      const color = colorMap[status] || colorMap.pending;
+      const el = document.createElement("div");
+      el.style.cssText = `width:18px;height:18px;border-radius:50%;background:${color};border:2px solid #0d1829;box-shadow:0 0 8px ${color}99`;
+      new maplibregl.Marker({ element: el })
+        .setLngLat([lng, lat])
+        .setPopup(new maplibregl.Popup({ offset: 14 }).setHTML(`<div style="font-family:sans-serif;font-weight:600;padding:4px">${name}</div>`))
+        .addTo(_detailMap);
+      setTimeout(() => _detailMap.resize(), 100);
+    });
+  });
 }
 
 // -- Dashboard grouping state (master / view only)
@@ -1721,7 +1706,7 @@ async function loadServers(){
     cacheSet(CACHE_KEY_SERVERS, servers);
     renderSidebar();
     updateHealthBanner();
-    if (_mapActive) _renderMapMarkers();
+    if (_mapActive) _renderMainMarkers();
     // Refresh detail if selected server updated
     if (selectedId) {
       const updated = servers.find(s => s.id === selectedId);
