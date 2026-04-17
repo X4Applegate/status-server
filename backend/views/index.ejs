@@ -178,6 +178,25 @@ body::before{content:'';position:fixed;inset:0;pointer-events:none;background:ra
 .pin-btn{background:none;border:none;cursor:pointer;color:var(--text-2);font-size:14px;padding:2px 4px;border-radius:4px;transition:color .15s;line-height:1;flex-shrink:0}
 .pin-btn:hover,.pin-btn.pinned{color:var(--orange)}
 /* Health banner */
+/* Operator-authored admin banners (announcements, maintenance notices). Stacks above the auto-status health bar. */
+.admin-banners{display:flex;flex-direction:column}
+.admin-banner{display:flex;align-items:flex-start;gap:12px;padding:12px 22px;font-size:13px;line-height:1.5;border-bottom:1px solid var(--border)}
+.admin-banner.sev-info{background:rgba(99,102,241,.08);color:#a5b4fc;border-bottom-color:rgba(99,102,241,.2)}
+.admin-banner.sev-warning{background:rgba(245,158,11,.08);color:#fbbf24;border-bottom-color:rgba(245,158,11,.2)}
+.admin-banner.sev-critical{background:rgba(239,61,90,.1);color:#fca5a5;border-bottom-color:rgba(239,61,90,.25)}
+.admin-banner.sev-success{background:rgba(16,184,122,.08);color:#6ee7b7;border-bottom-color:rgba(16,184,122,.2)}
+.admin-banner-icon{flex-shrink:0;margin-top:1px}
+.admin-banner-body{flex:1;min-width:0}
+.admin-banner-title{font-weight:700;color:var(--text-white);margin-bottom:2px;font-size:13px}
+.admin-banner-msg{color:var(--text-hi);font-weight:500;white-space:pre-wrap;word-wrap:break-word}
+.admin-banner.sev-critical .admin-banner-title{color:#fecaca}
+.admin-banner.sev-warning .admin-banner-title{color:#fef3c7}
+.admin-banner.sev-info .admin-banner-title{color:#c7d2fe}
+.admin-banner.sev-success .admin-banner-title{color:#bbf7d0}
+.admin-banner-link{display:inline-block;margin-left:8px;padding:2px 10px;border-radius:6px;background:rgba(255,255,255,.06);color:inherit;font-weight:600;font-size:12px;text-decoration:none;border:1px solid rgba(255,255,255,.1);transition:background .15s}
+.admin-banner-link:hover{background:rgba(255,255,255,.12);text-decoration:none}
+.admin-banner-close{flex-shrink:0;margin-left:8px;width:22px;height:22px;border:none;background:transparent;color:currentColor;opacity:.55;font-size:18px;line-height:1;cursor:pointer;border-radius:4px;transition:opacity .15s,background .15s}
+.admin-banner-close:hover{opacity:1;background:rgba(255,255,255,.08)}
 .health-banner{display:flex;align-items:center;gap:10px;padding:10px 22px;font-size:13px;font-weight:600;border-bottom:1px solid var(--border);transition:background .3s,color .3s}
 .health-banner.all-up{background:rgba(16,232,138,.07);color:#10e88a}
 .health-banner.has-down{background:rgba(255,61,90,.07);color:var(--red)}
@@ -483,6 +502,9 @@ function _shade(hex, amount) {
   groupSlug:     groupSlug
 }) %>
 
+<!-- Operator-authored announcement banners (scheduled maintenance, ongoing issues, release notes). -->
+<!-- Rendered above healthBanner so announcements appear first when present. -->
+<div id="adminBanners" class="admin-banners"></div>
 <div id="healthBanner" class="health-banner" style="display:none"></div>
 <div class="layout">
   <!-- SIDEBAR -->
@@ -1737,6 +1759,87 @@ function sbScrollStep(dir){
 if (<%- JSON.stringify(!!groupSlug) %> && "serviceWorker" in navigator) {
   navigator.serviceWorker.register("/sw.js").catch(() => {});
 }
+
+// ── Admin banners ─────────────────────────────────────────────────────────
+// Polls the public banner feed for this group and renders severity-coded
+// announcements above the auto-status health bar. Dismissals are scoped to
+// (banner id + current message) so editing the banner re-shows it to
+// everyone who'd dismissed the previous version.
+const BANNER_DISMISS_KEY = "sm-banner-dismiss-v1";
+
+function bannerEscape(s){ return String(s||"").replace(/[&<>"']/g, c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c])); }
+
+function getDismissedBanners(){
+  try { return JSON.parse(localStorage.getItem(BANNER_DISMISS_KEY) || "{}"); } catch(e){ return {}; }
+}
+function setDismissedBanners(m){
+  try { localStorage.setItem(BANNER_DISMISS_KEY, JSON.stringify(m)); } catch(e){}
+}
+
+// Hash the message so editing the text revokes stale dismissals.
+function bannerKey(b){
+  let h = 0;
+  const s = (b.title||"") + "|" + (b.message||"") + "|" + (b.severity||"");
+  for (let i = 0; i < s.length; i++) { h = (h * 31 + s.charCodeAt(i)) | 0; }
+  return b.id + "-" + h;
+}
+
+function dismissBanner(id){
+  const el = document.querySelector(`[data-banner-id="${id}"]`);
+  if (!el) return;
+  const key = el.getAttribute("data-banner-key");
+  const d = getDismissedBanners();
+  d[key] = Date.now();
+  setDismissedBanners(d);
+  el.style.display = "none";
+}
+
+function iconForSeverity(sev){
+  if (sev === "critical") return '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>';
+  if (sev === "warning")  return '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>';
+  if (sev === "success")  return '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/></svg>';
+  /* info */              return '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><line x1="12" y1="16" x2="12" y2="12"/><line x1="12" y1="8" x2="12.01" y2="8"/></svg>';
+}
+
+function renderAdminBanners(list){
+  const host = document.getElementById("adminBanners");
+  if (!host) return;
+  const dismissed = getDismissedBanners();
+  const visible = list.filter(b => !(b.dismissible && dismissed[bannerKey(b)]));
+  if (!visible.length) { host.innerHTML = ""; return; }
+  host.innerHTML = visible.map(b => {
+    const key = bannerKey(b);
+    const titleHtml = b.title ? `<div class="admin-banner-title">${bannerEscape(b.title)}</div>` : "";
+    const linkHtml  = (b.link_url && b.link_text)
+      ? `<a class="admin-banner-link" href="${bannerEscape(b.link_url)}" target="_blank" rel="noopener">${bannerEscape(b.link_text)} →</a>`
+      : "";
+    const closeHtml = b.dismissible
+      ? `<button class="admin-banner-close" onclick="dismissBanner(${b.id})" title="Dismiss" aria-label="Dismiss banner">×</button>`
+      : "";
+    return `<div class="admin-banner sev-${b.severity||'info'}" data-banner-id="${b.id}" data-banner-key="${bannerEscape(key)}">
+      <div class="admin-banner-icon">${iconForSeverity(b.severity||'info')}</div>
+      <div class="admin-banner-body">
+        ${titleHtml}
+        <div class="admin-banner-msg">${bannerEscape(b.message)}${linkHtml}</div>
+      </div>
+      ${closeHtml}
+    </div>`;
+  }).join("");
+}
+
+async function loadAdminBanners(){
+  if (!GROUP_SLUG) return; // No banners on the admin-only master dashboard
+  try {
+    const r = await fetch(`/api/public/group/${encodeURIComponent(GROUP_SLUG)}/banners`);
+    if (!r.ok) return;
+    const list = await r.json();
+    renderAdminBanners(Array.isArray(list) ? list : []);
+  } catch(e) { /* silent */ }
+}
+
+// Initial load + refresh every 60s so scheduled banners roll on/off without a page reload.
+loadAdminBanners();
+setInterval(loadAdminBanners, 60 * 1000);
 </script>
 <footer style="text-align:center;padding:28px 16px 20px;font-size:12px;color:var(--text-2)">
   <% if (typeof groupSlug !== 'undefined' && groupSlug) { %>

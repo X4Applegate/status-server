@@ -759,6 +759,31 @@ async function initDB() {
   try { await db.query("ALTER TABLE status_incidents ADD COLUMN impact ENUM('minor','major','critical') NOT NULL DEFAULT 'minor'"); } catch(e) {}
   try { await db.query("ALTER TABLE status_incidents ADD COLUMN public TINYINT(1) NOT NULL DEFAULT 1"); } catch(e) {}
 
+  // Dashboard banners — persistent announcement bars shown at the top of the
+  // public dashboard. group_id NULL means global (shows on every dashboard);
+  // a numeric group_id scopes the banner to one group. Time window (starts_at /
+  // ends_at) is optional; NULL endpoints mean "always" on that side. dismissible
+  // controls whether visitors can hide it for their session.
+  await db.query(`
+    CREATE TABLE IF NOT EXISTS status_banners (
+      id           INT AUTO_INCREMENT PRIMARY KEY,
+      group_id     INT NULL,
+      title        VARCHAR(200) DEFAULT NULL,
+      message      TEXT NOT NULL,
+      severity     ENUM('info','warning','critical','success') NOT NULL DEFAULT 'info',
+      link_url     VARCHAR(500) DEFAULT NULL,
+      link_text    VARCHAR(100) DEFAULT NULL,
+      active       TINYINT(1) NOT NULL DEFAULT 1,
+      dismissible  TINYINT(1) NOT NULL DEFAULT 1,
+      starts_at    DATETIME NULL DEFAULT NULL,
+      ends_at      DATETIME NULL DEFAULT NULL,
+      created_by   INT NULL,
+      created_at   TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+      INDEX idx_group (group_id),
+      INDEX idx_active (active, starts_at, ends_at)
+    )
+  `);
+
   // Timeline of operator-authored updates for an incident.
   // Each status transition (investigating → identified, etc.) appends one row.
   // The message field supports plain text / minimal markdown — rendered escaped on the public page.
@@ -4549,6 +4574,119 @@ app.delete("/api/admin/incidents/:id", requireAdmin, async (req, res) => {
   try {
     await db.query("DELETE FROM status_incident_updates WHERE incident_id=?", [req.params.id]);
     await db.query("DELETE FROM status_incidents WHERE id=?", [req.params.id]);
+    res.json({ ok: true });
+  } catch(e) { res.status(500).json({ error: e.message }); }
+});
+
+// ── Dashboard banners ───────────────────────────────────────────────────────
+// Public feed — returns active banners for this group (group-scoped + global),
+// filtered to the current time window. Anonymous visitors hit this endpoint
+// when loading a public dashboard. Does not require auth.
+app.get("/api/public/group/:slug/banners", async (req, res) => {
+  try {
+    const [groups] = await db.query("SELECT id FROM status_groups WHERE slug=?", [req.params.slug]);
+    if (!groups.length) return res.status(404).json({ error: "Group not found" });
+    const groupId = groups[0].id;
+    // NOW() BETWEEN starts_at AND ends_at, but NULL on either end = unbounded.
+    const [rows] = await db.query(
+      `SELECT id, group_id, title, message, severity, link_url, link_text, dismissible,
+              starts_at, ends_at
+       FROM status_banners
+       WHERE active=1
+         AND (group_id=? OR group_id IS NULL)
+         AND (starts_at IS NULL OR starts_at <= NOW())
+         AND (ends_at   IS NULL OR ends_at   >= NOW())
+       ORDER BY
+         FIELD(severity,'critical','warning','info','success'),
+         created_at DESC`,
+      [groupId]
+    );
+    res.json(rows);
+  } catch(e) { res.status(500).json({ error: e.message }); }
+});
+
+// Admin — list every banner (regardless of active/time window).
+app.get("/api/admin/banners", requireAdmin, async (req, res) => {
+  try {
+    const [rows] = await db.query(
+      `SELECT b.*, g.name AS group_name, g.slug AS group_slug
+       FROM status_banners b
+       LEFT JOIN status_groups g ON g.id = b.group_id
+       ORDER BY b.active DESC, b.created_at DESC`
+    );
+    res.json(rows);
+  } catch(e) { res.status(500).json({ error: e.message }); }
+});
+
+// Admin — create banner.
+app.post("/api/admin/banners", requireAdmin, async (req, res) => {
+  const { group_id, title, message, severity = "info", link_url, link_text,
+          active = 1, dismissible = 1, starts_at, ends_at } = req.body;
+  if (!message || !String(message).trim()) return res.status(400).json({ error: "Message is required" });
+  if (!["info","warning","critical","success"].includes(severity)) {
+    return res.status(400).json({ error: "severity must be info|warning|critical|success" });
+  }
+  try {
+    const [r] = await db.query(
+      `INSERT INTO status_banners
+         (group_id, title, message, severity, link_url, link_text,
+          active, dismissible, starts_at, ends_at, created_by)
+       VALUES (?,?,?,?,?,?,?,?,?,?,?)`,
+      [
+        group_id ? parseInt(group_id) : null,
+        (title || "").trim() || null,
+        String(message).trim().slice(0, 2000),
+        severity,
+        (link_url || "").trim() || null,
+        (link_text || "").trim() || null,
+        active ? 1 : 0,
+        dismissible ? 1 : 0,
+        starts_at || null,
+        ends_at || null,
+        req.session.userId || null
+      ]
+    );
+    addAuditLog({ userId: req.session.userId, username: req.session.username, action:"banner.create", resourceType:"banner", resourceId:String(r.insertId), detail:severity, ip:req.ip });
+    res.json({ ok: true, id: r.insertId });
+  } catch(e) { res.status(500).json({ error: e.message }); }
+});
+
+// Admin — update banner.
+app.put("/api/admin/banners/:id", requireAdmin, async (req, res) => {
+  const { group_id, title, message, severity, link_url, link_text,
+          active, dismissible, starts_at, ends_at } = req.body;
+  try {
+    const [rows] = await db.query("SELECT id FROM status_banners WHERE id=?", [req.params.id]);
+    if (!rows.length) return res.status(404).json({ error: "Banner not found" });
+    if (severity && !["info","warning","critical","success"].includes(severity)) {
+      return res.status(400).json({ error: "Invalid severity" });
+    }
+    const fields = [];
+    const params = [];
+    if (group_id !== undefined)    { fields.push("group_id=?");    params.push(group_id ? parseInt(group_id) : null); }
+    if (title !== undefined)       { fields.push("title=?");       params.push((title||"").trim() || null); }
+    if (message !== undefined)     { fields.push("message=?");     params.push(String(message).trim().slice(0,2000)); }
+    if (severity !== undefined)    { fields.push("severity=?");    params.push(severity); }
+    if (link_url !== undefined)    { fields.push("link_url=?");    params.push((link_url||"").trim() || null); }
+    if (link_text !== undefined)   { fields.push("link_text=?");   params.push((link_text||"").trim() || null); }
+    if (active !== undefined)      { fields.push("active=?");      params.push(active ? 1 : 0); }
+    if (dismissible !== undefined) { fields.push("dismissible=?"); params.push(dismissible ? 1 : 0); }
+    if (starts_at !== undefined)   { fields.push("starts_at=?");   params.push(starts_at || null); }
+    if (ends_at !== undefined)     { fields.push("ends_at=?");     params.push(ends_at   || null); }
+    if (!fields.length) return res.status(400).json({ error: "No fields to update" });
+    params.push(req.params.id);
+    await db.query(`UPDATE status_banners SET ${fields.join(", ")} WHERE id=?`, params);
+    addAuditLog({ userId:req.session.userId, username:req.session.username, action:"banner.update", resourceType:"banner", resourceId:req.params.id, ip:req.ip });
+    res.json({ ok: true });
+  } catch(e) { res.status(500).json({ error: e.message }); }
+});
+
+// Admin — delete banner.
+app.delete("/api/admin/banners/:id", requireAdmin, async (req, res) => {
+  try {
+    const [r] = await db.query("DELETE FROM status_banners WHERE id=?", [req.params.id]);
+    if (!r.affectedRows) return res.status(404).json({ error: "Banner not found" });
+    addAuditLog({ userId:req.session.userId, username:req.session.username, action:"banner.delete", resourceType:"banner", resourceId:req.params.id, ip:req.ip });
     res.json({ ok: true });
   } catch(e) { res.status(500).json({ error: e.message }); }
 });

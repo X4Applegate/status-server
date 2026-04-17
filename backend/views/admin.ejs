@@ -591,7 +591,7 @@ body{font-family:var(--sans);background:var(--bg);color:var(--text);min-height:1
   </div>
   <div id="aListView" class="admin-section">
     <div class="drawer-toolbar">
-      <div class="admin-tabs"><button class="admin-tab active" id="tabServers" onclick="switchTab('servers')">Servers</button><button class="admin-tab" id="tabGroups" onclick="switchTab('groups')">Groups</button><button class="admin-tab" id="tabOmada" onclick="switchTab('omada')">Omada</button><button class="admin-tab" id="tabSquare" onclick="switchTab('square')">Square</button><button class="admin-tab" id="tabMaint" onclick="switchTab('maint')">Maintenance</button><button class="admin-tab" id="tabIncidents" onclick="switchTab('incidents')">Incidents</button><button class="admin-tab" id="tabApiKeys" onclick="switchTab('apikeys')">API Keys</button><button class="admin-tab" id="tabUsers" onclick="switchTab('users')">Users</button><button class="admin-tab" id="tabWebhooks" onclick="switchTab('webhooks')">Webhooks</button><button class="admin-tab" id="tabSettings" onclick="switchTab('settings')">Settings</button><button class="admin-tab" id="tabAudit" onclick="switchTab('audit')">Audit</button></div>
+      <div class="admin-tabs"><button class="admin-tab active" id="tabServers" onclick="switchTab('servers')">Servers</button><button class="admin-tab" id="tabGroups" onclick="switchTab('groups')">Groups</button><button class="admin-tab" id="tabOmada" onclick="switchTab('omada')">Omada</button><button class="admin-tab" id="tabSquare" onclick="switchTab('square')">Square</button><button class="admin-tab" id="tabMaint" onclick="switchTab('maint')">Maintenance</button><button class="admin-tab" id="tabIncidents" onclick="switchTab('incidents')">Incidents</button><button class="admin-tab" id="tabBanners" onclick="switchTab('banners')">Banners</button><button class="admin-tab" id="tabApiKeys" onclick="switchTab('apikeys')">API Keys</button><button class="admin-tab" id="tabUsers" onclick="switchTab('users')">Users</button><button class="admin-tab" id="tabWebhooks" onclick="switchTab('webhooks')">Webhooks</button><button class="admin-tab" id="tabSettings" onclick="switchTab('settings')">Settings</button><button class="admin-tab" id="tabAudit" onclick="switchTab('audit')">Audit</button></div>
       <span style="font-size:11px;color:var(--text-2)" id="aCount"></span>
       <div class="drawer-spacer"></div>
       <button class="btn" id="importBtn" onclick="triggerImport()" style="font-size:11px;padding:5px 11px;display:none" title="Import servers from JSON">⬆ Import</button>
@@ -796,6 +796,67 @@ body{font-family:var(--sans);background:var(--bg);color:var(--text);min-height:1
           <span class="form-err" id="mwErr"></span>
           <button class="btn" onclick="switchTab('maint')">Cancel</button>
           <button class="btn btn-primary" onclick="submitMaintForm()">Save Window</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div id="aBannerFormView" class="admin-section" style="display:none">
+    <div class="drawer-body">
+      <div class="form-wrap">
+        <div class="form-heading" id="bnFormHeading">Add Banner</div>
+        <input type="hidden" id="bnId">
+        <div class="form-grid">
+          <div class="fg full">
+            <label class="flabel">Message *</label>
+            <textarea class="finput" id="bnMessage" rows="3" maxlength="2000" placeholder="We're experiencing elevated error rates — investigating. Updates will follow."></textarea>
+          </div>
+          <div class="fg full">
+            <label class="flabel">Title <span style="font-weight:400;text-transform:none;letter-spacing:0;color:var(--text-2)">(optional, bold line above the message)</span></label>
+            <input class="finput" id="bnTitle" maxlength="200" placeholder="e.g. Scheduled Maintenance">
+          </div>
+          <div class="fg">
+            <label class="flabel">Severity</label>
+            <select class="fselect" id="bnSeverity">
+              <option value="info">ℹ️ Info (blue)</option>
+              <option value="warning">⚠️ Warning (amber)</option>
+              <option value="critical">🚨 Critical (red)</option>
+              <option value="success">✅ Success (green)</option>
+            </select>
+          </div>
+          <div class="fg">
+            <label class="flabel">Target Dashboard</label>
+            <select class="fselect" id="bnGroupId">
+              <option value="">🌐 All dashboards (global)</option>
+            </select>
+          </div>
+          <div class="fg">
+            <label class="flabel">Link URL <span style="font-weight:400;text-transform:none;letter-spacing:0;color:var(--text-2)">(optional CTA)</span></label>
+            <input class="finput" id="bnLinkUrl" placeholder="https://status.example.com/incident/123">
+          </div>
+          <div class="fg">
+            <label class="flabel">Link Text</label>
+            <input class="finput" id="bnLinkText" maxlength="100" placeholder="View details">
+          </div>
+          <div class="fg">
+            <label class="flabel">Start <span style="font-weight:400;text-transform:none;letter-spacing:0;color:var(--text-2)">(optional)</span></label>
+            <input class="finput" id="bnStartsAt" type="datetime-local">
+          </div>
+          <div class="fg">
+            <label class="flabel">End <span style="font-weight:400;text-transform:none;letter-spacing:0;color:var(--text-2)">(optional)</span></label>
+            <input class="finput" id="bnEndsAt" type="datetime-local">
+          </div>
+          <div class="fg full">
+            <label class="flabel"><input type="checkbox" id="bnActive" checked style="vertical-align:middle;margin-right:6px">Active (banner is visible when checked)</label>
+          </div>
+          <div class="fg full">
+            <label class="flabel"><input type="checkbox" id="bnDismissible" checked style="vertical-align:middle;margin-right:6px">Dismissible (visitors can hide it with the × button)</label>
+          </div>
+        </div>
+        <div class="form-footer">
+          <span class="form-err" id="bnErr"></span>
+          <button class="btn" onclick="switchTab('banners')">Cancel</button>
+          <button class="btn btn-primary" onclick="submitBannerForm()">Save Banner</button>
         </div>
       </div>
     </div>
@@ -1834,16 +1895,17 @@ async function switchTab(tab){
   document.getElementById("tabSquare").classList.toggle("active",   tab === "square");
   document.getElementById("tabMaint").classList.toggle("active",    tab === "maint");
   document.getElementById("tabIncidents").classList.toggle("active",tab === "incidents");
+  document.getElementById("tabBanners").classList.toggle("active",  tab === "banners");
   document.getElementById("tabApiKeys").classList.toggle("active",  tab === "apikeys");
   document.getElementById("tabUsers").classList.toggle("active",    tab === "users");
   document.getElementById("tabWebhooks").classList.toggle("active", tab === "webhooks");
   document.getElementById("tabSettings").classList.toggle("active", tab === "settings");
   document.getElementById("tabAudit").classList.toggle("active",    tab === "audit");
-  const labels = { servers:"Add Server", groups:"Add Group", omada:"Add Controller", square:"Add Account", maint:"Schedule Window", incidents:"", apikeys:"Generate Key", users:"Add User", webhooks:"Add Webhook", settings:"", audit:"" };
+  const labels = { servers:"Add Server", groups:"Add Group", omada:"Add Controller", square:"Add Account", maint:"Schedule Window", incidents:"", banners:"Add Banner", apikeys:"Generate Key", users:"Add User", webhooks:"Add Webhook", settings:"", audit:"" };
   document.getElementById("addBtnLabel").textContent = labels[tab] || "";
   // Incidents are created automatically from failed checks or via the Post Update button
   // on each row — there's no "add incident" flow, so hide the Add button for that tab.
-  const hideAdd = (!isAdmin() && (tab==="groups"||tab==="users")) || tab==="settings" || tab==="audit" || tab==="incidents";
+  const hideAdd = (!isAdmin() && (tab==="groups"||tab==="users"||tab==="banners")) || tab==="settings" || tab==="audit" || tab==="incidents";
   document.getElementById("addBtn").style.display = hideAdd ? "none" : "";
   document.getElementById("addBtn").onclick =
     tab === "servers"  ? () => showServerForm(null) :
@@ -1851,6 +1913,7 @@ async function switchTab(tab){
     tab === "omada"    ? () => showOmadaForm(null)  :
     tab === "square"   ? () => showSquareForm(null) :
     tab === "maint"    ? () => showMaintForm(null)  :
+    tab === "banners"  ? () => showBannerForm(null) :
     tab === "apikeys"  ? () => showApiKeyForm()     :
     tab === "users"    ? () => showUserForm(null)   :
     tab === "settings" ? () => {}                   :
@@ -1872,6 +1935,8 @@ async function switchTab(tab){
   document.getElementById("aSquareFormView").style.display  = "none";
   const maintFormView = document.getElementById("aMaintFormView");
   if (maintFormView) maintFormView.style.display = "none";
+  const bannerFormView = document.getElementById("aBannerFormView");
+  if (bannerFormView) bannerFormView.style.display = "none";
   const searchBar = document.getElementById("serverSearchBar");
   const statBar   = document.getElementById("drawerStatBar");
   if (tab === "servers") {
@@ -1888,6 +1953,7 @@ async function switchTab(tab){
   else if (tab === "square")    await loadSquareList();
   else if (tab === "maint")     await loadMaintList();
   else if (tab === "incidents") await loadIncidentList();
+  else if (tab === "banners")   await loadBannerList();
   else if (tab === "apikeys")   await loadApiKeyList();
   else if (tab === "users")     await loadUserList();
   else if (tab === "settings")  await loadSettings();
@@ -4258,6 +4324,181 @@ async function askDelIncident(id){
     if (!r.ok) { toast(d.error || "Delete failed", "error"); return; }
     toast("Incident deleted", "success");
     await switchTab("incidents");
+  } catch(e) { toast(e.message, "error"); }
+}
+
+// ── Banners ────────────────────────────────────────────────────────────────
+// Admin-authored announcements that render on the public dashboard above the
+// auto-status bar. Can be global (group_id NULL → all dashboards) or scoped
+// to a single group. Supports time windows, severity colors, and optional CTA.
+let adminBanners = [];
+
+function _bnSeverityLabel(sev){
+  return sev === "critical" ? "🚨 Critical"
+       : sev === "warning"  ? "⚠️ Warning"
+       : sev === "success"  ? "✅ Success"
+       :                      "ℹ️ Info";
+}
+function _bnIsActiveNow(b){
+  if (!b.active) return false;
+  const now = Date.now();
+  if (b.starts_at && new Date(b.starts_at).getTime() > now) return false;
+  if (b.ends_at   && new Date(b.ends_at).getTime()   < now) return false;
+  return true;
+}
+function _bnWindowLabel(b){
+  if (!b.starts_at && !b.ends_at) return "Always on";
+  const s = b.starts_at ? new Date(b.starts_at).toLocaleString(undefined, {month:"short",day:"numeric",hour:"numeric",minute:"2-digit"}) : "now";
+  const e = b.ends_at   ? new Date(b.ends_at).toLocaleString(undefined, {month:"short",day:"numeric",hour:"numeric",minute:"2-digit"})   : "no end";
+  return `${s} → ${e}`;
+}
+function _bnToLocalInput(iso){
+  if (!iso) return "";
+  const d = new Date(iso);
+  if (isNaN(d.getTime())) return "";
+  const pad = n => String(n).padStart(2,"0");
+  return `${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
+}
+
+function renderAdminBannerList(list){
+  const el = document.getElementById("adminPanelBody");
+  document.getElementById("aCount").textContent = `${list.length} banner${list.length===1?"":"s"}`;
+  if (!list.length){
+    el.innerHTML = `<div class="empty-state">No banners yet.<br>Click <strong>Add Banner</strong> to announce scheduled maintenance, incidents, or release notes.</div>`;
+    return;
+  }
+  el.innerHTML = list.map(b => {
+    const isLive = _bnIsActiveNow(b);
+    const statusDot = !b.active ? "var(--text-2)" : (isLive ? "var(--green)" : "var(--orange)");
+    const statusLabel = !b.active ? "DISABLED" : (isLive ? "LIVE" : "SCHEDULED");
+    const target = b.group_name ? b.group_name : "🌐 All dashboards";
+    const preview = (b.title ? b.title + " — " : "") + (b.message || "").slice(0, 120);
+    return `<div class="admin-server-item" style="align-items:flex-start">
+      <div class="admin-dot" style="background:${statusDot};margin-top:6px"></div>
+      <div class="admin-info" style="min-width:0;flex:1">
+        <div class="admin-name" style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
+          <span>${_escHtml(_bnSeverityLabel(b.severity))}</span>
+          <span style="font-size:10px;font-weight:700;padding:2px 7px;border-radius:8px;background:var(--surface2);color:${statusDot};letter-spacing:.04em">${statusLabel}</span>
+          ${!b.dismissible ? '<span style="font-size:10px;font-weight:700;padding:2px 7px;border-radius:8px;background:var(--surface2);color:var(--text-2);letter-spacing:.04em" title="Visitors cannot dismiss this banner">PINNED</span>' : ''}
+        </div>
+        <div class="admin-host" style="color:var(--text-hi);font-weight:500">${_escHtml(preview)}</div>
+        <div class="admin-checks-label">${_escHtml(target)} · ${_escHtml(_bnWindowLabel(b))}</div>
+      </div>
+      <div class="admin-row-actions" onclick="event.stopPropagation()">
+        <button class="btn btn-sm" onclick="toggleBannerActive(${b.id})">${b.active ? "Disable" : "Enable"}</button>
+        <button class="btn btn-sm" onclick="showBannerForm(adminBanners.find(x => x.id === ${b.id}))">Edit</button>
+        <button class="btn btn-sm btn-danger" onclick="askDelBanner(${b.id})">Delete</button>
+      </div>
+    </div>`;
+  }).join("");
+}
+
+async function loadBannerList(){
+  const el = document.getElementById("adminPanelBody");
+  el.innerHTML = `<div style="padding:24px;text-align:center;color:var(--text-2)">Loading banners…</div>`;
+  try {
+    const r = await fetch("/api/admin/banners");
+    if (r.status === 401) { window.location.href = "/"; return; }
+    if (r.status === 403) { el.innerHTML = `<div class="empty-state">Admin role required.</div>`; return; }
+    if (!r.ok) { el.innerHTML = `<div class="empty-state">Error ${r.status}</div>`; return; }
+    adminBanners = await r.json();
+    renderAdminBannerList(adminBanners);
+  } catch(e) {
+    el.innerHTML = `<div class="empty-state">Failed to load: ${e.message}</div>`;
+  }
+}
+
+async function _bnEnsureGroupsLoaded(){
+  // Reuse the admin group list so the target dropdown stays in sync
+  if (typeof adminGroups !== "undefined" && adminGroups && adminGroups.length) return adminGroups;
+  try {
+    const r = await fetch("/api/admin/groups");
+    if (r.ok) return await r.json();
+  } catch(e) {}
+  return [];
+}
+
+async function showBannerForm(banner){
+  document.getElementById("aListView").style.display = "none";
+  document.getElementById("aBannerFormView").style.display = "flex";
+  document.getElementById("bnFormHeading").textContent = banner ? "Edit Banner" : "Add Banner";
+  document.getElementById("bnId").value         = banner ? banner.id : "";
+  document.getElementById("bnMessage").value    = banner ? (banner.message || "") : "";
+  document.getElementById("bnTitle").value      = banner ? (banner.title || "") : "";
+  document.getElementById("bnSeverity").value   = banner ? (banner.severity || "info") : "info";
+  document.getElementById("bnLinkUrl").value    = banner ? (banner.link_url || "") : "";
+  document.getElementById("bnLinkText").value   = banner ? (banner.link_text || "") : "";
+  document.getElementById("bnStartsAt").value   = banner ? _bnToLocalInput(banner.starts_at) : "";
+  document.getElementById("bnEndsAt").value     = banner ? _bnToLocalInput(banner.ends_at)   : "";
+  document.getElementById("bnActive").checked      = banner ? !!banner.active      : true;
+  document.getElementById("bnDismissible").checked = banner ? !!banner.dismissible : true;
+  document.getElementById("bnErr").textContent = "";
+
+  // Populate group dropdown
+  const sel = document.getElementById("bnGroupId");
+  const groups = await _bnEnsureGroupsLoaded();
+  const currentGid = banner ? (banner.group_id ?? "") : "";
+  sel.innerHTML = `<option value="">🌐 All dashboards (global)</option>` +
+    groups.map(g => `<option value="${g.id}" ${String(currentGid) === String(g.id) ? "selected" : ""}>${_escHtml(g.name)}</option>`).join("");
+}
+
+async function submitBannerForm(){
+  const err = document.getElementById("bnErr");
+  err.textContent = "";
+  const id      = document.getElementById("bnId").value;
+  const message = document.getElementById("bnMessage").value.trim();
+  if (!message) { err.textContent = "Message is required"; return; }
+  const payload = {
+    message,
+    title:       document.getElementById("bnTitle").value.trim() || null,
+    severity:    document.getElementById("bnSeverity").value,
+    group_id:    document.getElementById("bnGroupId").value || null,
+    link_url:    document.getElementById("bnLinkUrl").value.trim() || null,
+    link_text:   document.getElementById("bnLinkText").value.trim() || null,
+    starts_at:   document.getElementById("bnStartsAt").value || null,
+    ends_at:     document.getElementById("bnEndsAt").value   || null,
+    active:      document.getElementById("bnActive").checked,
+    dismissible: document.getElementById("bnDismissible").checked
+  };
+  try {
+    const r = await fetch(id ? `/api/admin/banners/${id}` : "/api/admin/banners", {
+      method: id ? "PUT" : "POST",
+      headers: {"Content-Type":"application/json"},
+      body: JSON.stringify(payload)
+    });
+    const d = await r.json();
+    if (!r.ok) { err.textContent = d.error || "Save failed"; return; }
+    toast(id ? "Banner updated" : "Banner created", "success");
+    await switchTab("banners");
+  } catch(e) { err.textContent = e.message; }
+}
+
+async function toggleBannerActive(id){
+  const b = adminBanners.find(x => x.id === id);
+  if (!b) return;
+  try {
+    const r = await fetch(`/api/admin/banners/${id}`, {
+      method: "PUT",
+      headers: {"Content-Type":"application/json"},
+      body: JSON.stringify({ active: !b.active })
+    });
+    const d = await r.json();
+    if (!r.ok) { toast(d.error || "Failed", "error"); return; }
+    toast(b.active ? "Banner disabled" : "Banner enabled", "success");
+    await loadBannerList();
+  } catch(e) { toast(e.message, "error"); }
+}
+
+async function askDelBanner(id){
+  const b = adminBanners.find(x => x.id === id);
+  const preview = b ? (b.title || b.message || "").slice(0, 60) : "";
+  if (!confirm(`Delete banner?\n\n"${preview}"\n\nThis cannot be undone.`)) return;
+  try {
+    const r = await fetch(`/api/admin/banners/${id}`, { method: "DELETE" });
+    const d = await r.json();
+    if (!r.ok) { toast(d.error || "Delete failed", "error"); return; }
+    toast("Banner deleted", "success");
+    await loadBannerList();
   } catch(e) { toast(e.message, "error"); }
 }
 
