@@ -2346,7 +2346,7 @@ async function submitForm(){
       // Opened via ?edit= URL param (e.g. from the status page Edit button) — go back to status page
       window.location.href = "/";
     } else {
-      showList();
+      closeAdmin();
     }
   } catch(e){ document.getElementById("fErr").textContent = "Error: "+e.message; }
 }
