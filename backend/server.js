@@ -4553,6 +4553,42 @@ app.delete("/api/admin/incidents/:id", requireAdmin, async (req, res) => {
   } catch(e) { res.status(500).json({ error: e.message }); }
 });
 
+// ── Danger Zone: wipe all historical data ───────────────────────────────────
+// Deletes:
+//   • status_history           (uptime dots / check history)
+//   • status_incidents + status_incident_updates
+//   • status_audit_log
+// Keeps:
+//   • servers, groups, users, webhooks, omada, square, settings, maintenance
+// Requires the body to carry confirmation: "DELETE ALL HISTORY" — matches the
+// string the UI prompts the operator to type. Belt-and-suspenders safeguard
+// against a rogue /api/admin/clear-history call being triggered accidentally.
+app.post("/api/admin/clear-history", requireAdmin, async (req, res) => {
+  const confirm = (req.body && req.body.confirm) || "";
+  if (confirm !== "DELETE ALL HISTORY") {
+    return res.status(400).json({ error: "Confirmation phrase required" });
+  }
+  try {
+    const [h] = await db.query("SELECT COUNT(*) AS n FROM status_history");
+    const [i] = await db.query("SELECT COUNT(*) AS n FROM status_incidents");
+    const [a] = await db.query("SELECT COUNT(*) AS n FROM status_audit_log");
+    await db.query("DELETE FROM status_incident_updates");
+    await db.query("DELETE FROM status_incidents");
+    await db.query("DELETE FROM status_history");
+    await db.query("DELETE FROM status_audit_log");
+    addAuditLog({
+      userId: req.session.userId,
+      username: req.session.username,
+      action: "history.wipe",
+      resourceType: "system",
+      detail: `Cleared ${h[0].n} history, ${i[0].n} incidents, ${a[0].n} audit entries`,
+      ip: req.ip
+    });
+    addLog({ level:"warn", server:"system", message:`[DANGER] ${req.session.username} cleared all history (${h[0].n} history, ${i[0].n} incidents, ${a[0].n} audit rows)` });
+    res.json({ ok: true, deleted: { history: h[0].n, incidents: i[0].n, audit: a[0].n } });
+  } catch(e) { res.status(500).json({ error: e.message }); }
+});
+
 // Master server list — auth required.
 // Admins see ALL servers (including any without group membership). Viewers see only servers
 // whose group set intersects with their allowed groups.

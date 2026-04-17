@@ -2773,6 +2773,29 @@ async function loadSettings(){
           <button class="btn" onclick="clearMapboxToken()">Clear Token</button>
         </div>
         <div id="setMbMsg" style="margin-top:14px;font-size:12px"></div>
+
+        <div style="height:1px;background:var(--border);margin:32px 0"></div>
+
+        <!-- Danger Zone — destructive actions behind a typed confirmation. -->
+        <div style="border:1px solid rgba(239,61,90,.35);border-radius:12px;padding:20px 22px;background:rgba(239,61,90,.04);margin-top:8px">
+          <div style="display:flex;align-items:center;gap:10px;margin-bottom:12px">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#ef3d5a" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>
+            <div style="font-size:14px;font-weight:700;color:#ef3d5a;letter-spacing:-.01em">Danger Zone</div>
+          </div>
+          <div style="font-size:13px;color:var(--text);line-height:1.6;margin-bottom:16px">
+            Clearing history will <strong style="color:var(--text-hi)">permanently delete</strong> every uptime check,
+            incident record, update timeline entry, and audit log row. Your servers, groups, users, webhooks, and
+            integration settings are kept — only historical data is wiped.
+            <div style="margin-top:10px;font-size:12px;color:var(--text-2)">
+              <strong>This action cannot be undone.</strong> Consider exporting first if you need a backup.
+            </div>
+          </div>
+          <button class="btn btn-danger" onclick="clearAllHistory()" style="background:#ef3d5a;color:#fff;border-color:#ef3d5a;font-weight:600">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-2px;margin-right:6px"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg>
+            Clear All History
+          </button>
+          <div id="dangerMsg" style="margin-top:12px;font-size:12px"></div>
+        </div>
       </div>`;
   } catch(e) {
     el.innerHTML = `<div class="empty-state">Failed to load settings: ${e.message}</div>`;
@@ -2793,6 +2816,44 @@ async function saveMapboxSettings(){
     msg.style.color = "var(--green)";
     toast("Mapbox settings saved", "success");
     document.getElementById("setMbToken").value = "";
+  } catch(e) {
+    msg.textContent = "Error: " + e.message; msg.style.color = "var(--red)";
+  }
+}
+
+// ── Danger Zone: clear all history ────────────────────────────────────────
+// Two-gate confirmation:
+//   1) Native confirm() dialog (browser warning)
+//   2) Typed phrase via prompt() — must match "DELETE ALL HISTORY" exactly
+// The server also validates the phrase, so copying the fetch from devtools
+// still won't bypass the safeguard.
+async function clearAllHistory(){
+  const msg = document.getElementById("dangerMsg");
+  msg.textContent = "";
+  if (!confirm("⚠️ Clear ALL history?\n\nThis will permanently delete:\n • All uptime check history (status dots)\n • All incidents and their update timelines\n • The entire audit log\n\nServers, users, groups, webhooks, and settings will be kept.\n\nThis cannot be undone.")) return;
+  const phrase = prompt("To confirm, type exactly:\n\n   DELETE ALL HISTORY\n\nThen press OK.");
+  if (phrase !== "DELETE ALL HISTORY") {
+    msg.textContent = "Cancelled — confirmation phrase did not match.";
+    msg.style.color = "var(--orange)";
+    return;
+  }
+  msg.textContent = "Deleting all history…"; msg.style.color = "var(--text-2)";
+  try {
+    const r = await fetch("/api/admin/clear-history", {
+      method: "POST",
+      headers: {"Content-Type":"application/json"},
+      body: JSON.stringify({ confirm: "DELETE ALL HISTORY" })
+    });
+    const d = await r.json();
+    if (!r.ok) { msg.textContent = "Error: " + (d.error || "Failed"); msg.style.color = "var(--red)"; return; }
+    const summary = `Deleted ${d.deleted.history} history, ${d.deleted.incidents} incidents, ${d.deleted.audit} audit entries.`;
+    msg.textContent = "✓ " + summary; msg.style.color = "var(--green)";
+    toast("All history cleared", "success");
+    // Caches referencing wiped data are stale — drop them so the next tab
+    // switch fetches fresh (empty) lists.
+    if (typeof cacheDel === "function") {
+      try { cacheDel("admin-incidents"); } catch(_) {}
+    }
   } catch(e) {
     msg.textContent = "Error: " + e.message; msg.style.color = "var(--red)";
   }
