@@ -2041,10 +2041,12 @@ async function showServerForm(s){
     const subCats = Array.from(new Set((adminServers||[]).map(x => x.sub_category).filter(Boolean))).sort();
     document.getElementById("subCategoryHints").innerHTML = subCats.map(c => `<option value="${c}">`).join("");
   } catch(e) {}
-  document.getElementById("fLat").value  = s?.lat != null ? String(s.lat) : "";
-  document.getElementById("fLng").value  = s?.lng != null ? String(s.lng) : "";
-  document.getElementById("fAddress").value = "";
-  document.getElementById("fGeoResult").textContent = (s?.lat && s?.lng) ? `📍 ${parseFloat(s.lat).toFixed(5)}, ${parseFloat(s.lng).toFixed(5)}` : "";
+  document.getElementById("fLat").value     = s?.lat != null ? String(s.lat) : "";
+  document.getElementById("fLng").value     = s?.lng != null ? String(s.lng) : "";
+  document.getElementById("fAddress").value = s?.location_address || "";
+  document.getElementById("fGeoResult").textContent = (s?.lat && s?.lng)
+    ? (s.location_address ? `📍 ${s.location_address}` : `📍 ${parseFloat(s.lat).toFixed(5)}, ${parseFloat(s.lng).toFixed(5)}`)
+    : "";
   document.getElementById("fGeoResult").style.color = "var(--text-2)";
   document.getElementById("fGeoList").style.display = "none";
   document.getElementById("fTags").value  = (s?.tags||[]).join(", ");
@@ -2300,8 +2302,9 @@ function changeCT(i,t){
 function upCk(i,k,v)  { currentChecks[i][k] = v; }
 
 function _pickGeoResult(lat, lon, display_name) {
-  document.getElementById("fLat").value = parseFloat(lat).toFixed(6);
-  document.getElementById("fLng").value = parseFloat(lon).toFixed(6);
+  document.getElementById("fLat").value     = parseFloat(lat).toFixed(6);
+  document.getElementById("fLng").value     = parseFloat(lon).toFixed(6);
+  document.getElementById("fAddress").value = display_name;
   document.getElementById("fGeoResult").innerHTML =
     `✅ &nbsp;<span style="opacity:.8">${display_name}</span>`;
   document.getElementById("fGeoResult").style.color = "var(--green)";
@@ -2384,6 +2387,7 @@ async function submitForm(){
     failure_threshold: parseInt(document.getElementById("fThreshold").value) || 1,
     lat: parseFloat(document.getElementById("fLat").value) || null,
     lng: parseFloat(document.getElementById("fLng").value) || null,
+    location_address: document.getElementById("fAddress").value.trim() || null,
   };
   try {
     const r = await fetch(id ? `/api/admin/servers/${id}` : "/api/admin/servers", {
@@ -2416,7 +2420,7 @@ async function submitForm(){
       if (saveId != null && Array.isArray(liveServers)) {
         const lIdx = liveServers.findIndex(x => x.id == saveId);
         if (lIdx >= 0) {
-          liveServers[lIdx] = { ...liveServers[lIdx], name: body.name, host: body.host, description: body.description || "" };
+          liveServers[lIdx] = { ...liveServers[lIdx], name: body.name, host: body.host, description: body.description || "", location_address: body.location_address || null };
           cacheSet("servers", liveServers);
           renderSidebarList(liveServers);
         }

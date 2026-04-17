@@ -960,6 +960,9 @@ async function initDB() {
   try {
     await db.query("ALTER TABLE status_servers ADD COLUMN lng DECIMAL(10,7) DEFAULT NULL");
   } catch(e) { /* column already exists */ }
+  try {
+    await db.query("ALTER TABLE status_servers ADD COLUMN location_address VARCHAR(500) DEFAULT NULL");
+  } catch(e) { /* column already exists */ }
 
   // Load SMTP config from DB (overrides env vars if set)
   await loadSmtpFromDb();
@@ -2940,8 +2943,8 @@ app.post("/api/admin/servers", requireAuth, async (req, res) => {
   const id = name.toLowerCase().replace(/[^a-z0-9]+/g,"-").replace(/^-|-$/g,"") + "-" + Date.now();
   try {
     await db.query(
-      "INSERT INTO status_servers (id, name, host, description, category, sub_category, tags, checks, poll_interval_sec, failure_threshold, lat, lng) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)",
-      [id, name, host, description||"", (category||"").trim() || null, (sub_category||"").trim() || null, JSON.stringify(tags||[]), JSON.stringify(checks||[{type:"ping"}]), interval, threshold, lat, lng]
+      "INSERT INTO status_servers (id, name, host, description, category, sub_category, tags, checks, poll_interval_sec, failure_threshold, lat, lng, location_address) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)",
+      [id, name, host, description||"", (category||"").trim() || null, (sub_category||"").trim() || null, JSON.stringify(tags||[]), JSON.stringify(checks||[{type:"ping"}]), interval, threshold, lat, lng, req.body.location_address||null]
     );
     await setServerGroupIds(id, wantGroups);
     await loadConfig();
@@ -2954,7 +2957,7 @@ app.post("/api/admin/servers", requireAuth, async (req, res) => {
 });
 
 app.put("/api/admin/servers/:id", requireAuth, async (req, res) => {
-  const { name, host, description, category, sub_category, tags, checks, group_ids, poll_interval_sec, failure_threshold } = req.body;
+  const { name, host, description, category, sub_category, tags, checks, group_ids, poll_interval_sec, failure_threshold, location_address } = req.body;
   if (!name || !host) return res.status(400).json({ error:"name and host are required" });
   if (Array.isArray(checks)) {
     for (const c of checks) {
@@ -2997,8 +3000,8 @@ app.put("/api/admin/servers/:id", requireAuth, async (req, res) => {
       }
     }
     const [result] = await db.query(
-      "UPDATE status_servers SET name=?, host=?, description=?, category=?, sub_category=?, tags=?, checks=?, poll_interval_sec=?, failure_threshold=?, lat=?, lng=?, updated_at=NOW() WHERE id=?",
-      [name, host, description||"", (category||"").trim() || null, (sub_category||"").trim() || null, JSON.stringify(tags||[]), JSON.stringify(checks||[]), interval, threshold, lat, lng, req.params.id]
+      "UPDATE status_servers SET name=?, host=?, description=?, category=?, sub_category=?, tags=?, checks=?, poll_interval_sec=?, failure_threshold=?, lat=?, lng=?, location_address=?, updated_at=NOW() WHERE id=?",
+      [name, host, description||"", (category||"").trim() || null, (sub_category||"").trim() || null, JSON.stringify(tags||[]), JSON.stringify(checks||[]), interval, threshold, lat, lng, location_address||null, req.params.id]
     );
     if (result.affectedRows === 0) return res.status(404).json({ error:"Server not found" });
     // Admins with undefined group_ids leave groups alone; otherwise replace the full set.
@@ -4787,16 +4790,16 @@ app.post("/api/admin/import", requireAdmin, async (req, res) => {
         if (mode === "skip") { skipped++; continue; }
         const id = existing[0].id;
         await db.query(
-          "UPDATE status_servers SET host=?,description=?,category=?,sub_category=?,tags=?,checks=?,poll_interval_sec=?,failure_threshold=?,lat=?,lng=?,updated_at=NOW() WHERE id=?",
-          [s.host, s.description||"", cat, subCat, tags, checks, interval, threshold, lat, lng, id]
+          "UPDATE status_servers SET host=?,description=?,category=?,sub_category=?,tags=?,checks=?,poll_interval_sec=?,failure_threshold=?,lat=?,lng=?,location_address=?,updated_at=NOW() WHERE id=?",
+          [s.host, s.description||"", cat, subCat, tags, checks, interval, threshold, lat, lng, s.location_address||null, id]
         );
         if (Array.isArray(s.group_ids) && s.group_ids.length) await setServerGroupIds(id, s.group_ids);
         added++;
       } else {
         const id = s.name.toLowerCase().replace(/[^a-z0-9]+/g,"-").replace(/^-|-$/g,"") + "-" + Date.now() + "-" + Math.floor(Math.random()*9999);
         await db.query(
-          "INSERT INTO status_servers (id,name,host,description,category,sub_category,tags,checks,poll_interval_sec,failure_threshold,lat,lng) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)",
-          [id, s.name, s.host, s.description||"", cat, subCat, tags, checks, interval, threshold, lat, lng]
+          "INSERT INTO status_servers (id,name,host,description,category,sub_category,tags,checks,poll_interval_sec,failure_threshold,lat,lng,location_address) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)",
+          [id, s.name, s.host, s.description||"", cat, subCat, tags, checks, interval, threshold, lat, lng, s.location_address||null]
         );
         if (Array.isArray(s.group_ids) && s.group_ids.length) await setServerGroupIds(id, s.group_ids);
         added++;
