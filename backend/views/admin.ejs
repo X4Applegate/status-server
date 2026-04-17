@@ -2301,12 +2301,14 @@ function changeCT(i,t){
 }
 function upCk(i,k,v)  { currentChecks[i][k] = v; }
 
-function _pickGeoResult(lat, lon, display_name) {
-  document.getElementById("fLat").value     = parseFloat(lat).toFixed(6);
-  document.getElementById("fLng").value     = parseFloat(lon).toFixed(6);
-  document.getElementById("fAddress").value = display_name;
-  document.getElementById("fGeoResult").innerHTML =
-    `✅ &nbsp;<span style="opacity:.8">${display_name}</span>`;
+let _geoResults = [];
+function _pickGeoResult(idx) {
+  const d = _geoResults[idx];
+  if (!d) return;
+  document.getElementById("fLat").value     = parseFloat(d.lat).toFixed(6);
+  document.getElementById("fLng").value     = parseFloat(d.lon).toFixed(6);
+  document.getElementById("fAddress").value = d.display_name;
+  document.getElementById("fGeoResult").textContent = `📍 ${d.display_name}`;
   document.getElementById("fGeoResult").style.color = "var(--green)";
   document.getElementById("fGeoList").style.display = "none";
 }
@@ -2349,15 +2351,17 @@ async function geocodeAddress() {
       result.style.color = "var(--red)";
     } else if (data.length === 1) {
       // Single result — auto-select it
-      _pickGeoResult(data[0].lat, data[0].lon, data[0].display_name);
+      _geoResults = data;
+      _pickGeoResult(0);
     } else {
       // Multiple results — let user pick the right one
+      _geoResults = data;
       result.textContent = `${data.length} results found — pick the correct one:`;
       result.style.color = "var(--text-2)";
       list.style.display = "block";
       list.innerHTML = data.map((d, i) =>
-        `<div class="geo-pick-row" onclick="_pickGeoResult('${d.lat}','${d.lon}',${JSON.stringify(d.display_name)})">
-          <span style="font-family:var(--mono);font-size:11px;color:var(--blue);white-space:nowrap">${parseFloat(d.lat).toFixed(4)}, ${parseFloat(d.lon).toFixed(4)}</span>
+        `<div class="geo-pick-row" onclick="_pickGeoResult(${i})">
+          <span style="font-family:var(--mono);font-size:11px;color:var(--blue);flex-shrink:0">${parseFloat(d.lat).toFixed(5)}, ${parseFloat(d.lon).toFixed(5)}</span>
           <span style="color:var(--text-hi);font-size:12px;flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${d.display_name}</span>
         </div>`
       ).join("");
