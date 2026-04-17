@@ -3182,23 +3182,41 @@ app.get("/api/mapbox-token", requireAuth, (req, res) => {
   res.json({ token: mapboxConfig.token || "" });
 });
 
-// Geocoding proxy — forwards to Nominatim with proper server-side User-Agent.
+// Geocoding proxy — tries Nominatim first, falls back to Photon if no results.
 // Admin-only; used by the server edit form to resolve an address to lat/lng.
 app.get("/api/admin/geocode", requireAdmin, async (req, res) => {
   const q = (req.query.q || "").trim();
   if (!q) return res.status(400).json({ error: "Missing query" });
+  const headers = {
+    "User-Agent": "status-server/1.0 (self-hosted monitoring; admin geocode)",
+    "Accept-Language": "en"
+  };
   try {
-    const url = `https://nominatim.openstreetmap.org/search?format=json&limit=3&addressdetails=1&q=${encodeURIComponent(q)}`;
-    const r = await fetch(url, {
-      headers: {
-        "User-Agent": "status-server/1.0 (self-hosted monitoring; admin geocode)",
-        "Accept-Language": "en",
-        "Referer": "https://github.com/status-server"
-      }
+    // 1) Try Nominatim
+    const nr = await fetch(`https://nominatim.openstreetmap.org/search?format=json&limit=3&addressdetails=1&q=${encodeURIComponent(q)}`, { headers });
+    if (nr.ok) {
+      const nd = await nr.json();
+      if (nd.length) return res.json(nd);
+    }
+    // 2) Fall back to Photon (different OSM dataset, better address coverage)
+    const pr = await fetch(`https://photon.komoot.io/api/?q=${encodeURIComponent(q)}&limit=3`, { headers });
+    if (!pr.ok) return res.json([]);
+    const pd = await pr.json();
+    if (!pd.features || !pd.features.length) return res.json([]);
+    // Normalize Photon features to Nominatim-style {lat, lon, display_name}
+    const normalized = pd.features.map(f => {
+      const p = f.properties || {};
+      const [lon, lat] = f.geometry.coordinates;
+      const parts = [
+        p.housenumber && p.street ? `${p.housenumber} ${p.street}` : (p.street || p.name || ""),
+        p.locality || p.city || p.town || p.village || "",
+        p.state || "",
+        p.postcode || "",
+        p.country || ""
+      ].filter(Boolean);
+      return { lat: String(lat), lon: String(lon), display_name: parts.join(", ") };
     });
-    if (!r.ok) return res.status(502).json({ error: `Nominatim error ${r.status}` });
-    const data = await r.json();
-    res.json(data);
+    res.json(normalized);
   } catch(e) {
     res.status(502).json({ error: e.message });
   }
