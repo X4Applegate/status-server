@@ -1759,6 +1759,9 @@ function drawChart(data){
 // Refresh selected server detail every 30s
 setInterval(() => { if (selectedServerId) selectServer(selectedServerId); }, 30000);
 
+// Map state — declared here so renderServers() (called by the IIFEs below) can reference them safely
+let _adminMap = null, _adminMarkers = [], _adminMapActive = false;
+
 // On boot, hydrate from cache so the sidebar/detail render before SSE arrives
 (function hydrateFromCache(){
   const cached = cacheGet("servers");
@@ -3944,7 +3947,6 @@ function toast(msg, type="info"){
 }
 
 // ── Admin Map View ────────────────────────────────────────────────────────────
-let _adminMap = null, _adminMarkers = [], _adminMapActive = false;
 
 function _loadAdminMapLibre(cb) {
   if (window.maplibregl) { cb(); return; }
