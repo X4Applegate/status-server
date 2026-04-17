@@ -758,12 +758,6 @@ body{font-family:var(--sans);background:var(--bg);color:var(--text);min-height:1
       </div>
     </div>
   </div>
-  <!-- API Keys panel -->
-  <div id="aApiKeysView" class="admin-section" style="display:none">
-    <div class="drawer-body" id="apiKeysBody" style="padding:20px">
-      <div class="empty-state">Loading…</div>
-    </div>
-  </div>
 
   <div id="aGroupFormView" class="admin-section" style="display:none">
     <div class="drawer-body">
@@ -1832,7 +1826,6 @@ async function switchTab(tab){
   document.getElementById("aOmadaFormView").style.display   = "none";
   document.getElementById("aOmadaSitesView").style.display  = "none";
   document.getElementById("aSquareFormView").style.display  = "none";
-  document.getElementById("aApiKeysView").style.display     = "none";
   const searchBar = document.getElementById("serverSearchBar");
   const statBar   = document.getElementById("drawerStatBar");
   if (tab === "servers") {
@@ -2276,9 +2269,7 @@ async function geocodeAddress() {
   btn.disabled = true; btn.textContent = "Looking up…";
   result.textContent = ""; result.style.color = "var(--text-2)";
   try {
-    const r = await fetch(`https://nominatim.openstreetmap.org/search?format=json&limit=1&q=${encodeURIComponent(query)}`, {
-      headers: { "Accept-Language": "en", "User-Agent": "status-server-admin" }
-    });
+    const r = await fetch(`/api/admin/geocode?q=${encodeURIComponent(query)}`);
     const data = await r.json();
     if (!data.length) {
       result.textContent = "Address not found — try a more specific location.";
@@ -3696,15 +3687,13 @@ async function handleImportFile(input) {
 
 // ── API Keys ──────────────────────────────────────────────────────────────────
 async function loadApiKeyList() {
-  const el = document.getElementById("apiKeysBody");
-  document.getElementById("aApiKeysView").style.display = "";
-  document.getElementById("aListView").style.display    = "none";
-  document.getElementById("addBtn").style.display       = "";
+  const el = document.getElementById("adminPanelBody");
   el.innerHTML = `<div class="empty-state">Loading…</div>`;
   try {
     const r = await fetch("/api/admin/api-keys");
-    if (!r.ok) { el.innerHTML = `<div class="empty-state">Failed to load.</div>`; return; }
+    if (!r.ok) { const d = await r.json().catch(()=>({})); el.innerHTML = `<div class="empty-state">Failed to load: ${d.error || r.statusText}</div>`; return; }
     const keys = await r.json();
+    document.getElementById("aCount").textContent = `${keys.length} key${keys.length===1?"":"s"}`;
     if (!keys.length) {
       el.innerHTML = `<div class="empty-state">No API keys yet. Click <strong>Generate Key</strong> to create one.</div>
         <div style="padding:0 20px 20px">

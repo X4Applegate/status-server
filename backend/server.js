@@ -3182,6 +3182,28 @@ app.get("/api/mapbox-token", requireAuth, (req, res) => {
   res.json({ token: mapboxConfig.token || "" });
 });
 
+// Geocoding proxy — forwards to Nominatim with proper server-side User-Agent.
+// Admin-only; used by the server edit form to resolve an address to lat/lng.
+app.get("/api/admin/geocode", requireAdmin, async (req, res) => {
+  const q = (req.query.q || "").trim();
+  if (!q) return res.status(400).json({ error: "Missing query" });
+  try {
+    const url = `https://nominatim.openstreetmap.org/search?format=json&limit=3&addressdetails=1&q=${encodeURIComponent(q)}`;
+    const r = await fetch(url, {
+      headers: {
+        "User-Agent": "status-server/1.0 (self-hosted monitoring; admin geocode)",
+        "Accept-Language": "en",
+        "Referer": "https://github.com/status-server"
+      }
+    });
+    if (!r.ok) return res.status(502).json({ error: `Nominatim error ${r.status}` });
+    const data = await r.json();
+    res.json(data);
+  } catch(e) {
+    res.status(502).json({ error: e.message });
+  }
+});
+
 app.post("/api/admin/settings/smtp/test", requireAdmin, async (req, res) => {
   const { to } = req.body;
   if (!to) return res.status(400).json({ error: "Recipient email required" });
