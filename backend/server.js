@@ -397,6 +397,20 @@ function isValidEmail(s) {
   return /^[^\s@]{1,64}@[^\s@]{1,253}\.[^\s@]{1,63}$/.test(s);
 }
 
+// Human-readable duration string — "2m 14s", "1h 05m", "3d 4h". Used in incident
+// update messages ("restored after 2m 14s") and on the public incident page.
+function fmtDuration(seconds) {
+  const s = Math.max(0, Math.round(Number(seconds) || 0));
+  if (s < 60)    return `${s}s`;
+  if (s < 3600)  return `${Math.floor(s/60)}m ${s%60}s`;
+  if (s < 86400) {
+    const h = Math.floor(s/3600), m = Math.floor((s%3600)/60);
+    return `${h}h ${String(m).padStart(2,"0")}m`;
+  }
+  const d = Math.floor(s/86400), h = Math.floor((s%86400)/3600);
+  return `${d}d ${h}h`;
+}
+
 function isPrivateOrLocalIp(host) {
   if (net.isIP(host) === 4) {
     if (host === "127.0.0.1" || host === "0.0.0.0") return true;
@@ -731,6 +745,32 @@ async function initDB() {
       duration_s  INT       NULL DEFAULT NULL,
       cause       VARCHAR(255) DEFAULT NULL,
       INDEX idx_server (server_id)
+    )
+  `);
+
+  // Additive incident columns for the public incident page:
+  //   title  — optional custom headline (falls back to server_name + cause)
+  //   status — investigating → identified → monitoring → resolved
+  //   impact — minor / major / critical
+  //   public — 1 = show on public incident page, 0 = hidden
+  // All default to sensible values so existing auto-detected incidents keep working.
+  try { await db.query("ALTER TABLE status_incidents ADD COLUMN title VARCHAR(200) DEFAULT NULL"); } catch(e) {}
+  try { await db.query("ALTER TABLE status_incidents ADD COLUMN status ENUM('investigating','identified','monitoring','resolved') NOT NULL DEFAULT 'investigating'"); } catch(e) {}
+  try { await db.query("ALTER TABLE status_incidents ADD COLUMN impact ENUM('minor','major','critical') NOT NULL DEFAULT 'minor'"); } catch(e) {}
+  try { await db.query("ALTER TABLE status_incidents ADD COLUMN public TINYINT(1) NOT NULL DEFAULT 1"); } catch(e) {}
+
+  // Timeline of operator-authored updates for an incident.
+  // Each status transition (investigating → identified, etc.) appends one row.
+  // The message field supports plain text / minimal markdown — rendered escaped on the public page.
+  await db.query(`
+    CREATE TABLE IF NOT EXISTS status_incident_updates (
+      id           BIGINT AUTO_INCREMENT PRIMARY KEY,
+      incident_id  BIGINT NOT NULL,
+      status       ENUM('investigating','identified','monitoring','resolved') NOT NULL,
+      message      TEXT NOT NULL,
+      created_by   INT NULL,
+      created_at   TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+      INDEX idx_incident (incident_id, created_at)
     )
   `);
 
@@ -1924,18 +1964,32 @@ async function recordHistory(def, checks, overall) {
     );
 
     if (overall !== "up" && open.length === 0) {
-      // New incident
+      // New incident. status defaults to 'investigating', impact to 'minor'.
+      // We seed the update timeline with the initial detection message so the
+      // public page always has at least one entry to show.
       const cause = checks.filter(c => !c.ok).map(c => c.detail).join(", ");
-      await db.query(
+      const [ins] = await db.query(
         "INSERT INTO status_incidents (server_id, server_name, started_at, cause) VALUES (?,?,?,?)",
         [def.id, def.name, now, cause]
       );
+      const detectionMsg = cause
+        ? `Automated check failed: ${cause}`
+        : `Automated check detected ${def.name} is not responding.`;
+      await db.query(
+        "INSERT INTO status_incident_updates (incident_id, status, message) VALUES (?,?,?)",
+        [ins.insertId, "investigating", detectionMsg]
+      );
     } else if (overall === "up" && open.length > 0) {
-      // Close open incident
+      // Auto-close open incident. If an operator hasn't manually moved the status
+      // past "investigating" we still mark it resolved and append a recovery update.
       const dur = Math.round((now - new Date(open[0].started_at)) / 1000);
       await db.query(
-        "UPDATE status_incidents SET ended_at=?, duration_s=? WHERE id=?",
+        "UPDATE status_incidents SET ended_at=?, duration_s=?, status='resolved' WHERE id=?",
         [now, dur, open[0].id]
+      );
+      await db.query(
+        "INSERT INTO status_incident_updates (incident_id, status, message) VALUES (?,?,?)",
+        [open[0].id, "resolved", `Automated checks are passing again. Service restored after ${fmtDuration(dur)}.`]
       );
     }
 
@@ -4323,7 +4377,7 @@ app.get("/api/public/heartbeat/:id", allowGroupedOrAuth, async (req, res) => {
   } catch(e) { res.status(500).json({ error: e.message }); }
 });
 
-// Incidents for a server
+// Incidents for a server — returns recent incidents with their full update timeline.
 app.get("/api/public/incidents/:id", allowGroupedOrAuth, async (req, res) => {
   try {
     const [rows] = await db.query(
@@ -4332,7 +4386,170 @@ app.get("/api/public/incidents/:id", allowGroupedOrAuth, async (req, res) => {
        ORDER BY started_at DESC LIMIT 20`,
       [req.params.id]
     );
-    res.json(rows);
+    // Attach updates to each incident in one query (avoids N+1)
+    const ids = rows.map(r => r.id);
+    let updatesByIncident = {};
+    if (ids.length) {
+      const [uRows] = await db.query(
+        `SELECT id, incident_id, status, message, created_at
+         FROM status_incident_updates WHERE incident_id IN (?)
+         ORDER BY created_at ASC`,
+        [ids]
+      );
+      for (const u of uRows) {
+        (updatesByIncident[u.incident_id] = updatesByIncident[u.incident_id] || []).push(u);
+      }
+    }
+    res.json(rows.map(r => ({ ...r, updates: updatesByIncident[r.id] || [] })));
+  } catch(e) { res.status(500).json({ error: e.message }); }
+});
+
+// Public incident feed for a group dashboard. Returns incidents for every server
+// in the group (filtered to public=1) with their update timelines. Used by the
+// /dashboard/:slug/incidents page and can be polled by external integrations.
+app.get("/api/public/group/:slug/incidents", async (req, res) => {
+  try {
+    const [groups] = await db.query("SELECT id FROM status_groups WHERE slug=?", [req.params.slug]);
+    if (!groups.length) return res.status(404).json({ error: "Group not found" });
+    const groupId = groups[0].id;
+    const [serverRows] = await db.query(
+      "SELECT server_id FROM status_server_group_map WHERE group_id=?",
+      [groupId]
+    );
+    const serverIds = serverRows.map(r => r.server_id);
+    if (!serverIds.length) return res.json({ open: [], recent: [] });
+
+    const [rows] = await db.query(
+      `SELECT * FROM status_incidents
+       WHERE server_id IN (?) AND public=1
+       ORDER BY started_at DESC LIMIT 60`,
+      [serverIds]
+    );
+    const ids = rows.map(r => r.id);
+    let updatesByIncident = {};
+    if (ids.length) {
+      const [uRows] = await db.query(
+        `SELECT id, incident_id, status, message, created_at
+         FROM status_incident_updates WHERE incident_id IN (?)
+         ORDER BY created_at ASC`,
+        [ids]
+      );
+      for (const u of uRows) {
+        (updatesByIncident[u.incident_id] = updatesByIncident[u.incident_id] || []).push(u);
+      }
+    }
+    const enriched = rows.map(r => ({ ...r, updates: updatesByIncident[r.id] || [] }));
+    const open   = enriched.filter(r => !r.ended_at);
+    const recent = enriched.filter(r =>  r.ended_at);
+    res.json({ open, recent });
+  } catch(e) { res.status(500).json({ error: e.message }); }
+});
+
+// ── Admin incident management ───────────────────────────────────────────────
+// List all incidents (open + recent) across every server the caller can see.
+// Viewers are filtered by allowed_group_ids; admins see everything.
+app.get("/api/admin/incidents", requireAuth, async (req, res) => {
+  try {
+    let sql = `SELECT i.* FROM status_incidents i`;
+    const params = [];
+    if (req.session.role !== "admin") {
+      const allowed = await getUserAllowedGroupIds(req.session.userId, req.session.role) || [];
+      if (!allowed.length) return res.json([]);
+      sql += ` JOIN status_server_group_map m ON m.server_id = i.server_id
+               WHERE m.group_id IN (?)`;
+      params.push(allowed);
+    }
+    sql += ` GROUP BY i.id ORDER BY i.started_at DESC LIMIT 200`;
+    const [rows] = await db.query(sql, params);
+    const ids = rows.map(r => r.id);
+    let updatesByIncident = {};
+    if (ids.length) {
+      const [uRows] = await db.query(
+        `SELECT id, incident_id, status, message, created_at
+         FROM status_incident_updates WHERE incident_id IN (?)
+         ORDER BY created_at ASC`,
+        [ids]
+      );
+      for (const u of uRows) {
+        (updatesByIncident[u.incident_id] = updatesByIncident[u.incident_id] || []).push(u);
+      }
+    }
+    res.json(rows.map(r => ({ ...r, updates: updatesByIncident[r.id] || [] })));
+  } catch(e) { res.status(500).json({ error: e.message }); }
+});
+
+// Edit incident metadata — title, impact, public flag. status is driven by
+// the update timeline (see POST .../updates below).
+app.put("/api/admin/incidents/:id", requireAdmin, async (req, res) => {
+  try {
+    const { title, impact, public: isPublic } = req.body;
+    const fields = [];
+    const params = [];
+    if (title !== undefined)   { fields.push("title=?");  params.push(String(title).slice(0,200) || null); }
+    if (impact !== undefined)  {
+      if (!["minor","major","critical"].includes(impact)) return res.status(400).json({ error:"impact must be minor|major|critical" });
+      fields.push("impact=?"); params.push(impact);
+    }
+    if (isPublic !== undefined){ fields.push("public=?"); params.push(isPublic ? 1 : 0); }
+    if (!fields.length) return res.status(400).json({ error: "No fields to update" });
+    params.push(req.params.id);
+    await db.query(`UPDATE status_incidents SET ${fields.join(", ")} WHERE id=?`, params);
+    res.json({ ok: true });
+  } catch(e) { res.status(500).json({ error: e.message }); }
+});
+
+// Post a new update to an incident. Changing status="resolved" closes the incident.
+app.post("/api/admin/incidents/:id/updates", requireAdmin, async (req, res) => {
+  const { status, message } = req.body;
+  if (!["investigating","identified","monitoring","resolved"].includes(status)) {
+    return res.status(400).json({ error: "status must be investigating|identified|monitoring|resolved" });
+  }
+  const msg = (message || "").toString().trim();
+  if (!msg) return res.status(400).json({ error: "Message required" });
+  if (msg.length > 4000) return res.status(400).json({ error: "Message too long (4000 max)" });
+  try {
+    const [rows] = await db.query("SELECT * FROM status_incidents WHERE id=?", [req.params.id]);
+    if (!rows.length) return res.status(404).json({ error: "Incident not found" });
+    const inc = rows[0];
+
+    await db.query(
+      "INSERT INTO status_incident_updates (incident_id, status, message, created_by) VALUES (?,?,?,?)",
+      [inc.id, status, msg, req.session.userId || null]
+    );
+    // Mirror the latest status onto the parent row + close if resolved
+    if (status === "resolved" && !inc.ended_at) {
+      const now = new Date();
+      const dur = Math.round((now - new Date(inc.started_at)) / 1000);
+      await db.query(
+        "UPDATE status_incidents SET status='resolved', ended_at=?, duration_s=? WHERE id=?",
+        [now, dur, inc.id]
+      );
+    } else {
+      await db.query("UPDATE status_incidents SET status=? WHERE id=?", [status, inc.id]);
+    }
+    res.json({ ok: true });
+  } catch(e) { res.status(500).json({ error: e.message }); }
+});
+
+// Delete an update (typo fix). Never allow deleting the last update — there
+// should always be at least one entry in the timeline.
+app.delete("/api/admin/incident-updates/:id", requireAdmin, async (req, res) => {
+  try {
+    const [rows] = await db.query("SELECT incident_id FROM status_incident_updates WHERE id=?", [req.params.id]);
+    if (!rows.length) return res.status(404).json({ error: "Update not found" });
+    const [count] = await db.query("SELECT COUNT(*) AS n FROM status_incident_updates WHERE incident_id=?", [rows[0].incident_id]);
+    if (count[0].n <= 1) return res.status(400).json({ error: "Cannot delete the only update on an incident" });
+    await db.query("DELETE FROM status_incident_updates WHERE id=?", [req.params.id]);
+    res.json({ ok: true });
+  } catch(e) { res.status(500).json({ error: e.message }); }
+});
+
+// Delete an entire incident (admin only, for spurious flaps or test data).
+app.delete("/api/admin/incidents/:id", requireAdmin, async (req, res) => {
+  try {
+    await db.query("DELETE FROM status_incident_updates WHERE incident_id=?", [req.params.id]);
+    await db.query("DELETE FROM status_incidents WHERE id=?", [req.params.id]);
+    res.json({ ok: true });
   } catch(e) { res.status(500).json({ error: e.message }); }
 });
 
@@ -4776,6 +4993,20 @@ app.use(async (req, res, next) => {
           ? res.render("group-legal", { g, type: "terms", content: g.terms_text })
           : res.render("terms");
       }
+      if (req.path === "/incidents") {
+        return res.render("incidents", {
+          groupSlug:    g.slug,
+          groupName:    g.name,
+          accentColor:  g.accent_color || "#2a7fff",
+          bgColor:      g.bg_color || null,
+          logoText:     g.logo_text || "",
+          logoImage:    g.logo_image || null,
+          logoSize:     g.logo_size || 42,
+          pageTitle:    `${g.name} — Incident History`,
+          privacyUrl:   g.privacy_text ? "/privacy" : null,
+          termsUrl:     g.terms_text   ? "/terms"   : null,
+        });
+      }
       return res.render("index", {
         // Relative /admin — keeps the viewer on their own custom domain (e.g.
         // status.myanthemcoffee.com/admin) so they can log in and manage without
@@ -4870,6 +5101,28 @@ app.get("/dashboard/:slug/privacy", pageLimiter, async (req, res) => {
     return g.privacy_text
       ? res.render("group-legal", { g, type: "privacy", content: g.privacy_text })
       : res.render("privacy");
+  } catch(e) { res.status(500).send("Server error"); }
+});
+
+// Public incident history page — lists every public incident for servers in this group
+// with the operator-authored update timeline. Uses the same branding as the dashboard.
+app.get("/dashboard/:slug/incidents", pageLimiter, async (req, res) => {
+  try {
+    const [rows] = await db.query("SELECT * FROM status_groups WHERE slug=?", [req.params.slug]);
+    if (!rows.length) return res.status(404).render("404", { slug: req.params.slug });
+    const g = rows[0];
+    res.render("incidents", {
+      groupSlug:    g.slug,
+      groupName:    g.name,
+      accentColor:  g.accent_color || "#2a7fff",
+      bgColor:      g.bg_color || null,
+      logoText:     g.logo_text || "",
+      logoImage:    g.logo_image || null,
+      logoSize:     g.logo_size || 42,
+      pageTitle:    `${g.name} — Incident History`,
+      privacyUrl:   g.privacy_text ? `/dashboard/${g.slug}/privacy` : "/privacy",
+      termsUrl:     g.terms_text   ? `/dashboard/${g.slug}/terms`   : "/terms",
+    });
   } catch(e) { res.status(500).send("Server error"); }
 });
 

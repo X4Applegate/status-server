@@ -591,7 +591,7 @@ body{font-family:var(--sans);background:var(--bg);color:var(--text);min-height:1
   </div>
   <div id="aListView" class="admin-section">
     <div class="drawer-toolbar">
-      <div class="admin-tabs"><button class="admin-tab active" id="tabServers" onclick="switchTab('servers')">Servers</button><button class="admin-tab" id="tabGroups" onclick="switchTab('groups')">Groups</button><button class="admin-tab" id="tabOmada" onclick="switchTab('omada')">Omada</button><button class="admin-tab" id="tabSquare" onclick="switchTab('square')">Square</button><button class="admin-tab" id="tabMaint" onclick="switchTab('maint')">Maintenance</button><button class="admin-tab" id="tabApiKeys" onclick="switchTab('apikeys')">API Keys</button><button class="admin-tab" id="tabUsers" onclick="switchTab('users')">Users</button><button class="admin-tab" id="tabWebhooks" onclick="switchTab('webhooks')">Webhooks</button><button class="admin-tab" id="tabSettings" onclick="switchTab('settings')">Settings</button><button class="admin-tab" id="tabAudit" onclick="switchTab('audit')">Audit</button></div>
+      <div class="admin-tabs"><button class="admin-tab active" id="tabServers" onclick="switchTab('servers')">Servers</button><button class="admin-tab" id="tabGroups" onclick="switchTab('groups')">Groups</button><button class="admin-tab" id="tabOmada" onclick="switchTab('omada')">Omada</button><button class="admin-tab" id="tabSquare" onclick="switchTab('square')">Square</button><button class="admin-tab" id="tabMaint" onclick="switchTab('maint')">Maintenance</button><button class="admin-tab" id="tabIncidents" onclick="switchTab('incidents')">Incidents</button><button class="admin-tab" id="tabApiKeys" onclick="switchTab('apikeys')">API Keys</button><button class="admin-tab" id="tabUsers" onclick="switchTab('users')">Users</button><button class="admin-tab" id="tabWebhooks" onclick="switchTab('webhooks')">Webhooks</button><button class="admin-tab" id="tabSettings" onclick="switchTab('settings')">Settings</button><button class="admin-tab" id="tabAudit" onclick="switchTab('audit')">Audit</button></div>
       <span style="font-size:11px;color:var(--text-2)" id="aCount"></span>
       <div class="drawer-spacer"></div>
       <button class="btn" id="importBtn" onclick="triggerImport()" style="font-size:11px;padding:5px 11px;display:none" title="Import servers from JSON">⬆ Import</button>
@@ -1825,7 +1825,7 @@ function closeAdmin(){
 
 async function switchTab(tab){
   // Viewers can access Servers, Omada, Square, Maintenance, Webhooks, and Groups. Admin-only tabs bounce back.
-  if (!isAdmin() && !["servers","omada","square","maint","webhooks","groups"].includes(tab)) tab = "servers";
+  if (!isAdmin() && !["servers","omada","square","maint","incidents","webhooks","groups"].includes(tab)) tab = "servers";
   currentTab = tab;
   serverFormReturn = null;
   document.getElementById("tabServers").classList.toggle("active",  tab === "servers");
@@ -1833,14 +1833,17 @@ async function switchTab(tab){
   document.getElementById("tabOmada").classList.toggle("active",    tab === "omada");
   document.getElementById("tabSquare").classList.toggle("active",   tab === "square");
   document.getElementById("tabMaint").classList.toggle("active",    tab === "maint");
+  document.getElementById("tabIncidents").classList.toggle("active",tab === "incidents");
   document.getElementById("tabApiKeys").classList.toggle("active",  tab === "apikeys");
   document.getElementById("tabUsers").classList.toggle("active",    tab === "users");
   document.getElementById("tabWebhooks").classList.toggle("active", tab === "webhooks");
   document.getElementById("tabSettings").classList.toggle("active", tab === "settings");
   document.getElementById("tabAudit").classList.toggle("active",    tab === "audit");
-  const labels = { servers:"Add Server", groups:"Add Group", omada:"Add Controller", square:"Add Account", maint:"Schedule Window", apikeys:"Generate Key", users:"Add User", webhooks:"Add Webhook", settings:"", audit:"" };
+  const labels = { servers:"Add Server", groups:"Add Group", omada:"Add Controller", square:"Add Account", maint:"Schedule Window", incidents:"", apikeys:"Generate Key", users:"Add User", webhooks:"Add Webhook", settings:"", audit:"" };
   document.getElementById("addBtnLabel").textContent = labels[tab] || "";
-  const hideAdd = (!isAdmin() && (tab==="groups"||tab==="users")) || tab==="settings" || tab==="audit";
+  // Incidents are created automatically from failed checks or via the Post Update button
+  // on each row — there's no "add incident" flow, so hide the Add button for that tab.
+  const hideAdd = (!isAdmin() && (tab==="groups"||tab==="users")) || tab==="settings" || tab==="audit" || tab==="incidents";
   document.getElementById("addBtn").style.display = hideAdd ? "none" : "";
   document.getElementById("addBtn").onclick =
     tab === "servers"  ? () => showServerForm(null) :
@@ -1852,6 +1855,7 @@ async function switchTab(tab){
     tab === "users"    ? () => showUserForm(null)   :
     tab === "settings" ? () => {}                   :
     tab === "audit"    ? () => {}                   :
+    tab === "incidents"? () => {}                   :
                          () => showWebhookForm(null);
   // Show/hide import+export buttons (servers tab only, admin only)
   const showIE = tab === "servers" && isAdmin();
@@ -1878,16 +1882,17 @@ async function switchTab(tab){
     statBar.classList.remove("visible");
     clearServerSearch();
   }
-  if      (tab === "servers")  await loadServerList();
-  else if (tab === "groups")   await loadGroupList();
-  else if (tab === "omada")    await loadOmadaList();
-  else if (tab === "square")   await loadSquareList();
-  else if (tab === "maint")    await loadMaintList();
-  else if (tab === "apikeys")  await loadApiKeyList();
-  else if (tab === "users")    await loadUserList();
-  else if (tab === "settings") await loadSettings();
-  else if (tab === "audit")    await loadAuditLog();
-  else                         await loadWebhookList();
+  if      (tab === "servers")   await loadServerList();
+  else if (tab === "groups")    await loadGroupList();
+  else if (tab === "omada")     await loadOmadaList();
+  else if (tab === "square")    await loadSquareList();
+  else if (tab === "maint")     await loadMaintList();
+  else if (tab === "incidents") await loadIncidentList();
+  else if (tab === "apikeys")   await loadApiKeyList();
+  else if (tab === "users")     await loadUserList();
+  else if (tab === "settings")  await loadSettings();
+  else if (tab === "audit")     await loadAuditLog();
+  else                          await loadWebhookList();
   requestAnimationFrame(() => requestAnimationFrame(updatePanelScrollBtns));
 }
 
@@ -3940,6 +3945,258 @@ async function askDelMaint(id, title){
     const data = await r.json();
     if (!r.ok) { toast(data.error || "Delete failed", "error"); return; }
     await loadMaintList();
+  } catch(e) { toast(e.message, "error"); }
+}
+
+// ── Incidents ─────────────────────────────────────────────────────────────────
+// The incident feature has three pieces:
+//   1. Automated detection (server.js) opens/closes incidents from failed checks
+//   2. This admin UI lets operators edit title/impact/public flag and post
+//      customer-facing updates that appear on the public /dashboard/:slug/incidents page
+//   3. The public page polls /api/public/group/:slug/incidents for rendering
+let adminIncidents = [];
+
+function _incStatusColor(status){
+  return status === "investigating" ? "var(--red)"
+       : status === "identified"    ? "var(--orange)"
+       : status === "monitoring"    ? "#a78bfa"
+       : /* resolved */               "var(--green)";
+}
+function _incImpactColor(impact){
+  return impact === "critical" ? "var(--red)"
+       : impact === "major"    ? "var(--orange)"
+       :                         "var(--text-2)";
+}
+function _incFmtDate(iso){
+  if (!iso) return "";
+  try { return new Date(iso).toLocaleString(undefined, {month:"short", day:"numeric", hour:"numeric", minute:"2-digit"}); }
+  catch(e) { return iso; }
+}
+function _incFmtDuration(seconds){
+  const s = Math.max(0, Math.round(Number(seconds)||0));
+  if (s < 60) return s+"s";
+  if (s < 3600) return Math.floor(s/60)+"m "+(s%60)+"s";
+  if (s < 86400) { const h=Math.floor(s/3600), m=Math.floor((s%3600)/60); return h+"h "+String(m).padStart(2,"0")+"m"; }
+  const d=Math.floor(s/86400), h=Math.floor((s%86400)/3600); return d+"d "+h+"h";
+}
+
+function renderAdminIncidentList(list){
+  const el = document.getElementById("adminPanelBody");
+  document.getElementById("aCount").textContent = `${list.length} incident${list.length===1?"":"s"}`;
+  if (!list.length){
+    el.innerHTML = `<div class="empty-state">No incidents yet.<br>Incidents open automatically when a server's checks fail. You can also post manual updates from here.</div>`;
+    return;
+  }
+  // Open incidents first, then recent resolved (list arrives DESC by started_at)
+  const open   = list.filter(x => !x.ended_at);
+  const closed = list.filter(x =>  x.ended_at);
+  const ordered = [...open, ...closed];
+
+  el.innerHTML = ordered.map(inc => {
+    const status = inc.status || (inc.ended_at ? "resolved" : "investigating");
+    const impact = inc.impact || "minor";
+    const title  = inc.title || (inc.server_name + (inc.cause ? " — " + (inc.cause.split(",")[0].trim()) : ""));
+    const isOpen = !inc.ended_at;
+    const meta = isOpen
+      ? `<span style="color:var(--red);font-weight:600">OPEN</span> · started ${_incFmtDate(inc.started_at)}`
+      : `Resolved · ${_incFmtDuration(inc.duration_s)} · ended ${_incFmtDate(inc.ended_at)}`;
+    const publicFlag = inc.public
+      ? `<span title="Visible on public incident page" style="color:var(--text-2);font-size:11px">🌐 public</span>`
+      : `<span title="Hidden from public incident page" style="color:var(--orange);font-size:11px">🔒 private</span>`;
+    return `<div class="admin-server-item" style="align-items:flex-start">
+      <div class="admin-dot" style="background:${_incStatusColor(status)};margin-top:6px"></div>
+      <div class="admin-info" style="min-width:0;flex:1">
+        <div class="admin-name" style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
+          <span style="overflow:hidden;text-overflow:ellipsis">${_escHtml(title)}</span>
+          <span style="font-size:10px;font-weight:700;padding:2px 7px;border-radius:8px;background:var(--surface2);color:${_incStatusColor(status)};letter-spacing:.04em">${status.toUpperCase()}</span>
+          <span style="font-size:10px;font-weight:700;padding:2px 7px;border-radius:8px;background:var(--surface2);color:${_incImpactColor(impact)};letter-spacing:.04em">${impact.toUpperCase()}</span>
+          ${publicFlag}
+        </div>
+        <div class="admin-host">${_escHtml(inc.server_name)}</div>
+        <div class="admin-checks-label">${meta}</div>
+      </div>
+      <div class="admin-row-actions" onclick="event.stopPropagation()">
+        <button class="btn btn-sm" onclick="showIncidentPanel(${inc.id})">Manage</button>
+      </div>
+    </div>`;
+  }).join("");
+}
+
+function _escHtml(s){ return String(s||"").replace(/[&<>"']/g, c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c])); }
+
+async function loadIncidentList(){
+  const el = document.getElementById("adminPanelBody");
+  el.innerHTML = `<div style="padding:24px;text-align:center;color:var(--text-2)">Loading incidents…</div>`;
+  try {
+    const r = await fetch("/api/admin/incidents");
+    if (r.status === 401) { window.location.href = "/"; return; }
+    if (!r.ok) { el.innerHTML = `<div class="empty-state">Error ${r.status}</div>`; return; }
+    adminIncidents = await r.json();
+    renderAdminIncidentList(adminIncidents);
+  } catch(e) {
+    el.innerHTML = `<div class="empty-state">Failed to load: ${e.message}</div>`;
+  }
+}
+
+// Full-screen management panel for a single incident. Rendered inline by
+// replacing the list body — no separate form view needed because every
+// action (edit meta, post update) lives on this one panel.
+function showIncidentPanel(id){
+  const inc = adminIncidents.find(x => x.id === id);
+  if (!inc) { toast("Incident not found", "error"); return; }
+  const title  = inc.title || "";
+  const defaultTitle = inc.server_name + (inc.cause ? " — " + (inc.cause.split(",")[0].trim()) : "");
+  const updates = Array.isArray(inc.updates) ? inc.updates.slice().reverse() : [];
+  const status = inc.status || (inc.ended_at ? "resolved" : "investigating");
+  const impact = inc.impact || "minor";
+  const isPublic = !!inc.public;
+  const isOpen = !inc.ended_at;
+
+  const updatesHtml = updates.length ? updates.map(u => `
+    <div style="padding:12px 14px;border:1px solid var(--border);border-radius:8px;margin-bottom:8px;background:var(--surface)">
+      <div style="display:flex;align-items:center;gap:10px;margin-bottom:6px">
+        <span style="font-size:10px;font-weight:700;padding:2px 7px;border-radius:8px;background:var(--surface2);color:${_incStatusColor(u.status)};letter-spacing:.04em">${u.status.toUpperCase()}</span>
+        <span style="font-size:11px;color:var(--text-2);font-family:var(--mono)">${_incFmtDate(u.created_at)}</span>
+        <span style="flex:1"></span>
+        <button class="btn btn-sm btn-danger" style="font-size:10px;padding:2px 8px" onclick="askDelIncidentUpdate(${u.id}, ${inc.id})" title="Delete this update">✕</button>
+      </div>
+      <div style="font-size:13px;color:var(--text-hi);white-space:pre-wrap;line-height:1.5">${_escHtml(u.message)}</div>
+    </div>
+  `).join("") : `<div style="padding:20px;text-align:center;color:var(--text-2);font-size:13px">No updates yet</div>`;
+
+  const el = document.getElementById("adminPanelBody");
+  el.innerHTML = `
+    <div style="padding:20px 24px;max-width:720px;margin:0 auto">
+      <a href="#" onclick="event.preventDefault();switchTab('incidents')" style="font-size:12px;color:var(--text-2);text-decoration:none;display:inline-flex;align-items:center;gap:4px;margin-bottom:16px">
+        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="15 18 9 12 15 6"/></svg>
+        Back to incidents
+      </a>
+      <div style="margin-bottom:24px">
+        <div style="font-size:11px;color:var(--text-2);text-transform:uppercase;letter-spacing:.08em;margin-bottom:4px">${_escHtml(inc.server_name)}</div>
+        <h2 style="font-size:20px;font-weight:700;color:var(--text-white);letter-spacing:-.01em">${_escHtml(inc.title || defaultTitle)}</h2>
+        <div style="font-size:12px;color:var(--text-2);margin-top:6px">
+          Started ${_incFmtDate(inc.started_at)} · ${isOpen ? '<span style="color:var(--red);font-weight:600">Ongoing</span>' : `Resolved after ${_incFmtDuration(inc.duration_s)}`}
+        </div>
+      </div>
+
+      <div style="background:var(--surface);border:1px solid var(--border-hi);border-radius:12px;padding:18px 20px;margin-bottom:18px">
+        <div style="font-size:12px;font-weight:700;color:var(--text-hi);text-transform:uppercase;letter-spacing:.08em;margin-bottom:14px">Incident Details</div>
+        <div class="form-grid">
+          <div class="fg full">
+            <label class="flabel">Custom Title <span style="font-weight:400;text-transform:none;letter-spacing:0;color:var(--text-2)">(leave blank to use "${_escHtml(defaultTitle)}")</span></label>
+            <input class="finput" id="incTitle" maxlength="200" value="${_escHtml(title)}" placeholder="${_escHtml(defaultTitle)}">
+          </div>
+          <div class="fg">
+            <label class="flabel">Impact</label>
+            <select class="fselect" id="incImpact">
+              <option value="minor"    ${impact==="minor"?"selected":""}>Minor</option>
+              <option value="major"    ${impact==="major"?"selected":""}>Major</option>
+              <option value="critical" ${impact==="critical"?"selected":""}>Critical</option>
+            </select>
+          </div>
+          <div class="fg">
+            <label class="flabel">Visibility</label>
+            <select class="fselect" id="incPublic">
+              <option value="1" ${isPublic?"selected":""}>🌐 Public — shown on incident page</option>
+              <option value="0" ${!isPublic?"selected":""}>🔒 Private — admin only</option>
+            </select>
+          </div>
+        </div>
+        <div style="display:flex;justify-content:flex-end;margin-top:14px">
+          <button class="btn btn-primary" onclick="submitIncidentMeta(${inc.id})">Save Details</button>
+        </div>
+      </div>
+
+      <div style="background:var(--surface);border:1px solid var(--border-hi);border-radius:12px;padding:18px 20px;margin-bottom:18px">
+        <div style="font-size:12px;font-weight:700;color:var(--text-hi);text-transform:uppercase;letter-spacing:.08em;margin-bottom:14px">Post Update</div>
+        <div class="form-grid">
+          <div class="fg">
+            <label class="flabel">New Status</label>
+            <select class="fselect" id="incNewStatus">
+              <option value="investigating" ${status==="investigating"?"selected":""}>Investigating</option>
+              <option value="identified"    ${status==="identified"?"selected":""}>Identified</option>
+              <option value="monitoring"    ${status==="monitoring"?"selected":""}>Monitoring</option>
+              <option value="resolved">Resolved (close incident)</option>
+            </select>
+          </div>
+          <div class="fg full">
+            <label class="flabel">Message</label>
+            <textarea class="finput" id="incNewMsg" rows="4" maxlength="4000" placeholder="We've identified the cause and are rolling out a fix..."></textarea>
+          </div>
+        </div>
+        <div style="display:flex;justify-content:flex-end;margin-top:14px">
+          <button class="btn btn-primary" onclick="submitIncidentUpdate(${inc.id})">Post Update</button>
+        </div>
+      </div>
+
+      <div style="background:var(--surface);border:1px solid var(--border-hi);border-radius:12px;padding:18px 20px;margin-bottom:18px">
+        <div style="font-size:12px;font-weight:700;color:var(--text-hi);text-transform:uppercase;letter-spacing:.08em;margin-bottom:14px">Timeline</div>
+        ${updatesHtml}
+      </div>
+
+      <div style="display:flex;justify-content:flex-end;margin-top:20px">
+        <button class="btn btn-danger" onclick="askDelIncident(${inc.id})">Delete Incident</button>
+      </div>
+    </div>
+  `;
+}
+
+async function submitIncidentMeta(id){
+  const title  = document.getElementById("incTitle").value.trim();
+  const impact = document.getElementById("incImpact").value;
+  const isPublic = document.getElementById("incPublic").value === "1";
+  try {
+    const r = await fetch(`/api/admin/incidents/${id}`, {
+      method: "PUT",
+      headers: {"Content-Type":"application/json"},
+      body: JSON.stringify({ title: title || null, impact, public: isPublic })
+    });
+    const d = await r.json();
+    if (!r.ok) { toast(d.error || "Update failed", "error"); return; }
+    toast("Incident details saved", "success");
+    await loadIncidentList();
+    // Re-open panel so the operator stays in context
+    showIncidentPanel(id);
+  } catch(e) { toast(e.message, "error"); }
+}
+
+async function submitIncidentUpdate(id){
+  const status = document.getElementById("incNewStatus").value;
+  const message = document.getElementById("incNewMsg").value.trim();
+  if (!message) { toast("Update message is required", "error"); return; }
+  try {
+    const r = await fetch(`/api/admin/incidents/${id}/updates`, {
+      method: "POST",
+      headers: {"Content-Type":"application/json"},
+      body: JSON.stringify({ status, message })
+    });
+    const d = await r.json();
+    if (!r.ok) { toast(d.error || "Post failed", "error"); return; }
+    toast(status === "resolved" ? "Incident resolved" : "Update posted", "success");
+    await loadIncidentList();
+    showIncidentPanel(id);
+  } catch(e) { toast(e.message, "error"); }
+}
+
+async function askDelIncidentUpdate(updateId, incidentId){
+  if (!confirm("Delete this update? This cannot be undone.")) return;
+  try {
+    const r = await fetch(`/api/admin/incident-updates/${updateId}`, { method: "DELETE" });
+    const d = await r.json();
+    if (!r.ok) { toast(d.error || "Delete failed", "error"); return; }
+    await loadIncidentList();
+    showIncidentPanel(incidentId);
+  } catch(e) { toast(e.message, "error"); }
+}
+
+async function askDelIncident(id){
+  if (!confirm("Delete this entire incident and all its updates?\n\nThis cannot be undone and will remove the incident from the public page.")) return;
+  try {
+    const r = await fetch(`/api/admin/incidents/${id}`, { method: "DELETE" });
+    const d = await r.json();
+    if (!r.ok) { toast(d.error || "Delete failed", "error"); return; }
+    toast("Incident deleted", "success");
+    await switchTab("incidents");
   } catch(e) { toast(e.message, "error"); }
 }
 
