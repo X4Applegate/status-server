@@ -731,6 +731,8 @@ function _initDetailMap(lat, lng, name, status) {
   if (_detailMap) { try { _detailMap.remove(); } catch(e) {} _detailMap = null; }
   const doCreate = () => {
     _detailMap = L.map(container, { zoomControl: true, attributionControl: false }).setView([lat, lng], 13);
+    // Force Leaflet to recalculate container dimensions after DOM paint
+    setTimeout(() => { if (_detailMap) _detailMap.invalidateSize(); }, 100);
     // Tile layer — Mapbox for logged-in, CARTO fallback for public
     const cartaTiles = () => L.tileLayer("https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png", {
       subdomains: "abcd", maxZoom: 19
