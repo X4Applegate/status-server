@@ -151,7 +151,7 @@ body::before{content:'';position:fixed;inset:0;pointer-events:none;background:ra
 .sidebar-body{columns:640px;column-gap:24px;display:block;overflow-x:hidden}
 
 /* Server card */
-.srv-row{display:flex;flex-direction:column;gap:7px;padding:11px 14px;cursor:pointer;border:1px solid var(--border);border-radius:10px;background:var(--surface);transition:border-color .18s,box-shadow .18s,transform .1s}
+.srv-row{display:flex;flex-direction:column;gap:7px;padding:11px 14px;cursor:pointer;border:1px solid var(--border);border-radius:10px;background:var(--surface);transition:border-color .18s,box-shadow .18s,transform .1s;min-width:0}
 .srv-row:hover{border-color:var(--border-hi);box-shadow:0 4px 16px rgba(0,0,0,.2);transform:translateY(-1px)}
 .srv-row.active{border-color:var(--blue);box-shadow:0 0 0 1px var(--blue)}
 .srv-hb-bar{display:flex;gap:2px;width:100%;align-items:flex-end}
@@ -204,7 +204,7 @@ body::before{content:'';position:fixed;inset:0;pointer-events:none;background:ra
 .srv-info{min-width:0;flex:1}
 .srv-name{font-size:12px;font-weight:500;color:var(--text-hi);overflow:hidden;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;word-break:break-word}
 .srv-host{font-family:var(--mono);font-size:10px;color:var(--text-2);margin-top:2px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-.srv-desc{font-size:10px;color:var(--text-2);margin-top:2px;opacity:.75;font-style:italic;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.srv-desc{font-size:10px;color:var(--text-2);margin-top:2px;opacity:.75;font-style:italic;overflow:hidden;text-overflow:ellipsis;word-break:break-word;overflow-wrap:anywhere}
 .srv-badge{font-size:10px;font-weight:600;padding:3px 9px;border-radius:10px;flex-shrink:0;letter-spacing:.04em}
 .srv-badge.up      {color:var(--green);background:var(--green-soft)}
 .srv-badge.down    {color:var(--red);background:var(--red-soft)}
