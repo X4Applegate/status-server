@@ -1022,14 +1022,17 @@ function renderSidebar(){
     const msHtml   = latestMs !== null
       ? `<span class="srv-ms ${latestMs<150?"fast":latestMs<400?"ok":"slow"}">${latestMs}ms</span>`
       : "";
+    const badgeCls  = s.maintenance ? "pending" : (s.overall || "pending");
+    const badgeText = s.maintenance ? "MAINT"   : (s.overall || "pending").toUpperCase();
+    const maintTag  = s.maintenance ? ` <span title="Scheduled maintenance — alerts suppressed" style="font-size:11px;vertical-align:middle">🔧</span>` : "";
     return `
     <div class="srv-row ${s.id===selectedId?"active":""}" onclick="selectServer('${s.id}')">
       <div style="display:flex;align-items:center;gap:8px;width:100%;min-width:0">
         <div class="srv-dot ${s.overall||'pending'}" style="flex-shrink:0"></div>
         <div style="min-width:0;flex:1;overflow:hidden">
           <div style="display:flex;align-items:center;gap:6px;min-width:0">
-            <div class="srv-name" style="overflow:hidden;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;word-break:break-word;flex:1;min-width:0">${s.name}</div>
-            <div class="srv-badge ${s.overall||'pending'}" style="flex-shrink:0">${(s.overall||"pending").toUpperCase()}</div>
+            <div class="srv-name" style="overflow:hidden;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;word-break:break-word;flex:1;min-width:0">${s.name}${maintTag}</div>
+            <div class="srv-badge ${badgeCls}" style="flex-shrink:0">${badgeText}</div>
             <button class="pin-btn ${isPinned ? 'pinned' : ''}" onclick="togglePin('${s.id}',event)" title="${isPinned ? 'Unpin' : 'Pin to top'}" style="flex-shrink:0">${isPinned ? '&#9733;' : '&#9734;'}</button>
           </div>
           <div style="display:flex;align-items:center;gap:6px;margin-top:3px;min-width:0">

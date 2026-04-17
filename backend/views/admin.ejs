@@ -591,7 +591,7 @@ body{font-family:var(--sans);background:var(--bg);color:var(--text);min-height:1
   </div>
   <div id="aListView" class="admin-section">
     <div class="drawer-toolbar">
-      <div class="admin-tabs"><button class="admin-tab active" id="tabServers" onclick="switchTab('servers')">Servers</button><button class="admin-tab" id="tabGroups" onclick="switchTab('groups')">Groups</button><button class="admin-tab" id="tabOmada" onclick="switchTab('omada')">Omada</button><button class="admin-tab" id="tabSquare" onclick="switchTab('square')">Square</button><button class="admin-tab" id="tabApiKeys" onclick="switchTab('apikeys')">API Keys</button><button class="admin-tab" id="tabUsers" onclick="switchTab('users')">Users</button><button class="admin-tab" id="tabWebhooks" onclick="switchTab('webhooks')">Webhooks</button><button class="admin-tab" id="tabSettings" onclick="switchTab('settings')">Settings</button><button class="admin-tab" id="tabAudit" onclick="switchTab('audit')">Audit</button></div>
+      <div class="admin-tabs"><button class="admin-tab active" id="tabServers" onclick="switchTab('servers')">Servers</button><button class="admin-tab" id="tabGroups" onclick="switchTab('groups')">Groups</button><button class="admin-tab" id="tabOmada" onclick="switchTab('omada')">Omada</button><button class="admin-tab" id="tabSquare" onclick="switchTab('square')">Square</button><button class="admin-tab" id="tabMaint" onclick="switchTab('maint')">Maintenance</button><button class="admin-tab" id="tabApiKeys" onclick="switchTab('apikeys')">API Keys</button><button class="admin-tab" id="tabUsers" onclick="switchTab('users')">Users</button><button class="admin-tab" id="tabWebhooks" onclick="switchTab('webhooks')">Webhooks</button><button class="admin-tab" id="tabSettings" onclick="switchTab('settings')">Settings</button><button class="admin-tab" id="tabAudit" onclick="switchTab('audit')">Audit</button></div>
       <span style="font-size:11px;color:var(--text-2)" id="aCount"></span>
       <div class="drawer-spacer"></div>
       <button class="btn" id="importBtn" onclick="triggerImport()" style="font-size:11px;padding:5px 11px;display:none" title="Import servers from JSON">⬆ Import</button>
@@ -766,6 +766,36 @@ body{font-family:var(--sans);background:var(--bg);color:var(--text);min-height:1
           <span class="form-err" id="sqErr"></span>
           <button class="btn" onclick="switchTab('square')">Cancel</button>
           <button class="btn btn-primary" onclick="submitSquareForm()">Save Account</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div id="aMaintFormView" class="admin-section" style="display:none">
+    <div class="drawer-body">
+      <div class="form-wrap">
+        <div class="form-heading" id="mwFormHeading">Schedule Maintenance Window</div>
+        <input type="hidden" id="mwId">
+        <div class="form-grid">
+          <div class="fg full"><label class="flabel">Title *</label><input class="finput" id="mwTitle" placeholder="e.g. Monthly firmware update"></div>
+          <div class="fg">
+            <label class="flabel">Start Time *</label>
+            <input class="finput" id="mwStart" type="datetime-local">
+          </div>
+          <div class="fg">
+            <label class="flabel">End Time *</label>
+            <input class="finput" id="mwEnd" type="datetime-local">
+          </div>
+          <div class="fg full">
+            <label class="flabel">Servers * <span style="font-weight:400;text-transform:none;letter-spacing:0;color:var(--text-2)">(alerts suppressed during the window for everyone selected)</span></label>
+            <div id="mwServerPicker" style="background:var(--input-bg);border:1px solid var(--border-hi);border-radius:var(--r-sm);max-height:220px;overflow-y:auto;padding:8px"></div>
+          </div>
+          <div class="fg full"><label class="flabel">Notes <span style="font-weight:400;text-transform:none;letter-spacing:0;color:var(--text-2)">(optional — shown in audit log and future incident history)</span></label><textarea class="finput" id="mwNotes" rows="3" placeholder="What's happening during this window?"></textarea></div>
+        </div>
+        <div class="form-footer">
+          <span class="form-err" id="mwErr"></span>
+          <button class="btn" onclick="switchTab('maint')">Cancel</button>
+          <button class="btn btn-primary" onclick="submitMaintForm()">Save Window</button>
         </div>
       </div>
     </div>
@@ -1463,16 +1493,18 @@ function renderSidebarList(servers){
   const sidebar = document.getElementById("sidebarList");
   if (!sidebar) return;
   sidebar.innerHTML = list.map(s => {
-    const lbl    = s.overall==="up"?"UP":s.overall==="down"?"DOWN":s.overall==="degraded"?"DEG":"PEND";
+    const lbl    = s.maintenance ? "MAINT" : (s.overall==="up"?"UP":s.overall==="down"?"DOWN":s.overall==="degraded"?"DEG":"PEND");
+    const badgeCls = s.maintenance ? "pending" : (s.overall||"pending");
     const active = s.id === selectedServerId ? " active" : "";
+    const maintTag = s.maintenance ? ` <span title="Under scheduled maintenance — alerts suppressed" style="font-size:10px">🔧</span>` : "";
     return `<div class="srv-row${active}" onclick="selectServer('${s.id}')">
       <div class="srv-dot ${s.overall||'pending'}"></div>
       <div class="srv-row-info">
-        <div class="srv-row-name">${s.name}</div>
+        <div class="srv-row-name">${s.name}${maintTag}</div>
         <div class="srv-row-host">${s.host}</div>
         ${s.description ? `<div class="srv-row-desc">${s.description}</div>` : ""}
       </div>
-      <div class="srv-badge ${s.overall||'pending'}">${lbl}</div>
+      <div class="srv-badge ${badgeCls}">${lbl}</div>
     </div>`;
   }).join("");
 }
@@ -1792,20 +1824,21 @@ function closeAdmin(){
 }
 
 async function switchTab(tab){
-  // Viewers can access Servers, Omada, Square, Webhooks, and Groups. Admin-only tabs bounce back.
-  if (!isAdmin() && !["servers","omada","square","webhooks","groups"].includes(tab)) tab = "servers";
+  // Viewers can access Servers, Omada, Square, Maintenance, Webhooks, and Groups. Admin-only tabs bounce back.
+  if (!isAdmin() && !["servers","omada","square","maint","webhooks","groups"].includes(tab)) tab = "servers";
   currentTab = tab;
   serverFormReturn = null;
   document.getElementById("tabServers").classList.toggle("active",  tab === "servers");
   document.getElementById("tabGroups").classList.toggle("active",   tab === "groups");
   document.getElementById("tabOmada").classList.toggle("active",    tab === "omada");
   document.getElementById("tabSquare").classList.toggle("active",   tab === "square");
+  document.getElementById("tabMaint").classList.toggle("active",    tab === "maint");
   document.getElementById("tabApiKeys").classList.toggle("active",  tab === "apikeys");
   document.getElementById("tabUsers").classList.toggle("active",    tab === "users");
   document.getElementById("tabWebhooks").classList.toggle("active", tab === "webhooks");
   document.getElementById("tabSettings").classList.toggle("active", tab === "settings");
   document.getElementById("tabAudit").classList.toggle("active",    tab === "audit");
-  const labels = { servers:"Add Server", groups:"Add Group", omada:"Add Controller", square:"Add Account", apikeys:"Generate Key", users:"Add User", webhooks:"Add Webhook", settings:"", audit:"" };
+  const labels = { servers:"Add Server", groups:"Add Group", omada:"Add Controller", square:"Add Account", maint:"Schedule Window", apikeys:"Generate Key", users:"Add User", webhooks:"Add Webhook", settings:"", audit:"" };
   document.getElementById("addBtnLabel").textContent = labels[tab] || "";
   const hideAdd = (!isAdmin() && (tab==="groups"||tab==="users")) || tab==="settings" || tab==="audit";
   document.getElementById("addBtn").style.display = hideAdd ? "none" : "";
@@ -1814,6 +1847,7 @@ async function switchTab(tab){
     tab === "groups"   ? () => showGroupForm(null)  :
     tab === "omada"    ? () => showOmadaForm(null)  :
     tab === "square"   ? () => showSquareForm(null) :
+    tab === "maint"    ? () => showMaintForm(null)  :
     tab === "apikeys"  ? () => showApiKeyForm()     :
     tab === "users"    ? () => showUserForm(null)   :
     tab === "settings" ? () => {}                   :
@@ -1832,6 +1866,8 @@ async function switchTab(tab){
   document.getElementById("aOmadaFormView").style.display   = "none";
   document.getElementById("aOmadaSitesView").style.display  = "none";
   document.getElementById("aSquareFormView").style.display  = "none";
+  const maintFormView = document.getElementById("aMaintFormView");
+  if (maintFormView) maintFormView.style.display = "none";
   const searchBar = document.getElementById("serverSearchBar");
   const statBar   = document.getElementById("drawerStatBar");
   if (tab === "servers") {
@@ -1846,6 +1882,7 @@ async function switchTab(tab){
   else if (tab === "groups")   await loadGroupList();
   else if (tab === "omada")    await loadOmadaList();
   else if (tab === "square")   await loadSquareList();
+  else if (tab === "maint")    await loadMaintList();
   else if (tab === "apikeys")  await loadApiKeyList();
   else if (tab === "users")    await loadUserList();
   else if (tab === "settings") await loadSettings();
@@ -3723,6 +3760,187 @@ async function askDelSquare(id, name){
     adminSquare = [];
     await loadSquareList();
   } catch(e) { showToast(e.message, "error"); }
+}
+
+// ── Maintenance Windows ───────────────────────────────────────────────────────
+let adminMaint = [];
+
+// Convert a server-returned UTC-ish DATETIME string into a value compatible with
+// <input type="datetime-local"> (which wants "YYYY-MM-DDTHH:MM" in local time).
+function _toLocalInput(v){
+  if (!v) return "";
+  const d = new Date(v);
+  if (isNaN(d)) return "";
+  const pad = n => String(n).padStart(2, "0");
+  return `${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
+}
+function _fmtWindow(start, end){
+  const s = new Date(start), e = new Date(end);
+  const sameDay = s.toDateString() === e.toDateString();
+  const opts = { month:"short", day:"numeric", hour:"numeric", minute:"2-digit" };
+  return sameDay
+    ? `${s.toLocaleString(undefined, opts)} → ${e.toLocaleTimeString(undefined, {hour:"numeric",minute:"2-digit"})}`
+    : `${s.toLocaleString(undefined, opts)} → ${e.toLocaleString(undefined, opts)}`;
+}
+function _classifyWindow(w){
+  const now = Date.now();
+  const s = new Date(w.start_time).getTime();
+  const e = new Date(w.end_time).getTime();
+  if (now < s) return { label:"Upcoming", cls:"up" };
+  if (now > e) return { label:"Past",     cls:"warn" };
+  return { label:"Active", cls:"down" };  // use red-ish dot so it stands out
+}
+
+function renderAdminMaintList(list){
+  const el = document.getElementById("adminPanelBody");
+  document.getElementById("aCount").textContent = `${list.length} window${list.length===1?"":"s"}`;
+  if (!list.length){
+    el.innerHTML = `<div class="empty-state">No maintenance windows scheduled.<br>Click <strong>Schedule Window</strong> to add one.</div>`;
+    return;
+  }
+  // Sort: active first, then upcoming, then past (newest past first — list comes pre-sorted DESC on start)
+  const ranked = list.slice().sort((a, b) => {
+    const ra = _classifyWindow(a).label, rb = _classifyWindow(b).label;
+    const order = { Active:0, Upcoming:1, Past:2 };
+    if (order[ra] !== order[rb]) return order[ra] - order[rb];
+    return new Date(b.start_time) - new Date(a.start_time);
+  });
+  el.innerHTML = ranked.map((w, idx) => {
+    const cls = _classifyWindow(w);
+    const srvLabel = w.server_name || `(server ${w.server_id})`;
+    return `<div class="admin-server-item">
+      <div class="admin-dot ${cls.cls}"></div>
+      <div class="admin-info">
+        <div class="admin-name">${w.title} <span style="font-size:10px;font-weight:600;padding:1px 6px;border-radius:8px;background:var(--surface2);color:var(--text-2);letter-spacing:.04em;vertical-align:middle;margin-left:4px">${cls.label.toUpperCase()}</span></div>
+        <div class="admin-host">${srvLabel}</div>
+        <div class="admin-checks-label">${_fmtWindow(w.start_time, w.end_time)}</div>
+      </div>
+      <div class="admin-row-actions" onclick="event.stopPropagation()">
+        <button class="btn btn-sm" onclick="showMaintForm(adminMaint.find(x => x.id === ${w.id}))">Edit</button>
+        <button class="btn btn-sm btn-danger" onclick="askDelMaint(${w.id}, '${w.title.replace(/\\/g,"\\\\").replace(/'/g,"\\'")}')">Cancel</button>
+      </div>
+    </div>`;
+  }).join("");
+}
+
+async function loadMaintList(){
+  const el = document.getElementById("adminPanelBody");
+  el.innerHTML = `<div style="padding:24px;text-align:center;color:var(--text-2)">Loading maintenance windows…</div>`;
+  try {
+    const r = await fetch("/api/admin/maintenance");
+    if (r.status === 401) { window.location.href = "/"; return; }
+    if (!r.ok) { el.innerHTML = `<div class="empty-state">Error ${r.status}</div>`; return; }
+    adminMaint = await r.json();
+    renderAdminMaintList(adminMaint);
+  } catch(e) {
+    el.innerHTML = `<div class="empty-state">Failed to load: ${e.message}</div>`;
+  }
+}
+
+async function showMaintForm(w){
+  document.getElementById("aListView").style.display        = "none";
+  document.getElementById("aFormView").style.display        = "none";
+  document.getElementById("aUserFormView").style.display    = "none";
+  document.getElementById("aWebhookFormView").style.display = "none";
+  document.getElementById("aGroupFormView").style.display   = "none";
+  document.getElementById("aOmadaFormView").style.display   = "none";
+  document.getElementById("aOmadaSitesView").style.display  = "none";
+  document.getElementById("aSquareFormView").style.display  = "none";
+  document.getElementById("aMaintFormView").style.display   = "flex";
+  document.getElementById("mwFormHeading").textContent = w ? "Edit Maintenance Window" : "Schedule Maintenance Window";
+  document.getElementById("mwId").value    = w?.id    || "";
+  document.getElementById("mwTitle").value = w?.title || "";
+  document.getElementById("mwNotes").value = w?.notes || "";
+  // Default: start = now + 5 min, end = now + 1 hour (only when creating)
+  if (w) {
+    document.getElementById("mwStart").value = _toLocalInput(w.start_time);
+    document.getElementById("mwEnd").value   = _toLocalInput(w.end_time);
+  } else {
+    const start = new Date(Date.now() + 5 * 60 * 1000);
+    const end   = new Date(Date.now() + 60 * 60 * 1000);
+    document.getElementById("mwStart").value = _toLocalInput(start);
+    document.getElementById("mwEnd").value   = _toLocalInput(end);
+  }
+  document.getElementById("mwErr").textContent = "";
+
+  // Populate server picker — edit mode is locked to the window's single server,
+  // create mode lets you multi-select (one row per server is inserted server-side).
+  await ensureAdminServersLoaded();
+  const picker = document.getElementById("mwServerPicker");
+  if (w) {
+    // Edit: pin to the one server this window belongs to (server_id field is not editable)
+    picker.innerHTML = `<div style="font-size:12px;color:var(--text-2);padding:4px 2px">Server: <strong style="color:var(--text-hi)">${w.server_name || w.server_id}</strong><br><span style="font-size:11px">(server locked when editing — delete and re-create to move this window)</span></div>`;
+    picker.dataset.lockedServerId = w.server_id;
+  } else {
+    delete picker.dataset.lockedServerId;
+    if (!adminServers.length) {
+      picker.innerHTML = `<div style="font-size:12px;color:var(--text-2);padding:4px">No servers available</div>`;
+    } else {
+      picker.innerHTML = adminServers.map(s => `
+        <label style="display:flex;align-items:center;gap:8px;padding:5px 4px;cursor:pointer;border-radius:4px;font-size:13px;color:var(--text-hi)">
+          <input type="checkbox" value="${s.id}" style="accent-color:var(--accent)">
+          <span style="flex:1">${s.name}</span>
+          <span style="font-size:11px;color:var(--text-2)">${s.host || ""}</span>
+        </label>`).join("");
+    }
+  }
+}
+
+async function ensureAdminServersLoaded(){
+  if (adminServers && adminServers.length) return;
+  const cached = cacheGet("admin-servers");
+  if (cached) { adminServers = cached; return; }
+  try {
+    const r = await fetch("/api/admin/servers");
+    if (r.ok) { adminServers = await r.json(); cacheSet("admin-servers", adminServers); }
+  } catch(e) {}
+}
+
+async function submitMaintForm(){
+  const id    = document.getElementById("mwId").value;
+  const title = document.getElementById("mwTitle").value.trim();
+  const notes = document.getElementById("mwNotes").value.trim();
+  const start = document.getElementById("mwStart").value;
+  const end   = document.getElementById("mwEnd").value;
+  const err   = document.getElementById("mwErr");
+  err.textContent = "";
+  if (!title)         { err.textContent = "Title is required"; return; }
+  if (!start || !end) { err.textContent = "Start and end times are required"; return; }
+  if (new Date(end) <= new Date(start)) { err.textContent = "End time must be after start time"; return; }
+
+  let server_ids;
+  const picker = document.getElementById("mwServerPicker");
+  if (id) {
+    // Edit mode — server is locked
+    server_ids = [picker.dataset.lockedServerId];
+  } else {
+    server_ids = Array.from(picker.querySelectorAll("input[type=checkbox]:checked")).map(el => el.value);
+    if (!server_ids.length) { err.textContent = "Pick at least one server"; return; }
+  }
+
+  const body = { title, notes, start_time: start, end_time: end };
+  if (!id) body.server_ids = server_ids;
+
+  try {
+    const r = await fetch(id ? `/api/admin/maintenance/${id}` : "/api/admin/maintenance", {
+      method: id ? "PUT" : "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body)
+    });
+    const data = await r.json();
+    if (!r.ok) { err.textContent = data.error || "Save failed"; return; }
+    await switchTab("maint");
+  } catch(e) { err.textContent = e.message; }
+}
+
+async function askDelMaint(id, title){
+  if (!confirm(`Cancel maintenance window "${title}"?\n\nAlerts will resume immediately if the server is currently down.`)) return;
+  try {
+    const r = await fetch(`/api/admin/maintenance/${id}`, { method: "DELETE" });
+    const data = await r.json();
+    if (!r.ok) { toast(data.error || "Delete failed", "error"); return; }
+    await loadMaintList();
+  } catch(e) { toast(e.message, "error"); }
 }
 
 // ── Import / Export ───────────────────────────────────────────────────────────

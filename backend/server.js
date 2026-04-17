@@ -292,8 +292,44 @@ let logClients   = [];
 // Alert debounce: hold DOWN alerts for 5 min; cancel if server recovers first
 const pendingDownAlerts = new Map(); // serverId → { timer, evt }
 const sentDownAlerts    = new Set(); // serverIds whose down-alert was actually fired
+// Maintenance window cache: serverId → array of { id, title, start_time, end_time, notes }
+// Refreshed every 60s and after any CRUD write. Checking a Set/Map is cheap enough to do
+// on every runChecks() call.
+let maintenanceCache = new Map();
 let serverConfig = [];
 let eventLog     = [];
+
+// Returns true if the given serverId is currently inside an active maintenance window.
+function isUnderMaintenance(serverId) {
+  const windows = maintenanceCache.get(String(serverId));
+  if (!windows || !windows.length) return false;
+  const now = Date.now();
+  return windows.some(w => {
+    const s = new Date(w.start_time).getTime();
+    const e = new Date(w.end_time).getTime();
+    return now >= s && now <= e;
+  });
+}
+
+async function refreshMaintenanceCache() {
+  try {
+    // Only pull windows that haven't ended yet — past windows are historical, we keep them
+    // in the DB for audit but don't need them in the hot-path cache.
+    const [rows] = await db.query(
+      "SELECT id, server_id, title, notes, start_time, end_time FROM status_maintenance_windows WHERE end_time >= NOW()"
+    );
+    const next = new Map();
+    for (const r of rows) {
+      const key = String(r.server_id);
+      if (!next.has(key)) next.set(key, []);
+      next.get(key).push(r);
+    }
+    maintenanceCache = next;
+  } catch (e) {
+    // Don't crash the monitor loop just because the cache refresh failed
+    console.error("[maint] cache refresh failed:", e.message);
+  }
+}
 
 // -- View engine ---------------------------------------------------------------
 app.set("view engine", "ejs");
@@ -695,6 +731,23 @@ async function initDB() {
       duration_s  INT       NULL DEFAULT NULL,
       cause       VARCHAR(255) DEFAULT NULL,
       INDEX idx_server (server_id)
+    )
+  `);
+
+  // Maintenance windows: planned downtime that suppresses alerts.
+  // One row per server per window — if you want a multi-server window, create N rows.
+  await db.query(`
+    CREATE TABLE IF NOT EXISTS status_maintenance_windows (
+      id           INT AUTO_INCREMENT PRIMARY KEY,
+      server_id    VARCHAR(150) NOT NULL,
+      title        VARCHAR(200) NOT NULL,
+      notes        TEXT,
+      start_time   DATETIME NOT NULL,
+      end_time     DATETIME NOT NULL,
+      created_by   INT NULL,
+      created_at   TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+      INDEX idx_server (server_id),
+      INDEX idx_window (start_time, end_time)
     )
   `);
 
@@ -2377,14 +2430,20 @@ async function pollAll(force = false) {
       addLog({ level:c.ok?"info":"error", server:def.name, serverId:def.id, check:label, message:`${label} - ${c.detail}`, ok:c.ok, detail:c.detail });
     });
 
+    const inMaintenance = isUnderMaintenance(def.id);
+
     if (prev.overall && prev.overall!=="pending" && prev.overall!==overall) {
-      addLog({ level:overall==="up"?"info":"error", server:def.name, serverId:def.id, check:"STATUS", message:`Status changed: ${prev.overall.toUpperCase()} -> ${overall.toUpperCase()}`, ok:overall==="up", isStatusChange:true });
+      addLog({ level:overall==="up"?"info":"error", server:def.name, serverId:def.id, check:"STATUS", message:`Status changed: ${prev.overall.toUpperCase()} -> ${overall.toUpperCase()}${inMaintenance ? " (under maintenance — alerts suppressed)" : ""}`, ok:overall==="up", isStatusChange:true });
 
       const isRecovery = overall === "up";
       const isDownward = overall === "down" || overall === "degraded";
       const isSquare   = (def.checks || []).some(c => c.type === "square_pos");
 
-      if (isDownward) {
+      if (inMaintenance) {
+        // Server is in a planned maintenance window — skip all webhook/email alerts.
+        // The status change is still logged above and still appears in SSE/dashboard;
+        // we just don't page anyone about it.
+      } else if (isDownward) {
         if (isSquare) {
           // Square POS: hold alert for 5 min — cancel if it recovers first
           if (pendingDownAlerts.has(def.id)) {
@@ -2429,7 +2488,7 @@ async function pollAll(force = false) {
         }
       }
 
-      if (isRecovery) {
+      if (isRecovery && !inMaintenance) {
         if (isSquare && pendingDownAlerts.has(def.id)) {
           // Square recovered before 5-min window — suppress the alert entirely
           clearTimeout(pendingDownAlerts.get(def.id).timer);
@@ -2470,7 +2529,7 @@ async function pollAll(force = false) {
       }
     }
 
-    serverStatus[def.id] = { id:def.id, name:def.name, host:def.host, description:def.description||"", category:def.category||"", sub_category:def.sub_category||"", group_ids:def.group_ids||[], tags:def.tags||[], checks, overall, lastChecked:now, uptimeHistory:history, failStreak, lat:def.lat||null, lng:def.lng||null };
+    serverStatus[def.id] = { id:def.id, name:def.name, host:def.host, description:def.description||"", category:def.category||"", sub_category:def.sub_category||"", group_ids:def.group_ids||[], tags:def.tags||[], checks, overall, lastChecked:now, uptimeHistory:history, failStreak, lat:def.lat||null, lng:def.lng||null, maintenance:inMaintenance };
     // Record to DB (non-blocking)
     recordHistory(def, checks, overall).catch(() => {});
   }));
@@ -4015,6 +4074,116 @@ app.delete("/api/admin/square-accounts/:id", requireAuth, async (req, res) => {
   } catch(e) { res.status(500).json({ error: e.message }); }
 });
 
+// ── Maintenance Windows ────────────────────────────────────────────────────────
+// Scheduled downtime that suppresses alerts. One window targets one server — to
+// schedule across multiple servers, the POST endpoint accepts a server_ids array
+// and creates one row per server.
+
+// Helper: pull the list of server IDs the caller is allowed to touch.
+// Admins see everything; viewers see servers in any of their granted dashboard groups.
+async function allowedServerIdsFor(session) {
+  if (session.role === "admin") {
+    const [rows] = await db.query("SELECT id FROM status_servers");
+    return rows.map(r => String(r.id));
+  }
+  const groupIds = await getUserAllowedGroupIds(session.userId, session.role) || [];
+  if (!groupIds.length) return [];
+  const [rows] = await db.query(
+    "SELECT DISTINCT server_id FROM status_server_group_map WHERE group_id IN (?)",
+    [groupIds]
+  );
+  return rows.map(r => String(r.server_id));
+}
+
+app.get("/api/admin/maintenance", requireAuth, async (req, res) => {
+  try {
+    const allowed = await allowedServerIdsFor(req.session);
+    // Admins get everything; viewers get windows only for servers they can see
+    let sql = `SELECT m.id, m.server_id, m.title, m.notes, m.start_time, m.end_time,
+                      m.created_by, m.created_at, s.name AS server_name
+               FROM status_maintenance_windows m
+               LEFT JOIN status_servers s ON s.id = m.server_id`;
+    const params = [];
+    if (req.session.role !== "admin") {
+      if (!allowed.length) return res.json([]);
+      sql += ` WHERE m.server_id IN (?)`;
+      params.push(allowed);
+    }
+    sql += ` ORDER BY m.start_time DESC`;
+    const [rows] = await db.query(sql, params);
+    res.json(rows);
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+app.post("/api/admin/maintenance", requireAuth, async (req, res) => {
+  const { server_ids, title, notes, start_time, end_time } = req.body;
+  if (!Array.isArray(server_ids) || !server_ids.length) return res.status(400).json({ error: "At least one server is required" });
+  if (!title || !String(title).trim())                    return res.status(400).json({ error: "Title is required" });
+  if (!start_time || !end_time)                           return res.status(400).json({ error: "Start and end times are required" });
+  const startMs = new Date(start_time).getTime();
+  const endMs   = new Date(end_time).getTime();
+  if (!isFinite(startMs) || !isFinite(endMs))             return res.status(400).json({ error: "Invalid date format" });
+  if (endMs <= startMs)                                   return res.status(400).json({ error: "End time must be after start time" });
+  try {
+    // Filter server_ids to only ones the caller can schedule against
+    const allowed = new Set(await allowedServerIdsFor(req.session));
+    const targets = server_ids.map(String).filter(id => allowed.has(id));
+    if (!targets.length) return res.status(403).json({ error: "No accessible servers in selection" });
+
+    const rows = targets.map(sid => [
+      sid, String(title).trim(), notes || null,
+      new Date(start_time), new Date(end_time), req.session.userId
+    ]);
+    await db.query(
+      "INSERT INTO status_maintenance_windows (server_id, title, notes, start_time, end_time, created_by) VALUES ?",
+      [rows]
+    );
+    await refreshMaintenanceCache();
+    addLog({ level:"info", server:"system", message:`Maintenance scheduled: "${title}" for ${targets.length} server(s) by ${req.session.username}` });
+    res.json({ ok:true, created: targets.length });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+app.put("/api/admin/maintenance/:id", requireAuth, async (req, res) => {
+  const id = parseInt(req.params.id);
+  const { title, notes, start_time, end_time } = req.body;
+  if (!title || !start_time || !end_time) return res.status(400).json({ error: "Title, start and end are required" });
+  const startMs = new Date(start_time).getTime();
+  const endMs   = new Date(end_time).getTime();
+  if (!isFinite(startMs) || !isFinite(endMs) || endMs <= startMs) return res.status(400).json({ error: "Invalid date range" });
+  try {
+    const [rows] = await db.query("SELECT server_id FROM status_maintenance_windows WHERE id=?", [id]);
+    if (!rows.length) return res.status(404).json({ error: "Window not found" });
+    if (req.session.role !== "admin") {
+      const allowed = new Set(await allowedServerIdsFor(req.session));
+      if (!allowed.has(String(rows[0].server_id))) return res.status(403).json({ error: "Not allowed" });
+    }
+    await db.query(
+      "UPDATE status_maintenance_windows SET title=?, notes=?, start_time=?, end_time=? WHERE id=?",
+      [String(title).trim(), notes || null, new Date(start_time), new Date(end_time), id]
+    );
+    await refreshMaintenanceCache();
+    addLog({ level:"info", server:"system", message:`Maintenance window ${id} updated by ${req.session.username}` });
+    res.json({ ok:true });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+app.delete("/api/admin/maintenance/:id", requireAuth, async (req, res) => {
+  const id = parseInt(req.params.id);
+  try {
+    const [rows] = await db.query("SELECT server_id, title FROM status_maintenance_windows WHERE id=?", [id]);
+    if (!rows.length) return res.status(404).json({ error: "Window not found" });
+    if (req.session.role !== "admin") {
+      const allowed = new Set(await allowedServerIdsFor(req.session));
+      if (!allowed.has(String(rows[0].server_id))) return res.status(403).json({ error: "Not allowed" });
+    }
+    await db.query("DELETE FROM status_maintenance_windows WHERE id=?", [id]);
+    await refreshMaintenanceCache();
+    addLog({ level:"warn", server:"system", message:`Maintenance window "${rows[0].title}" cancelled by ${req.session.username}` });
+    res.json({ ok:true });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
 // Update own profile (first name, last name, email) — all authenticated users
 app.put("/api/profile", requireAuth, async (req, res) => {
   const { first_name, last_name, email } = req.body;
@@ -4902,11 +5071,15 @@ app.delete("/api/admin/api-keys/:id", requireAdmin, async (req, res) => {
 (async () => {
   await initDB();
   await loadConfig();
+  await refreshMaintenanceCache();
   await pollAll(true);  // force everything on startup
   // Tick every 5 seconds — pollAll() picks only servers that are DUE based on their
   // own poll_interval_sec. This lets fast servers (20s) and slow ones (5 min) coexist.
   const TICK = 5000;
   setInterval(async () => { await loadConfig(); await pollAll(); }, TICK);
+  // Refresh maintenance cache every 60s — CRUD endpoints also refresh inline, this is
+  // a safety net for windows that become active/inactive purely by time passing.
+  setInterval(() => { refreshMaintenanceCache().catch(() => {}); }, 60 * 1000);
   // Listen on dual-stack (::) so both IPv4 and IPv6 clients connect with no fallback delay.
   // Without this, "localhost" resolves to ::1, the connection attempt fails, and the client
   // waits ~200ms before retrying on 127.0.0.1 — adding 200ms latency to every request.
