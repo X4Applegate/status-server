@@ -262,6 +262,10 @@ body::before{content:'';position:fixed;inset:0;pointer-events:none;background:ra
 .welcome-btn:hover{background:#1a6fe8}
 @keyframes fadeIn{from{opacity:0}to{opacity:1}}
 
+/* -- DETAIL MAP -- */
+.detail-map-wrap{border-radius:10px;overflow:hidden;height:180px;border:1px solid var(--border);margin-bottom:24px}
+.detail-map-wrap .leaflet-container{height:180px;background:var(--surface)}
+
 /* -- SERVER DETAIL -- */
 .detail-header{display:flex;align-items:flex-start;justify-content:space-between;margin-bottom:24px;gap:16px;flex-wrap:wrap}
 .detail-name{font-size:22px;font-weight:700;color:var(--text-white);letter-spacing:-.02em}
@@ -650,12 +654,27 @@ function _initMap() {
 
 function _createMap() {
   _leafletMap = L.map("leafletContainer", { zoomControl: true }).setView([20, 0], 2);
-  L.tileLayer("https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png", {
+  _addMapTileLayer();
+  _renderMapMarkers();
+}
+
+// Tile layer — try Mapbox (signed-in only), fall back to CARTO/OSM otherwise.
+// Public /dashboard/<slug> pages never request the token.
+function _addMapTileLayer() {
+  const fallback = () => L.tileLayer("https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png", {
     attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors &copy; <a href="https://carto.com/attributions">CARTO</a>',
     subdomains: "abcd",
     maxZoom: 19
   }).addTo(_leafletMap);
-  _renderMapMarkers();
+  if (!sidebarSession.loggedIn || GROUP_SLUG) { fallback(); return; }
+  fetch("/api/mapbox-token").then(r => r.ok ? r.json() : null).then(d => {
+    const token = d && d.token;
+    if (!token) { fallback(); return; }
+    L.tileLayer(`https://api.mapbox.com/styles/v1/mapbox/dark-v11/tiles/{z}/{x}/{y}?access_token=${encodeURIComponent(token)}`, {
+      attribution: '&copy; <a href="https://www.mapbox.com/about/maps/">Mapbox</a> &copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>',
+      tileSize: 512, zoomOffset: -1, maxZoom: 19
+    }).addTo(_leafletMap);
+  }).catch(() => fallback());
 }
 
 function _renderMapMarkers() {
@@ -700,6 +719,47 @@ function _renderMapMarkers() {
   // Show/hide map toggle button based on whether any servers have coords
   const mapBtn = document.getElementById("topbarMapBtn");
   if (mapBtn) mapBtn.style.display = servers.some(s => s.lat!=null&&s.lng!=null) ? "" : "none";
+}
+
+// ── Detail panel mini-map ────────────────────────────────────────────────────
+let _detailMap = null;
+
+function _initDetailMap(lat, lng, name, status) {
+  const container = document.getElementById("detailMapContainer");
+  if (!container) return;
+  // Destroy previous instance if any
+  if (_detailMap) { try { _detailMap.remove(); } catch(e) {} _detailMap = null; }
+  const doCreate = () => {
+    _detailMap = L.map(container, { zoomControl: true, attributionControl: false }).setView([lat, lng], 13);
+    // Tile layer — Mapbox for logged-in, CARTO fallback for public
+    const cartaTiles = () => L.tileLayer("https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png", {
+      subdomains: "abcd", maxZoom: 19
+    }).addTo(_detailMap);
+    if (!sidebarSession.loggedIn || GROUP_SLUG) { cartaTiles(); }
+    else {
+      fetch("/api/mapbox-token").then(r => r.ok ? r.json() : null).then(d => {
+        const token = d && d.token;
+        if (!token) { cartaTiles(); return; }
+        L.tileLayer(`https://api.mapbox.com/styles/v1/mapbox/dark-v11/tiles/{z}/{x}/{y}?access_token=${encodeURIComponent(token)}`, {
+          tileSize: 512, zoomOffset: -1, maxZoom: 19
+        }).addTo(_detailMap);
+      }).catch(() => cartaTiles());
+    }
+    const colorMap = { up:"#10e88a", down:"#ff3d5a", degraded:"#ff8c2a", pending:"#5e8aad" };
+    const color = colorMap[status] || colorMap.pending;
+    L.circleMarker([lat, lng], {
+      radius: 10, fillColor: color, color: "#0d1829",
+      weight: 2, opacity: 1, fillOpacity: 0.9
+    }).addTo(_detailMap).bindPopup(`<div style="font-family:sans-serif;font-weight:600">${name}</div>`);
+  };
+  if (typeof L === "undefined") {
+    const script = document.createElement("script");
+    script.src = "https://unpkg.com/leaflet@1.9.4/dist/leaflet.js";
+    script.integrity = "sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV/XN/WLs=";
+    script.crossOrigin = "";
+    script.onload = doCreate;
+    document.head.appendChild(script);
+  } else { doCreate(); }
 }
 
 // -- Dashboard grouping state (master / view only)
@@ -1408,6 +1468,8 @@ function renderDetail(s, uptime, heartbeat, incidents){
       </div>
     </div>
 
+    ${s.lat && s.lng ? `<div class="detail-map-wrap" id="detailMapContainer"></div>` : ""}
+
     <div class="uptime-row">${uptimeCards}</div>
 
     <div class="section">
@@ -1464,6 +1526,9 @@ function renderDetail(s, uptime, heartbeat, incidents){
   // Draw response time chart if we have data (requestAnimationFrame ensures DOM is painted first)
   const chartData = heartbeat.filter(h => h.response_ms !== null);
   if (chartData.length > 0) requestAnimationFrame(() => drawChart(chartData));
+
+  // Detail map — only when server has coordinates
+  if (s.lat && s.lng) requestAnimationFrame(() => _initDetailMap(s.lat, s.lng, s.name, s.overall));
 }
 
 // -- Simple canvas chart with hover crosshair (no external libs)
