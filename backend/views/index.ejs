@@ -749,7 +749,7 @@ function _renderMainMarkers() {
     if (unmapped.length) unmappedEl.textContent = `${unmapped.length} server${unmapped.length>1?"s":""} without a location are not shown. Add one in Admin → Edit Server.`;
   }
   const mapBtn = document.getElementById("topbarMapBtn");
-  if (mapBtn) mapBtn.style.display = servers.some(s => s.lat!=null&&s.lng!=null) ? "" : "none";
+  if (mapBtn) mapBtn.style.display = ((sidebarSession.loggedIn || !!GROUP_SLUG) && servers.some(s => s.lat!=null&&s.lng!=null)) ? "" : "none";
 }
 
 // ── Detail panel mini-map ─────────────────────────────────────────────────────
@@ -1730,7 +1730,7 @@ async function loadServers(){
 
 // -- Live updates via SSE
 (function connectSSE(){
-  const es = new EventSource("/api/events");
+  const es = new EventSource("/api/events" + (GROUP_SLUG ? `?slug=${encodeURIComponent(GROUP_SLUG)}` : ""));
   es.onmessage = e => {
     let data = JSON.parse(e.data);
     // On a dashboard, filter the global stream down to our group (many-to-many aware)

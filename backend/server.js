@@ -2793,6 +2793,7 @@ app.get("/api/events", async (req, res) => {
   // - Public   → only servers in any group (for dashboard pages)
   res._authed   = !!(req.session && req.session.userId);
   res._isAdmin  = res._authed && req.session.role === "admin";
+  res._slug     = req.query.slug || null;  // group-slug dashboard context (may be null)
   res._allowed  = null;          // null = unrestricted
   if (res._authed && !res._isAdmin) {
     try {
@@ -2807,13 +2808,19 @@ app.get("/api/events", async (req, res) => {
 });
 
 // Returns the subset of server records this SSE client is allowed to see.
-// With many-to-many, a server is visible if ANY of its groups is accessible to the client.
+// Authenticated users and group-slug visitors get lat/lng (map feature).
+// Anonymous visitors on the root page have lat/lng stripped to protect locations.
 function filterServersForSseClient(res, all) {
   if (res._isAdmin) return all;                                              // admin → everything
   if (res._authed) {
     return all.filter(s => Array.isArray(s.group_ids) && s.group_ids.some(gid => res._allowed.has(gid)));
   }
-  return all.filter(s => Array.isArray(s.group_ids) && s.group_ids.length > 0); // public → any grouped server
+  // Public clients — only grouped servers
+  const list = all.filter(s => Array.isArray(s.group_ids) && s.group_ids.length > 0);
+  // Group-slug dashboard visitors may see lat/lng (map is intentionally enabled for them)
+  if (res._slug) return list;
+  // Anonymous root-page visitors: strip lat/lng to hide server locations
+  return list.map(({ lat, lng, ...rest }) => rest);
 }
 
 // Logs reveal internal system state — admin only
@@ -4198,7 +4205,8 @@ app.get("/api/public/group/:slug", async (req, res) => {
         description: s.description, category: s.category || "", sub_category: s.sub_category || "", tags: s.tags, group_ids: s.group_ids,
         checks: s.checks || [],              // includes cert info for HTTPS checks
         overall: s.overall, lastChecked: s.lastChecked,
-        uptimeHistory: s.uptimeHistory
+        uptimeHistory: s.uptimeHistory,
+        lat: s.lat || null, lng: s.lng || null  // needed for map view on shared dashboards
       }));
     res.json({ group: g, servers });
   } catch(e) { res.status(500).json({ error: e.message }); }
