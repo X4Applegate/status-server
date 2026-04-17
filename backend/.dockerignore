@@ -1,0 +1,36 @@
+# Keep the build context lean and prevent secrets / dev artifacts from ever
+# landing in a published image layer.
+
+node_modules
+npm-debug.log
+.npm
+
+# Local dev files
+.env
+.env.*
+*.local
+
+# Editor / OS detritus
+.DS_Store
+.vscode
+.idea
+*.swp
+
+# VCS — never copy .git into the image
+.git
+.gitignore
+
+# Docs / CI
+README.md
+*.md
+.github
+
+# Build output
+dist
+build
+
+# Tests (not needed at runtime)
+test
+tests
+*.test.js
+coverage
