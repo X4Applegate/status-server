@@ -630,7 +630,9 @@ function toggleMapView() {
     if (mapDiv) mapDiv.classList.add("active");
     if (btn)   { btn.textContent = "📋 List"; btn.classList.add("active"); }
     if (!_leafletMap) _initMap();
-    else _renderMapMarkers();
+    else { _renderMapMarkers(); }
+    // Recalculate size after the container becomes visible in the DOM
+    setTimeout(() => { if (_leafletMap) _leafletMap.invalidateSize(); }, 100);
   } else {
     if (layout) layout.style.display = "";
     if (mapDiv) mapDiv.classList.remove("active");
