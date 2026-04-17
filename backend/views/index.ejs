@@ -658,24 +658,34 @@ function _createMap() {
   _renderMapMarkers();
 }
 
-// Tile layer — try Mapbox (signed-in only), fall back to CARTO/OSM otherwise.
-// Public /dashboard/<slug> pages never request the token.
-function _addMapTileLayer() {
-  const fallback = () => L.tileLayer("https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png", {
-    attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors &copy; <a href="https://carto.com/attributions">CARTO</a>',
-    subdomains: "abcd",
-    maxZoom: 19
-  }).addTo(_leafletMap);
-  if (!sidebarSession.loggedIn || GROUP_SLUG) { fallback(); return; }
+// Shared tile-layer helper — CARTO always loads first, then Mapbox replaces it
+// if a valid token exists. tileerror on Mapbox auto-reverts to CARTO.
+function _addTileLayer(map) {
+  const cartoUrl = "https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png";
+  const cartoOpts = {
+    attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> &copy; <a href="https://carto.com/attributions">CARTO</a>',
+    subdomains: "abcd", maxZoom: 19
+  };
+  const cartoLayer = L.tileLayer(cartoUrl, cartoOpts).addTo(map);
+  if (!sidebarSession.loggedIn || GROUP_SLUG) return;
   fetch("/api/mapbox-token").then(r => r.ok ? r.json() : null).then(d => {
     const token = d && d.token;
-    if (!token) { fallback(); return; }
-    L.tileLayer(`https://api.mapbox.com/styles/v1/mapbox/dark-v11/tiles/{z}/{x}/{y}?access_token=${encodeURIComponent(token)}`, {
-      attribution: '&copy; <a href="https://www.mapbox.com/about/maps/">Mapbox</a> &copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>',
-      tileSize: 512, zoomOffset: -1, maxZoom: 19
-    }).addTo(_leafletMap);
-  }).catch(() => fallback());
+    if (!token) return;
+    const mbLayer = L.tileLayer(
+      `https://api.mapbox.com/styles/v1/mapbox/dark-v11/tiles/256/{z}/{x}/{y}?access_token=${encodeURIComponent(token)}`,
+      { tileSize: 256, maxZoom: 19,
+        attribution: '&copy; <a href="https://www.mapbox.com/about/maps/">Mapbox</a>' }
+    );
+    let swapped = false;
+    mbLayer.on("tileload", () => {
+      if (!swapped) { swapped = true; cartoLayer.remove(); mbLayer.addTo(map); }
+    });
+    mbLayer.on("tileerror", () => { mbLayer.remove(); }); // keep CARTO on error
+    mbLayer.addTo(map);
+  }).catch(() => {}); // CARTO already added above
 }
+
+function _addMapTileLayer() { _addTileLayer(_leafletMap); }
 
 function _renderMapMarkers() {
   if (!_leafletMap) return;
@@ -733,20 +743,7 @@ function _initDetailMap(lat, lng, name, status) {
     _detailMap = L.map(container, { zoomControl: true, attributionControl: false }).setView([lat, lng], 13);
     // Force Leaflet to recalculate container dimensions after DOM paint
     setTimeout(() => { if (_detailMap) _detailMap.invalidateSize(); }, 100);
-    // Tile layer — Mapbox for logged-in, CARTO fallback for public
-    const cartaTiles = () => L.tileLayer("https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png", {
-      subdomains: "abcd", maxZoom: 19
-    }).addTo(_detailMap);
-    if (!sidebarSession.loggedIn || GROUP_SLUG) { cartaTiles(); }
-    else {
-      fetch("/api/mapbox-token").then(r => r.ok ? r.json() : null).then(d => {
-        const token = d && d.token;
-        if (!token) { cartaTiles(); return; }
-        L.tileLayer(`https://api.mapbox.com/styles/v1/mapbox/dark-v11/tiles/{z}/{x}/{y}?access_token=${encodeURIComponent(token)}`, {
-          tileSize: 512, zoomOffset: -1, maxZoom: 19
-        }).addTo(_detailMap);
-      }).catch(() => cartaTiles());
-    }
+    _addTileLayer(_detailMap);
     const colorMap = { up:"#10e88a", down:"#ff3d5a", degraded:"#ff8c2a", pending:"#5e8aad" };
     const color = colorMap[status] || colorMap.pending;
     L.circleMarker([lat, lng], {
