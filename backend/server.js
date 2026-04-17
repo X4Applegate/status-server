@@ -4336,8 +4336,8 @@ self.addEventListener("fetch",    e => e.respondWith(fetch(e.request)));`);
 });
 
 // Group icon — used by manifest.json and as apple-touch-icon.
-// Returns the group's stored logo_image (decoded from its base64 data URL)
-// or a generated SVG icon built from the group's initials + accent color.
+// Always returns image/svg+xml so manifest sizes:"any" is valid for Chrome PWA
+// install. Raster logo_images are embedded inside an SVG <image> wrapper.
 app.get("/api/icon/:slug", async (req, res) => {
   try {
     const [rows] = await db.query(
@@ -4346,13 +4346,15 @@ app.get("/api/icon/:slug", async (req, res) => {
     );
     if (!rows.length) return res.status(404).send("Not found");
     const g = rows[0];
+    res.setHeader("Content-Type", "image/svg+xml");
+    res.setHeader("Cache-Control", "public, max-age=3600");
     if (g.logo_image && g.logo_image.startsWith("data:")) {
-      const m = g.logo_image.match(/^data:(image\/[^;]+);base64,(.+)$/s);
-      if (m) {
-        res.setHeader("Content-Type", m[1]);
-        res.setHeader("Cache-Control", "public, max-age=3600");
-        return res.end(Buffer.from(m[2], "base64"));
-      }
+      // Wrap raster in an SVG envelope — keeps the image, forces SVG MIME type
+      // so manifest sizes:"any" is correct and Chrome PWA validation passes.
+      const svg = `<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" viewBox="0 0 512 512" width="512" height="512">
+  <image href="${g.logo_image}" width="512" height="512" preserveAspectRatio="xMidYMid meet"/>
+</svg>`;
+      return res.end(svg);
     }
     // Fallback: generate SVG from initials
     const initials = (g.logo_text || g.name || "?").substring(0, 2).toUpperCase();
@@ -4363,8 +4365,6 @@ app.get("/api/icon/:slug", async (req, res) => {
   <rect x="24" y="24" width="464" height="464" rx="72" fill="${accent}" opacity="0.18"/>
   <text x="256" y="348" font-family="-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif" font-size="240" font-weight="700" fill="${accent}" text-anchor="middle">${initials}</text>
 </svg>`;
-    res.setHeader("Content-Type", "image/svg+xml");
-    res.setHeader("Cache-Control", "public, max-age=3600");
     res.end(svg);
   } catch(e) { res.status(500).send("Error"); }
 });
@@ -4376,11 +4376,6 @@ app.get("/dashboard/:slug/manifest.json", pageLimiter, async (req, res) => {
     const [rows] = await db.query("SELECT * FROM status_groups WHERE slug=?", [req.params.slug]);
     if (!rows.length) return res.status(404).json({ error: "Not found" });
     const g = rows[0];
-    let iconType = "image/svg+xml";
-    if (g.logo_image) {
-      const m = g.logo_image.match(/^data:(image\/[^;]+);base64,/);
-      if (m) iconType = m[1];
-    }
     const shortName = g.name.length > 14 ? g.name.substring(0, 14).trimEnd() + "…" : g.name;
     res.setHeader("Content-Type", "application/manifest+json");
     res.setHeader("Cache-Control", "public, max-age=300");
@@ -4395,8 +4390,8 @@ app.get("/dashboard/:slug/manifest.json", pageLimiter, async (req, res) => {
       theme_color:      g.accent_color || "#2a7fff",
       background_color: g.bg_color     || "#060c18",
       icons: [
-        { src: `/api/icon/${g.slug}`, sizes: "any", type: iconType, purpose: "any"      },
-        { src: `/api/icon/${g.slug}`, sizes: "any", type: iconType, purpose: "maskable" }
+        { src: `/api/icon/${g.slug}`, sizes: "any", type: "image/svg+xml", purpose: "any"      },
+        { src: `/api/icon/${g.slug}`, sizes: "any", type: "image/svg+xml", purpose: "maskable" }
       ]
     });
   } catch(e) { res.status(500).json({ error: e.message }); }
