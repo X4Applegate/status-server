@@ -670,6 +670,9 @@ body{font-family:var(--sans);background:var(--bg);color:var(--text);min-height:1
             <div id="fGroupsPicker" style="background:var(--input-bg);border:1px solid var(--border-hi);border-radius:var(--r-sm);max-height:220px;overflow-y:auto;padding:8px"></div>
           </div>
           <div class="fg full checks-wrap"><div class="checks-head"><label class="flabel" style="margin:0">Health Checks</label><button class="btn" onclick="addCrow()" style="font-size:11px;padding:4px 10px">+ Add Check</button></div><div class="check-rows" id="crowContainer"></div></div>
+          <div class="fg full"><label class="flabel">Runbook <span style="font-weight:400;text-transform:none;letter-spacing:0;color:var(--text-2)">(markdown — shown on the detail panel when this service goes down, so on-call knows what to do)</span></label>
+            <textarea class="finput" id="fRunbook" placeholder="## First steps&#10;1. SSH to host as deploy user&#10;2. `sudo systemctl status myapp`&#10;3. Check logs in /var/log/myapp/&#10;&#10;## Escalation&#10;- On-call: [pagerduty](https://...)&#10;- Vendor: support@example.com (account #12345)" style="min-height:140px;font-family:var(--mono);font-size:12px;line-height:1.5;resize:vertical"></textarea>
+          </div>
           <div class="fg full" id="fBadgeSection" style="display:none">
             <label class="flabel">Badge URLs <span style="font-weight:400;text-transform:none;letter-spacing:0;color:var(--text-2)">embed in READMEs or docs</span></label>
             <div style="background:var(--input-bg);border:1px solid var(--border-hi);border-radius:var(--r-sm);padding:12px;display:flex;flex-direction:column;gap:8px" id="fBadgeList"></div>
@@ -2128,6 +2131,7 @@ async function showServerForm(s){
   document.getElementById("fGeoResult").style.color = "var(--text-2)";
   document.getElementById("fGeoList").style.display = "none";
   document.getElementById("fTags").value  = (s?.tags||[]).join(", ");
+  document.getElementById("fRunbook").value = s?.runbook || "";
   document.getElementById("fInterval").value = String(s?.poll_interval_sec || 30);
   document.getElementById("fThreshold").value = String(s?.failure_threshold || 1);
   document.getElementById("fErr").textContent = "";
@@ -2222,13 +2226,16 @@ function renderCrows(){
       // Existing checks default to showing cert info (show_cert undefined or true).
       // Only when explicitly false do we hide the cert chip.
       const showCert = ck.show_cert !== false;
+      const escAttr = (v) => String(v||"").replace(/"/g,"&quot;");
       detail =
         `<input class="finput" placeholder="URL" value="${ck.url||""}" oninput="upCk(${i},'url',this.value)">` +
         `<input class="finput" placeholder="Status" value="${ck.expectedStatus||200}" oninput="upCk(${i},'expectedStatus',parseInt(this.value))" style="max-width:90px">` +
         `<label class="crow-hint" style="display:flex;align-items:center;gap:5px;cursor:pointer;white-space:nowrap" title="Show SSL certificate expiry on the detail view (HTTPS only)">` +
           `<input type="checkbox" ${showCert ? "checked" : ""} onchange="upCk(${i},'show_cert',this.checked)" style="margin:0">` +
           `SSL info` +
-        `</label>`;
+        `</label>` +
+        `<input class="finput" placeholder='Body must contain (optional)' title="Treat as DOWN if the response body does NOT contain this text. Case-sensitive substring match." value="${escAttr(ck.contains)}" oninput="upCk(${i},'contains',this.value)" style="flex:1 1 180px;min-width:140px">` +
+        `<input class="finput" placeholder='Body must NOT contain (optional)' title="Treat as DOWN if the response body contains this text. Useful for catching error pages that still return 200." value="${escAttr(ck.not_contains)}" oninput="upCk(${i},'not_contains',this.value)" style="flex:1 1 180px;min-width:140px">`;
     } else if (ck.type === "dns") {
       // DNS check — hostname, record type dropdown, optional expected value
       const rtype = (ck.record_type || "A").toUpperCase();
@@ -2470,6 +2477,7 @@ async function submitForm(){
     lat: parseFloat(document.getElementById("fLat").value) || null,
     lng: parseFloat(document.getElementById("fLng").value) || null,
     location_address: document.getElementById("fAddress").value.trim() || null,
+    runbook:          document.getElementById("fRunbook").value,
   };
   try {
     const r = await fetch(id ? `/api/admin/servers/${id}` : "/api/admin/servers", {
@@ -2761,17 +2769,19 @@ async function loadSettings(){
   document.getElementById("aCount").textContent = "Settings";
   el.innerHTML = `<div style="padding:20px;color:var(--text-2);font-size:12px">Loading…</div>`;
   try {
-    const [smtpRes, tsRes, goRes, mbRes] = await Promise.all([
+    const [smtpRes, tsRes, goRes, mbRes, wrRes] = await Promise.all([
       fetch("/api/admin/settings/smtp"),
       fetch("/api/admin/settings/turnstile"),
       fetch("/api/admin/settings/google-oauth"),
-      fetch("/api/admin/settings/mapbox")
+      fetch("/api/admin/settings/mapbox"),
+      fetch("/api/admin/settings/weekly-report")
     ]);
     if (!smtpRes.ok) { el.innerHTML = `<div class="empty-state">Admin role required.</div>`; return; }
     const s  = await smtpRes.json();
     const t  = tsRes.ok ? await tsRes.json() : { enabled:false, site_key:"", secret_key:"" };
     const go = goRes.ok ? await goRes.json() : { enabled:false, client_id:"", client_secret:"", callback_url:"" };
     const mb = mbRes.ok ? await mbRes.json() : { token:"" };
+    const wr = wrRes.ok ? await wrRes.json() : { enabled:false, recipients:"", lastSentAt:null, smtpConfigured:false };
     el.innerHTML = `
       <div style="padding:24px;max-width:640px">
         <div style="margin-bottom:20px">
@@ -2842,6 +2852,22 @@ async function loadSettings(){
 
         <div style="height:1px;background:var(--border);margin:32px 0"></div>
 
+        <div style="margin-bottom:20px">
+          <div style="font-size:14px;font-weight:600;color:var(--text-hi);margin-bottom:4px">Weekly Uptime Report</div>
+          <div style="font-size:12px;color:var(--text-2);line-height:1.6">Every Monday at 09:00 UTC, email a 7-day summary — overall uptime, incident count, longest outages, and slowest services — to the recipients below. Requires SMTP. ${wr.enabled ? '<span style="color:var(--green)">● Enabled</span>' : '<span style="color:var(--orange)">● Disabled</span>'}${wr.lastSentAt ? `<div style="margin-top:4px;color:var(--text-2);font-size:11px">Last sent: ${new Date(wr.lastSentAt).toLocaleString()}</div>` : ''}</div>
+        </div>
+        <div class="form-grid">
+          <div class="fg full"><label class="flabel"><input type="checkbox" id="setWrEnabled" ${wr.enabled ? 'checked' : ''} style="vertical-align:middle;margin-right:6px">Enable scheduled weekly report</label></div>
+          <div class="fg full"><label class="flabel">Recipients <span style="font-weight:400;text-transform:none;letter-spacing:0;color:var(--text-2)">(comma or newline separated)</span></label><textarea class="finput" id="setWrRecipients" rows="3" placeholder="ops@example.com, cto@example.com" style="resize:vertical;font-family:inherit">${wr.recipients || ''}</textarea></div>
+        </div>
+        <div style="display:flex;gap:10px;margin-top:20px;flex-wrap:wrap">
+          <button class="btn btn-primary" onclick="saveWeeklyReportSettings()">Save Settings</button>
+          <button class="btn" onclick="sendWeeklyReportNow()" ${wr.smtpConfigured ? '' : 'disabled title="Configure SMTP first"'}>Send Now</button>
+        </div>
+        <div id="setWrMsg" style="margin-top:14px;font-size:12px"></div>
+
+        <div style="height:1px;background:var(--border);margin:32px 0"></div>
+
         <!-- Danger Zone — destructive actions behind a typed confirmation. -->
         <div style="border:1px solid rgba(239,61,90,.35);border-radius:12px;padding:20px 22px;background:rgba(239,61,90,.04);margin-top:8px">
           <div style="display:flex;align-items:center;gap:10px;margin-bottom:12px">
@@ -2865,6 +2891,46 @@ async function loadSettings(){
       </div>`;
   } catch(e) {
     el.innerHTML = `<div class="empty-state">Failed to load settings: ${e.message}</div>`;
+  }
+}
+
+async function saveWeeklyReportSettings(){
+  const msg = document.getElementById("setWrMsg");
+  msg.textContent = "Saving…"; msg.style.color = "var(--text-2)";
+  const body = {
+    enabled:    document.getElementById("setWrEnabled").checked,
+    recipients: document.getElementById("setWrRecipients").value
+  };
+  try {
+    const r = await fetch("/api/admin/settings/weekly-report", {
+      method: "POST", headers: {"Content-Type":"application/json"}, body: JSON.stringify(body)
+    });
+    const d = await r.json();
+    if (!r.ok) { msg.textContent = "Error: " + (d.error || "Failed"); msg.style.color = "var(--red)"; return; }
+    msg.textContent = d.enabled ? `Saved — report will send to ${d.recipients} recipient(s) every Monday at 09:00 UTC` : "Saved — weekly report disabled";
+    msg.style.color = "var(--green)";
+    toast("Weekly report settings saved", "success");
+  } catch(e) {
+    msg.textContent = "Error: " + e.message; msg.style.color = "var(--red)";
+  }
+}
+
+async function sendWeeklyReportNow(){
+  const msg = document.getElementById("setWrMsg");
+  const to = prompt("Send weekly report now.\n\nLeave blank to use configured recipients, or enter an ad-hoc address:");
+  if (to === null) return;
+  msg.textContent = "Sending…"; msg.style.color = "var(--text-2)";
+  try {
+    const r = await fetch("/api/admin/settings/weekly-report/send", {
+      method: "POST", headers: {"Content-Type":"application/json"}, body: JSON.stringify({ to: to.trim() })
+    });
+    const d = await r.json();
+    if (!r.ok) { msg.textContent = "Error: " + (d.error || "Failed"); msg.style.color = "var(--red)"; return; }
+    msg.textContent = `Sent to ${d.recipients} recipient(s) — overall uptime ${d.overallUptime == null ? "—" : d.overallUptime.toFixed(2) + "%"}, ${d.incidents} incidents`;
+    msg.style.color = "var(--green)";
+    toast("Weekly report sent", "success");
+  } catch(e) {
+    msg.textContent = "Error: " + e.message; msg.style.color = "var(--red)";
   }
 }
 

@@ -6,6 +6,49 @@ All notable changes to this project are documented here.
 
 ---
 
+## [3.3.0] — 2026-04-17 *(stable)*
+
+Major release consolidating the 3.3.0-beta line into stable, plus three new production-ready features.
+
+### Highlights — New in 3.3.0 stable
+- **🔍 Keyword / content check (HTTP)** — every HTTP check now accepts optional **Body must contain** and **Body must NOT contain** substrings. Useful for catching soft-failures where a service returns `200 OK` with an error page, a maintenance banner, or a missing marker string. The response body is buffered (up to 1 MB) only when one of the fields is set, so the hot path is unchanged for existing checks.
+- **📓 Runbook notes per server** — every server now has a **Runbook** field (markdown) in the admin form. When a server is **down** or **degraded**, the runbook appears at the top of its detail panel with a pulsing "follow these steps" flag. Supports `#/##/###` headings, bullet/numbered lists, **bold**, *italic*, `code`, fenced ``` blocks, and `[links](https://…)`. Runbook content is **logged-in-only** — stripped from anonymous SSE and anonymous group dashboards, since playbooks may contain internal ops detail.
+- **📬 Weekly uptime report email** — new admin **Settings → Weekly Uptime Report** section. Enable the toggle, enter recipients, and every **Monday at 09:00 UTC** an HTML summary email is sent: overall uptime %, incident count, total checks run, top-5 worst-uptime servers (with longest outage), and top-5 slowest services by avg response time. Includes a **Send Now** button for ad-hoc sends or testing.
+
+### Consolidated from 3.3.0-beta + 3.4.0-beta
+- **📷 Public status pages** — per-group `/status/<slug>` URL with no login required (toggle in Groups tab).
+- **📧 Email alert subscriptions** — visitors can subscribe to down/recovery notifications for a group from the 🔔 Alerts button; one-click unsubscribe links in every email.
+- **📌 Pin / favourite servers** — star button on every card; pins sync to DB for logged-in users, fall back to `localStorage` for anonymous visitors.
+- **🎨 Dashboard UI refresh** — full-width health banner ("All N systems operational"), response-time pill on every card (green/yellow/red tier), card redesign with 2-line name/description clamp.
+- **🎨 Badge `?style=` parameter** — `flat`, `flat-square`, `plastic`, `for-the-badge`.
+- **🗺️ Map view (MapLibre GL JS)** — 🗺️ Map button switches to a full-width map when any server has coordinates. Dark CARTO style by default; native Mapbox dark-v11 when a Mapbox token is configured. Co-located servers are grouped into one combined marker. Map is **hidden for anonymous visitors** and lat/lng are stripped from their SSE feed.
+- **📍 Address geocoding** — free-text address field + **Look up** button. Resolves via Nominatim with Photon fallback; address text is persisted alongside lat/lng.
+- **🔑 API key authentication** — Admin → API Keys tab. `read` scope (`GET /api/v1/status`, `GET /api/v1/status/:id`) and `write` scope (`POST /api/v1/servers/:id/push-status` for CI/CD). Keys stored as SHA-256 hashes; shown once at creation.
+- **📤 Import / Export** — Servers tab toolbar: **⬇ Export** (JSON snapshot of all servers + checks), **⬆ Import** (bulk-create, with skip-or-overwrite for conflicts).
+- **📦 Script check type** — admin-only. Enter any shell command (no shell metacharacters); exit 0 = up, non-zero = down. Uses `spawn`, not `exec`.
+- **📅 Maintenance windows** — schedule alert suppression per-server with title + notes. Windows are cached in memory and refreshed every 60s; CRUD writes refresh inline.
+- **🧯 Public incident page** — per-incident `/incident/<id>` page with an operator-driven **update timeline** (investigating → identified → monitoring → resolved). Manual "post update" textarea; auto-posts `restored after 2m 14s` on recovery.
+- **📢 Dashboard banner system** — admin-scheduled banners render above all dashboards with dismiss + expiry.
+- **⚠️ Danger Zone** — Settings → Clear All History behind a two-gate confirmation (browser dialog + typed phrase `DELETE ALL HISTORY`). Wipes history, incidents, and audit log only — servers, users, groups, webhooks, settings are preserved.
+- **🌙 Dark theme only** — the light-theme branch was removed. Dark across all views.
+- **🛡️ Scout hardening** — Docker image rebuilt for Docker Scout health-score compliance.
+
+### Security & privacy
+- Map lat/lng, runbook, and other logged-in-only fields are filtered out of every public/anonymous SSE frame and public group endpoint.
+- `/api/public/servers` is now consistent with the SSE payload for the same auth level (fixes prior race where REST would overwrite SSE-populated fields like `lat/lng`).
+- Omada controller CRUD rejects private/loopback IPs and non-allowlisted hostnames; TLS fingerprint verified via DNS lookup before each fetch.
+- Session auth on sensitive admin surfaces (`/api/admin/api-keys`, runbook CRUD, weekly-report routes) — admin role required.
+
+### Internal
+- New columns: `status_servers.runbook TEXT`
+- New `status_settings` keys: `weekly_report_enabled`, `weekly_report_recipients`, `weekly_report_last_sent_at`
+- New functions: `buildWeeklyReport()`, `sendWeeklyReport()`, `maybeSendScheduledWeeklyReport()` (hourly tick, Monday ≥09:00 UTC guard, once per ISO week)
+- New routes: `GET/POST /api/admin/settings/weekly-report`, `POST /api/admin/settings/weekly-report/send`
+- `httpCheck()` signature extended with optional `contains` / `notContains` params; bounded 1 MB body buffer only when either is set
+- Admin `renderDetail()` gains a runbook section with safe markdown renderer (escape-then-unescape, allow-listed tags, http/https/mailto links only)
+
+---
+
 ## [3.4.0-beta.1] — 2026-04-17 *(beta branch)*
 
 ### New Features

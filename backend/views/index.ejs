@@ -333,6 +333,24 @@ canvas#responseChart{width:100%!important}
 
 /* -- CHECKS -- */
 .checks-row{display:flex;gap:10px;flex-wrap:wrap}
+.runbook-section.runbook-hot{border-color:var(--red);box-shadow:0 0 0 1px var(--red) inset}
+.runbook-flag{display:inline-block;margin-left:8px;padding:2px 8px;background:var(--red);color:#fff;border-radius:10px;font-size:10px;font-weight:700;letter-spacing:.04em;vertical-align:middle;animation:runbook-pulse 1.6s ease-in-out infinite}
+@keyframes runbook-pulse{0%,100%{opacity:1}50%{opacity:.55}}
+.runbook-body{font-size:13px;line-height:1.6;color:var(--text-hi)}
+.runbook-body h2.rb-h,.runbook-body h3.rb-h,.runbook-body h4.rb-h{margin:14px 0 6px;color:var(--text-hi);font-weight:600}
+.runbook-body h2.rb-h{font-size:15px}
+.runbook-body h3.rb-h{font-size:14px}
+.runbook-body h4.rb-h{font-size:13px;color:var(--text-2);text-transform:uppercase;letter-spacing:.04em}
+.runbook-body h2.rb-h:first-child,.runbook-body h3.rb-h:first-child,.runbook-body h4.rb-h:first-child{margin-top:0}
+.runbook-body p{margin:0 0 10px}
+.runbook-body p:last-child{margin-bottom:0}
+.runbook-body ul.rb-ul,.runbook-body ol.rb-ol{margin:0 0 10px;padding-left:22px}
+.runbook-body li{margin:3px 0}
+.runbook-body a{color:var(--blue);text-decoration:none;border-bottom:1px solid rgba(42,127,255,0.35)}
+.runbook-body a:hover{border-bottom-color:var(--blue)}
+.runbook-body code.rb-code{background:var(--input-bg);border:1px solid var(--border);padding:1px 6px;border-radius:4px;font-family:var(--mono);font-size:12px}
+.runbook-body pre.rb-pre{background:var(--input-bg);border:1px solid var(--border);padding:10px 12px;border-radius:6px;overflow-x:auto;font-family:var(--mono);font-size:12px;line-height:1.5;margin:0 0 10px}
+.runbook-body pre.rb-pre code{background:transparent;border:none;padding:0}
 .check-chip{display:inline-flex;align-items:center;gap:8px;padding:8px 14px;border-radius:8px;font-size:12px;border:1px solid}
 .check-chip.ok  {border-color:rgba(16,232,138,0.2);background:var(--green-soft)}
 .check-chip.fail{border-color:rgba(255,61,90,0.2);background:var(--red-soft)}
@@ -897,6 +915,53 @@ let servers    = [];
 let selectedId = null;
 
 // -- Helpers
+// Minimal, safe markdown renderer for runbook notes. HTML-escape everything first,
+// then selectively un-escape a small set of inline/block patterns. No external libs —
+// this is intentionally tiny; if a user wants rich formatting they can structure with
+// headings, lists, code, and links.
+function escapeHtml(s){
+  return String(s||"")
+    .replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;")
+    .replace(/"/g,"&quot;").replace(/'/g,"&#39;");
+}
+function renderMarkdown(src){
+  if (!src) return "";
+  let html = escapeHtml(src);
+  // Fenced code blocks first so their contents bypass inline rules.
+  const codeBlocks = [];
+  html = html.replace(/```([\s\S]*?)```/g, (_m, code) => {
+    codeBlocks.push(code.replace(/^\n/, ""));
+    return `\u0000CODE${codeBlocks.length - 1}\u0000`;
+  });
+  // Headings — support ## and ###, restricted to line starts.
+  html = html.replace(/^### (.+)$/gm, '<h4 class="rb-h">$1</h4>');
+  html = html.replace(/^## (.+)$/gm,  '<h3 class="rb-h">$1</h3>');
+  html = html.replace(/^# (.+)$/gm,   '<h2 class="rb-h">$1</h2>');
+  // Bullet and numbered lists — one pass per kind, merge consecutive lines.
+  html = html.replace(/(?:^[-*] .+\n?)+/gm, m =>
+    "<ul class='rb-ul'>" + m.trim().split(/\n/).map(l => `<li>${l.replace(/^[-*]\s+/, "")}</li>`).join("") + "</ul>");
+  html = html.replace(/(?:^\d+\. .+\n?)+/gm, m =>
+    "<ol class='rb-ol'>" + m.trim().split(/\n/).map(l => `<li>${l.replace(/^\d+\.\s+/, "")}</li>`).join("") + "</ol>");
+  // Inline code, bold, italic, links. Links are gated to http/https/mailto to block javascript:.
+  html = html.replace(/`([^`\n]+)`/g, '<code class="rb-code">$1</code>');
+  html = html.replace(/\*\*([^*\n]+)\*\*/g, '<strong>$1</strong>');
+  html = html.replace(/(^|[^*])\*([^*\n]+)\*/g, '$1<em>$2</em>');
+  html = html.replace(/\[([^\]]+)\]\(([^)]+)\)/g, (_m, text, url) => {
+    const safe = /^(https?:\/\/|mailto:)/i.test(url);
+    return safe
+      ? `<a href="${url}" target="_blank" rel="noopener noreferrer">${text}</a>`
+      : escapeHtml(`[${text}](${url})`);
+  });
+  // Paragraphs — preserve double-newlines as block separators, single newlines as breaks.
+  html = html.split(/\n{2,}/).map(block => {
+    if (/^\s*<(h[234]|ul|ol|pre)/.test(block)) return block;
+    return `<p>${block.replace(/\n/g, "<br>")}</p>`;
+  }).join("");
+  // Restore fenced code blocks last so their contents are not touched by inline rules.
+  html = html.replace(/\u0000CODE(\d+)\u0000/g, (_m, i) => `<pre class="rb-pre"><code>${escapeHtml(codeBlocks[+i])}</code></pre>`);
+  return html;
+}
+
 function fmtDur(secs){
   if (!secs) return "ongoing";
   if (secs < 60)   return `${secs}s`;
@@ -1468,6 +1533,15 @@ function renderDetail(s, uptime, heartbeat, incidents){
         <div class="checks-row">${checkChips||"<span style='color:var(--text-2);font-size:12px'>No checks configured</span>"}</div>
       </div>
     </div>
+
+    ${sidebarSession.loggedIn && s.runbook ? `
+    <div class="section runbook-section ${s.overall==="down"||s.overall==="degraded"?"runbook-hot":""}">
+      <div class="section-head">
+        <div class="section-title">Runbook${s.overall==="down"||s.overall==="degraded"?' <span class="runbook-flag">follow these steps</span>':""}</div>
+        <span style="font-size:11px;color:var(--text-2)">On-call playbook</span>
+      </div>
+      <div class="section-body runbook-body">${renderMarkdown(s.runbook)}</div>
+    </div>` : ""}
 
     <div class="section">
       <div class="section-head">

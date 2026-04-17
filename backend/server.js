@@ -251,6 +251,25 @@ async function loadMapboxFromDb() {
   } catch(e) { /* settings table may not exist yet */ }
 }
 
+// -- Weekly uptime report -----------------------------------------------------
+// Persists admin preferences in status_settings. The scheduler checks hourly
+// and fires once per ISO week on Monday ≥09:00 UTC.
+let weeklyReportConfig = { enabled: false, recipients: [], lastSentAt: null };
+
+async function loadWeeklyReportFromDb() {
+  if (!db) return;
+  try {
+    const [rows] = await db.query("SELECT key_name, value FROM status_settings WHERE key_name LIKE 'weekly_report_%'");
+    const m = {};
+    rows.forEach(r => { m[r.key_name] = r.value; });
+    weeklyReportConfig = {
+      enabled:    m.weekly_report_enabled === "true",
+      recipients: (m.weekly_report_recipients || "").split(/[\s,;]+/).map(s => s.trim()).filter(Boolean),
+      lastSentAt: m.weekly_report_last_sent_at || null
+    };
+  } catch(e) { /* settings table may not exist yet */ }
+}
+
 async function verifyTurnstile(token, remoteIp) {
   if (!turnstileConfig.enabled) return { ok: true };
   if (!turnstileConfig.secret_key) return { ok: false, error: "Turnstile is enabled but not configured" };
@@ -721,6 +740,12 @@ async function initDB() {
   try {
     await db.query("ALTER TABLE status_servers ADD COLUMN failure_threshold INT NOT NULL DEFAULT 1");
   } catch(e) { /* column already exists */ }
+  // Runbook: free-form markdown that on-call can read on the detail panel when a
+  // server is down. Kept as TEXT (up to ~64KB) — long enough for multi-step playbooks,
+  // short enough to keep the single-row payload cheap.
+  try {
+    await db.query("ALTER TABLE status_servers ADD COLUMN runbook TEXT DEFAULT NULL");
+  } catch(e) { /* column already exists */ }
 
   await db.query(`
     CREATE TABLE IF NOT EXISTS status_history (
@@ -1087,6 +1112,7 @@ async function initDB() {
   await loadTurnstileFromDb();
   await loadGoogleOAuthFromDb();
   await loadMapboxFromDb();
+  await loadWeeklyReportFromDb();
 
   // No longer auto-creates admin — first user signs up via /login
 
@@ -1150,6 +1176,7 @@ async function loadConfig() {
       description:       r.description || "",
       category:          r.category || "",
       sub_category:      r.sub_category || "",
+      runbook:           r.runbook || "",
       poll_interval_sec: r.poll_interval_sec || 30,
       failure_threshold: Math.max(1, Math.min(10, r.failure_threshold || 1)),
       group_ids:         groupsByServer[r.id] || [],
@@ -1191,10 +1218,11 @@ async function loadConfig() {
 
     serverConfig.forEach(s => {
       if (!serverStatus[s.id]) {
-        serverStatus[s.id] = { id:s.id, name:s.name, host:s.host, description:s.description, category:s.category, sub_category:s.sub_category, group_ids:s.group_ids, tags:s.tags, checks:[], overall:"pending", lastChecked:null, uptimeHistory:[], lat:s.lat||null, lng:s.lng||null };
+        serverStatus[s.id] = { id:s.id, name:s.name, host:s.host, description:s.description, category:s.category, sub_category:s.sub_category, runbook:s.runbook||"", group_ids:s.group_ids, tags:s.tags, checks:[], overall:"pending", lastChecked:null, uptimeHistory:[], lat:s.lat||null, lng:s.lng||null };
       } else {
-        // Keep group_ids in sync on existing entries
+        // Keep group_ids + runbook in sync on existing entries
         serverStatus[s.id].group_ids = s.group_ids;
+        serverStatus[s.id].runbook   = s.runbook || "";
       }
     });
 
@@ -1268,7 +1296,7 @@ function tcpCheck(host, port, timeout=3000) {
 // so cert expiry info only shows up on the very first poll and never again.
 const httpsNoCacheAgent = new https.Agent({ maxCachedSessions: 0, keepAlive: false });
 
-function httpCheck(url, expectedStatus=200, timeout=5000, showCert=true) {
+function httpCheck(url, expectedStatus=200, timeout=5000, showCert=true, contains="", notContains="") {
   return new Promise(resolve => {
     // Guard against missing/malformed URLs and case-insensitive protocol detection —
     // "Https://example.com" (capital H) used to slip through startsWith("https") and crash
@@ -1298,10 +1326,15 @@ function httpCheck(url, expectedStatus=200, timeout=5000, showCert=true) {
     const reqOpts = { timeout };
     if (isHttps) reqOpts.agent = httpsNoCacheAgent;
     const t0 = Date.now();
+    // Only read the body when a keyword match is actually configured — keeps the
+    // hot path identical for users who don't use content matching.
+    const wantsBody = !!(contains || notContains);
+    // Cap body buffering at 1 MB so a misbehaving upstream can't balloon memory.
+    const MAX_BODY = 1024 * 1024;
     const req = lib.get(safeUrl, reqOpts, res => {
       const response_ms = Date.now() - t0;
-      const ok = res.statusCode === expectedStatus;
-      const result = { type:"http", url, ok, response_ms, detail:`HTTP ${res.statusCode}` };
+      const statusOk = res.statusCode === expectedStatus;
+      const result = { type:"http", url, ok: statusOk, response_ms, detail:`HTTP ${res.statusCode}` };
       // Attach TLS certificate info (for HTTPS only, and only when the check has cert
       // tracking enabled). Used by the detail view to show "SSL expires in N days" and
       // warn when <14 days.
@@ -1327,8 +1360,38 @@ function httpCheck(url, expectedStatus=200, timeout=5000, showCert=true) {
           }
         } catch(e) { logger.warn({ url, err: e.message }, "httpCheck cert parse error"); }
       }
-      resolve(result);
-      res.resume();
+      if (!wantsBody) {
+        resolve(result);
+        res.resume();
+        return;
+      }
+      // Body-matching path: buffer up to MAX_BODY bytes, then match.
+      let size = 0;
+      const chunks = [];
+      res.on("data", chunk => {
+        if (size >= MAX_BODY) return;
+        size += chunk.length;
+        chunks.push(chunk);
+      });
+      res.on("end", () => {
+        const body = Buffer.concat(chunks).toString("utf8", 0, Math.min(size, MAX_BODY));
+        const hasContains    = contains    ? body.includes(contains)    : true;
+        const hasNotContains = notContains ? !body.includes(notContains) : true;
+        if (!hasContains) {
+          result.ok = false;
+          result.detail = `HTTP ${res.statusCode} · missing "${contains.slice(0,40)}"`;
+        } else if (!hasNotContains) {
+          result.ok = false;
+          result.detail = `HTTP ${res.statusCode} · forbidden "${notContains.slice(0,40)}"`;
+        } else if (statusOk && (contains || notContains)) {
+          // Preserve cert-warning detail if already set, otherwise annotate match.
+          if (result.detail === `HTTP ${res.statusCode}`) {
+            result.detail = `HTTP ${res.statusCode} · content OK`;
+          }
+        }
+        resolve(result);
+      });
+      res.on("error", e => resolve({ type:"http", url, ok:false, detail:`body read: ${e.message}` }));
     });
     req.on("error",   e  => resolve({ type:"http", url, ok:false, detail:e.message }));
     req.on("timeout", () => { req.destroy(); resolve({ type:"http", url, ok:false, detail:"timeout" }); });
@@ -1936,7 +1999,7 @@ async function runChecks(def) {
     try {
       if (c.type==="ping")          return await pingCheck(def.host);
       if (c.type==="tcp")           return await tcpCheck(def.host, c.port, c.timeout);
-      if (c.type==="http")          return await httpCheck(c.url, c.expectedStatus, c.timeout, c.show_cert !== false);
+      if (c.type==="http")          return await httpCheck(c.url, c.expectedStatus, c.timeout, c.show_cert !== false, c.contains || "", c.not_contains || "");
       if (c.type==="udp")           return await udpCheck(def.host, c.port, c.timeout);
       if (c.type==="dns")           return await dnsCheck(c.hostname || def.host, c.record_type, c.expected, c.timeout);
       if (c.type==="omada_gateway") return await omadaGatewayCheck(c.controller_id, c.site_id, c.customer_id, c.site_name, c.customer_name, def.host);
@@ -2321,6 +2384,238 @@ async function sendEmailAlert(to, payload) {
   });
 }
 
+// -- Weekly uptime report build/send -----------------------------------------
+// Aggregates the last 7 days of status_history + status_incidents into a summary
+// email. Called by the hourly scheduler (auto) and by the admin "Send Now" route.
+async function buildWeeklyReport() {
+  const periodEnd = new Date();
+  const periodStart = new Date(periodEnd.getTime() - 7 * 24 * 60 * 60 * 1000);
+
+  // Per-server uptime + avg/p95 response time
+  const [upRows] = await db.query(
+    `SELECT server_id,
+            COUNT(*) AS total,
+            SUM(ok)  AS ok_count,
+            AVG(response_ms) AS avg_ms
+     FROM status_history
+     WHERE checked_at >= ? AND checked_at <= ?
+     GROUP BY server_id`,
+    [periodStart, periodEnd]
+  );
+
+  // Per-server incident summary
+  const [incRows] = await db.query(
+    `SELECT server_id,
+            COUNT(*) AS incidents,
+            MAX(COALESCE(duration_s, TIMESTAMPDIFF(SECOND, started_at, NOW()))) AS longest_s
+     FROM status_incidents
+     WHERE started_at >= ? AND started_at <= ?
+     GROUP BY server_id`,
+    [periodStart, periodEnd]
+  );
+
+  const incById = {};
+  for (const r of incRows) incById[r.server_id] = r;
+
+  const servers = serverConfig.map(s => {
+    const u = upRows.find(r => r.server_id === s.id);
+    const i = incById[s.id];
+    const total = u ? Number(u.total) : 0;
+    const okC   = u ? Number(u.ok_count) : 0;
+    const uptime = total > 0 ? (okC / total) * 100 : null;
+    return {
+      id:        s.id,
+      name:      s.name,
+      host:      s.host,
+      total,
+      uptime,
+      avgMs:     u && u.avg_ms != null ? Math.round(Number(u.avg_ms)) : null,
+      incidents: i ? Number(i.incidents) : 0,
+      longestS:  i ? Number(i.longest_s || 0) : 0
+    };
+  });
+
+  // Overall metrics
+  const totalChecks   = servers.reduce((a, s) => a + s.total, 0);
+  const totalIncidents = servers.reduce((a, s) => a + s.incidents, 0);
+  const weightedUp = servers.reduce((a, s) => s.total > 0 ? a + (s.uptime * s.total) : a, 0);
+  const overallUptime = totalChecks > 0 ? (weightedUp / totalChecks) : null;
+
+  const worst = [...servers]
+    .filter(s => s.uptime != null)
+    .sort((a, b) => a.uptime - b.uptime)
+    .slice(0, 5);
+  const slowest = [...servers]
+    .filter(s => s.avgMs != null)
+    .sort((a, b) => b.avgMs - a.avgMs)
+    .slice(0, 5);
+
+  return { periodStart, periodEnd, servers, totalChecks, totalIncidents, overallUptime, worst, slowest };
+}
+
+function fmtReportDuration(s) {
+  if (!s || s < 60) return `${Math.round(s || 0)}s`;
+  if (s < 3600) return `${Math.floor(s/60)}m ${Math.round(s%60)}s`;
+  if (s < 86400) return `${Math.floor(s/3600)}h ${Math.floor((s%3600)/60)}m`;
+  return `${Math.floor(s/86400)}d ${Math.floor((s%86400)/3600)}h`;
+}
+
+function renderWeeklyReportHtml(rep) {
+  const fmtPct = v => v == null ? "—" : `${v.toFixed(2)}%`;
+  const periodLabel = `${rep.periodStart.toISOString().slice(0,10)} → ${rep.periodEnd.toISOString().slice(0,10)}`;
+  const upColor = v => v == null ? "#8b949e" : (v >= 99.9 ? "#10e88a" : (v >= 99 ? "#f5a623" : "#ef3d5a"));
+
+  const worstRows = rep.worst.length ? rep.worst.map(s => `
+    <tr>
+      <td style="padding:8px 10px;border-bottom:1px solid #21262d">${escAttrServer(s.name)}</td>
+      <td style="padding:8px 10px;border-bottom:1px solid #21262d;color:${upColor(s.uptime)};font-weight:600">${fmtPct(s.uptime)}</td>
+      <td style="padding:8px 10px;border-bottom:1px solid #21262d;text-align:right">${s.incidents}</td>
+      <td style="padding:8px 10px;border-bottom:1px solid #21262d;text-align:right">${fmtReportDuration(s.longestS)}</td>
+    </tr>`).join("") : `<tr><td colspan="4" style="padding:12px;color:#8b949e;text-align:center">No data for this period.</td></tr>`;
+
+  const slowRows = rep.slowest.length ? rep.slowest.map(s => `
+    <tr>
+      <td style="padding:8px 10px;border-bottom:1px solid #21262d">${escAttrServer(s.name)}</td>
+      <td style="padding:8px 10px;border-bottom:1px solid #21262d;text-align:right">${s.avgMs} ms</td>
+      <td style="padding:8px 10px;border-bottom:1px solid #21262d;color:${upColor(s.uptime)};text-align:right">${fmtPct(s.uptime)}</td>
+    </tr>`).join("") : `<tr><td colspan="3" style="padding:12px;color:#8b949e;text-align:center">No response data for this period.</td></tr>`;
+
+  return `<!DOCTYPE html><html><head><meta charset="utf-8"></head>
+  <body style="margin:0;background:#f4f7fb;font-family:-apple-system,Segoe UI,sans-serif;color:#c9d1d9">
+    <div style="max-width:640px;margin:0 auto;padding:24px">
+      <div style="background:#0d1117;border:1px solid #21262d;border-radius:12px;overflow:hidden">
+        <div style="padding:24px;background:linear-gradient(135deg,#10e88a22,#0d1117)">
+          <div style="font-size:12px;color:#8b949e;letter-spacing:.05em;text-transform:uppercase">Weekly Uptime Report</div>
+          <div style="font-size:22px;font-weight:700;color:#f0f6fc;margin-top:4px">${periodLabel}</div>
+        </div>
+        <div style="padding:20px 24px;display:flex;gap:16px;flex-wrap:wrap;border-bottom:1px solid #21262d">
+          <div style="flex:1;min-width:140px">
+            <div style="font-size:11px;color:#8b949e;text-transform:uppercase;letter-spacing:.05em">Overall Uptime</div>
+            <div style="font-size:26px;font-weight:700;color:${upColor(rep.overallUptime)};margin-top:2px">${fmtPct(rep.overallUptime)}</div>
+          </div>
+          <div style="flex:1;min-width:140px">
+            <div style="font-size:11px;color:#8b949e;text-transform:uppercase;letter-spacing:.05em">Incidents</div>
+            <div style="font-size:26px;font-weight:700;color:#f0f6fc;margin-top:2px">${rep.totalIncidents}</div>
+          </div>
+          <div style="flex:1;min-width:140px">
+            <div style="font-size:11px;color:#8b949e;text-transform:uppercase;letter-spacing:.05em">Checks Run</div>
+            <div style="font-size:26px;font-weight:700;color:#f0f6fc;margin-top:2px">${rep.totalChecks.toLocaleString()}</div>
+          </div>
+        </div>
+
+        <div style="padding:20px 24px">
+          <div style="font-size:14px;font-weight:600;color:#f0f6fc;margin-bottom:10px">Lowest Uptime</div>
+          <table style="width:100%;border-collapse:collapse;font-size:13px">
+            <thead>
+              <tr style="color:#8b949e;font-size:11px;text-transform:uppercase;letter-spacing:.05em">
+                <th style="text-align:left;padding:6px 10px;border-bottom:1px solid #21262d">Server</th>
+                <th style="text-align:left;padding:6px 10px;border-bottom:1px solid #21262d">Uptime</th>
+                <th style="text-align:right;padding:6px 10px;border-bottom:1px solid #21262d">Incidents</th>
+                <th style="text-align:right;padding:6px 10px;border-bottom:1px solid #21262d">Longest Outage</th>
+              </tr>
+            </thead>
+            <tbody>${worstRows}</tbody>
+          </table>
+        </div>
+
+        <div style="padding:0 24px 20px">
+          <div style="font-size:14px;font-weight:600;color:#f0f6fc;margin-bottom:10px">Slowest Services (avg response)</div>
+          <table style="width:100%;border-collapse:collapse;font-size:13px">
+            <thead>
+              <tr style="color:#8b949e;font-size:11px;text-transform:uppercase;letter-spacing:.05em">
+                <th style="text-align:left;padding:6px 10px;border-bottom:1px solid #21262d">Server</th>
+                <th style="text-align:right;padding:6px 10px;border-bottom:1px solid #21262d">Avg Response</th>
+                <th style="text-align:right;padding:6px 10px;border-bottom:1px solid #21262d">Uptime</th>
+              </tr>
+            </thead>
+            <tbody>${slowRows}</tbody>
+          </table>
+        </div>
+
+        ${EXTERNAL_URL ? `<div style="padding:16px 24px;border-top:1px solid #21262d;background:#010409"><a href="${EXTERNAL_URL}" style="color:#10e88a;text-decoration:none;font-size:13px">Open the dashboard →</a></div>` : ""}
+      </div>
+      <div style="text-align:center;color:#8b949e;font-size:11px;margin-top:16px">Sent by Applegate Monitor · Manage in Admin → Settings → Weekly Report</div>
+    </div>
+  </body></html>`;
+}
+
+function renderWeeklyReportText(rep) {
+  const fmtPct = v => v == null ? "—" : `${v.toFixed(2)}%`;
+  const periodLabel = `${rep.periodStart.toISOString().slice(0,10)} to ${rep.periodEnd.toISOString().slice(0,10)}`;
+  const lines = [
+    `Weekly Uptime Report — ${periodLabel}`,
+    ``,
+    `Overall uptime: ${fmtPct(rep.overallUptime)}`,
+    `Incidents: ${rep.totalIncidents}`,
+    `Checks run: ${rep.totalChecks.toLocaleString()}`,
+    ``,
+    `Lowest uptime:`
+  ];
+  if (rep.worst.length) {
+    for (const s of rep.worst) lines.push(`  - ${s.name}: ${fmtPct(s.uptime)} · ${s.incidents} incidents · longest ${fmtReportDuration(s.longestS)}`);
+  } else {
+    lines.push(`  (no data)`);
+  }
+  lines.push(``, `Slowest services:`);
+  if (rep.slowest.length) {
+    for (const s of rep.slowest) lines.push(`  - ${s.name}: ${s.avgMs} ms · ${fmtPct(s.uptime)}`);
+  } else {
+    lines.push(`  (no response data)`);
+  }
+  return lines.join("\n");
+}
+
+// Minimal HTML-safe escape for server names inside report markup.
+function escAttrServer(s) {
+  return String(s == null ? "" : s).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
+}
+
+async function sendWeeklyReport(overrideRecipients) {
+  if (!smtpTransport) throw new Error("SMTP not configured");
+  const recipients = (overrideRecipients && overrideRecipients.length)
+    ? overrideRecipients
+    : weeklyReportConfig.recipients;
+  if (!recipients.length) throw new Error("No recipients configured");
+  const rep = await buildWeeklyReport();
+  const html = renderWeeklyReportHtml(rep);
+  const text = renderWeeklyReportText(rep);
+  const subject = `Weekly Uptime Report — ${rep.periodStart.toISOString().slice(0,10)} → ${rep.periodEnd.toISOString().slice(0,10)}`;
+  await smtpTransport.sendMail({
+    from: smtpConfig.from || smtpConfig.user || "monitor@example.com",
+    to: recipients.join(", "),
+    subject, text, html
+  });
+  return { recipients: recipients.length, overallUptime: rep.overallUptime, incidents: rep.totalIncidents };
+}
+
+// Fires Monday ≥09:00 UTC, at most once per ISO week.
+async function maybeSendScheduledWeeklyReport() {
+  if (!weeklyReportConfig.enabled) return;
+  if (!smtpTransport) return;
+  if (!weeklyReportConfig.recipients.length) return;
+  const now = new Date();
+  if (now.getUTCDay() !== 1) return;           // Monday only
+  if (now.getUTCHours() < 9) return;           // After 09:00 UTC
+  // Anchor: Monday 00:00 UTC of this week
+  const weekAnchor = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate()));
+  if (weeklyReportConfig.lastSentAt) {
+    const last = new Date(weeklyReportConfig.lastSentAt);
+    if (!isNaN(last.getTime()) && last >= weekAnchor) return; // already sent this week
+  }
+  try {
+    await sendWeeklyReport();
+    const ts = new Date().toISOString();
+    await db.query(
+      "INSERT INTO status_settings (key_name, value) VALUES (?, ?) ON DUPLICATE KEY UPDATE value=VALUES(value)",
+      ["weekly_report_last_sent_at", ts]
+    );
+    weeklyReportConfig.lastSentAt = ts;
+    addLog({ level:"info", server:"system", message:`Weekly report sent to ${weeklyReportConfig.recipients.length} recipient(s)` });
+  } catch(e) {
+    addLog({ level:"error", server:"system", message:`Weekly report failed: ${e.message}` });
+  }
+}
+
 async function fireWebhooks(evt) {
   let hooks;
   try {
@@ -2608,7 +2903,7 @@ async function pollAll(force = false) {
       }
     }
 
-    serverStatus[def.id] = { id:def.id, name:def.name, host:def.host, description:def.description||"", category:def.category||"", sub_category:def.sub_category||"", group_ids:def.group_ids||[], tags:def.tags||[], checks, overall, lastChecked:now, uptimeHistory:history, failStreak, lat:def.lat||null, lng:def.lng||null, maintenance:inMaintenance };
+    serverStatus[def.id] = { id:def.id, name:def.name, host:def.host, description:def.description||"", category:def.category||"", sub_category:def.sub_category||"", runbook:def.runbook||"", group_ids:def.group_ids||[], tags:def.tags||[], checks, overall, lastChecked:now, uptimeHistory:history, failStreak, lat:def.lat||null, lng:def.lng||null, maintenance:inMaintenance };
     // Record to DB (non-blocking)
     recordHistory(def, checks, overall).catch(() => {});
   }));
@@ -2956,9 +3251,10 @@ function filterServersForSseClient(res, all) {
   if (res._authed) {
     return all.filter(s => Array.isArray(s.group_ids) && s.group_ids.some(gid => res._allowed.has(gid)));
   }
-  // Public / unauthenticated clients — only grouped servers, lat/lng always stripped
+  // Public / unauthenticated clients — only grouped servers, lat/lng + runbook stripped
+  // (runbook may include internal ops info and is only for authenticated on-call viewers).
   const list = all.filter(s => Array.isArray(s.group_ids) && s.group_ids.length > 0);
-  return list.map(({ lat, lng, ...rest }) => rest);
+  return list.map(({ lat, lng, runbook, ...rest }) => rest);
 }
 
 // Logs reveal internal system state — admin only
@@ -3058,6 +3354,8 @@ app.get("/api/admin/servers", requireAuth, async (req, res) => {
 
 app.post("/api/admin/servers", requireAuth, async (req, res) => {
   const { name, host, description, category, sub_category, tags, checks, group_ids, poll_interval_sec, failure_threshold } = req.body;
+  // Runbook is optional markdown; cap at 64KB to match the TEXT column limit.
+  const runbook = String(req.body.runbook || "").slice(0, 65535);
   if (!name || !host) return res.status(400).json({ error:"name and host are required" });
   if (Array.isArray(checks)) {
     for (const c of checks) {
@@ -3081,8 +3379,8 @@ app.post("/api/admin/servers", requireAuth, async (req, res) => {
   const id = name.toLowerCase().replace(/[^a-z0-9]+/g,"-").replace(/^-|-$/g,"") + "-" + Date.now();
   try {
     await db.query(
-      "INSERT INTO status_servers (id, name, host, description, category, sub_category, tags, checks, poll_interval_sec, failure_threshold, lat, lng, location_address) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)",
-      [id, name, host, description||"", (category||"").trim() || null, (sub_category||"").trim() || null, JSON.stringify(tags||[]), JSON.stringify(checks||[{type:"ping"}]), interval, threshold, lat, lng, req.body.location_address||null]
+      "INSERT INTO status_servers (id, name, host, description, category, sub_category, tags, checks, poll_interval_sec, failure_threshold, lat, lng, location_address, runbook) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+      [id, name, host, description||"", (category||"").trim() || null, (sub_category||"").trim() || null, JSON.stringify(tags||[]), JSON.stringify(checks||[{type:"ping"}]), interval, threshold, lat, lng, req.body.location_address||null, runbook || null]
     );
     await setServerGroupIds(id, wantGroups);
     await loadConfig();
@@ -3096,6 +3394,7 @@ app.post("/api/admin/servers", requireAuth, async (req, res) => {
 
 app.put("/api/admin/servers/:id", requireAuth, async (req, res) => {
   const { name, host, description, category, sub_category, tags, checks, group_ids, poll_interval_sec, failure_threshold, location_address } = req.body;
+  const runbook = String(req.body.runbook || "").slice(0, 65535);
   if (!name || !host) return res.status(400).json({ error:"name and host are required" });
   if (Array.isArray(checks)) {
     for (const c of checks) {
@@ -3138,8 +3437,8 @@ app.put("/api/admin/servers/:id", requireAuth, async (req, res) => {
       }
     }
     const [result] = await db.query(
-      "UPDATE status_servers SET name=?, host=?, description=?, category=?, sub_category=?, tags=?, checks=?, poll_interval_sec=?, failure_threshold=?, lat=?, lng=?, location_address=?, updated_at=NOW() WHERE id=?",
-      [name, host, description||"", (category||"").trim() || null, (sub_category||"").trim() || null, JSON.stringify(tags||[]), JSON.stringify(checks||[]), interval, threshold, lat, lng, location_address||null, req.params.id]
+      "UPDATE status_servers SET name=?, host=?, description=?, category=?, sub_category=?, tags=?, checks=?, poll_interval_sec=?, failure_threshold=?, lat=?, lng=?, location_address=?, runbook=?, updated_at=NOW() WHERE id=?",
+      [name, host, description||"", (category||"").trim() || null, (sub_category||"").trim() || null, JSON.stringify(tags||[]), JSON.stringify(checks||[]), interval, threshold, lat, lng, location_address||null, runbook || null, req.params.id]
     );
     if (result.affectedRows === 0) return res.status(404).json({ error:"Server not found" });
     // Admins with undefined group_ids leave groups alone; otherwise replace the full set.
@@ -3323,6 +3622,54 @@ app.post("/api/admin/settings/mapbox", requireAdmin, async (req, res) => {
 // read it; anonymous visitors on /dashboard/<slug> get 401 and fall back to OSM.
 app.get("/api/mapbox-token", requireAuth, (req, res) => {
   res.json({ token: mapboxConfig.token || "" });
+});
+
+// -- Weekly uptime report settings + actions ---------------------------------
+app.get("/api/admin/settings/weekly-report", requireAdmin, (req, res) => {
+  res.json({
+    enabled:    weeklyReportConfig.enabled,
+    recipients: weeklyReportConfig.recipients.join(", "),
+    lastSentAt: weeklyReportConfig.lastSentAt,
+    smtpConfigured: !!smtpTransport
+  });
+});
+
+app.post("/api/admin/settings/weekly-report", requireAdmin, async (req, res) => {
+  const { enabled, recipients } = req.body;
+  try {
+    const newEnabled = !!enabled;
+    const parsed = String(recipients || "")
+      .split(/[\s,;]+/)
+      .map(s => s.trim())
+      .filter(Boolean);
+    const invalid = parsed.filter(e => !isValidEmail(e));
+    if (invalid.length) return res.status(400).json({ error: `Invalid email(s): ${invalid.join(", ")}` });
+    if (newEnabled && !parsed.length) return res.status(400).json({ error: "At least one recipient is required to enable the weekly report" });
+    const settings = [
+      ["weekly_report_enabled",    newEnabled ? "true" : "false"],
+      ["weekly_report_recipients", parsed.join(",")]
+    ];
+    for (const [k, v] of settings) {
+      await db.query("INSERT INTO status_settings (key_name, value) VALUES (?, ?) ON DUPLICATE KEY UPDATE value=VALUES(value)", [k, v]);
+    }
+    weeklyReportConfig.enabled    = newEnabled;
+    weeklyReportConfig.recipients = parsed;
+    addLog({ level:"info", server:"admin", message:`Weekly report ${newEnabled ? "enabled" : "disabled"} by ${req.session.username}` });
+    res.json({ ok: true, enabled: newEnabled, recipients: parsed.length });
+  } catch(e) { res.status(500).json({ error: e.message }); }
+});
+
+// Manually trigger a send now — admin's own recipients or an ad-hoc "to" address.
+app.post("/api/admin/settings/weekly-report/send", requireAdmin, async (req, res) => {
+  if (!smtpTransport) return res.status(400).json({ error: "SMTP not configured — set it up first" });
+  try {
+    const ad = String(req.body && req.body.to || "").split(/[\s,;]+/).map(s => s.trim()).filter(Boolean);
+    const invalid = ad.filter(e => !isValidEmail(e));
+    if (invalid.length) return res.status(400).json({ error: `Invalid email(s): ${invalid.join(", ")}` });
+    const result = await sendWeeklyReport(ad.length ? ad : null);
+    addLog({ level:"info", server:"admin", message:`Weekly report sent manually by ${req.session.username} to ${result.recipients} recipient(s)` });
+    res.json({ ok: true, ...result });
+  } catch(e) { res.status(500).json({ error: e.message }); }
 });
 
 // Geocoding proxy — tries Nominatim first, falls back to Photon if no results.
@@ -4743,7 +5090,12 @@ app.get("/api/public/servers", requireAuth, async (req, res) => {
       description: s.description, category: s.category || "", sub_category: s.sub_category || "", tags: s.tags, group_ids: s.group_ids || [],
       checks: s.checks || [],                  // includes cert info for HTTPS checks
       overall: s.overall, lastChecked: s.lastChecked,
-      uptimeHistory: s.uptimeHistory
+      uptimeHistory: s.uptimeHistory,
+      lat: s.lat != null ? s.lat : null,
+      lng: s.lng != null ? s.lng : null,
+      // Runbook: on-call playbook shown on the detail panel. Authenticated viewers only —
+      // may contain sensitive ops info (SSH hosts, vendor contacts, credential rotation steps).
+      runbook: s.runbook || ""
     }));
     res.json(servers);
   } catch(e) {
@@ -4758,6 +5110,7 @@ app.get("/api/public/group/:slug", async (req, res) => {
     const [groups] = await db.query("SELECT * FROM status_groups WHERE slug=?", [req.params.slug]);
     if (!groups.length) return res.status(404).json({ error: "Group not found" });
     const g = groups[0];
+    const isAuthed = !!(req.session && req.session.userId);
     const servers = Object.values(serverStatus)
       .filter(s => Array.isArray(s.group_ids) && s.group_ids.includes(g.id))
       .map(s => ({
@@ -4765,7 +5118,13 @@ app.get("/api/public/group/:slug", async (req, res) => {
         description: s.description, category: s.category || "", sub_category: s.sub_category || "", tags: s.tags, group_ids: s.group_ids,
         checks: s.checks || [],              // includes cert info for HTTPS checks
         overall: s.overall, lastChecked: s.lastChecked,
-        uptimeHistory: s.uptimeHistory
+        uptimeHistory: s.uptimeHistory,
+        // Coords are shown on the topbar map button (logged-in users only) — anonymous
+        // visitors on a public dashboard don't need them and shouldn't see locations.
+        lat: isAuthed && s.lat != null ? s.lat : null,
+        lng: isAuthed && s.lng != null ? s.lng : null,
+        // Runbook is for on-call only — don't surface to anonymous visitors.
+        runbook: isAuthed ? (s.runbook || "") : ""
       }));
     res.json({ group: g, servers });
   } catch(e) { res.status(500).json({ error: e.message }); }
@@ -5513,6 +5872,10 @@ app.use((err, req, res, next) => {
   // Refresh maintenance cache every 60s — CRUD endpoints also refresh inline, this is
   // a safety net for windows that become active/inactive purely by time passing.
   setInterval(() => { refreshMaintenanceCache().catch(() => {}); }, 60 * 1000);
+  // Hourly check: fire the weekly uptime report on Monday ≥09:00 UTC (once per week)
+  setInterval(() => { maybeSendScheduledWeeklyReport().catch(() => {}); }, 60 * 60 * 1000);
+  // Also attempt shortly after startup so a restart right at the trigger window still fires
+  setTimeout(() => { maybeSendScheduledWeeklyReport().catch(() => {}); }, 30 * 1000);
   // Listen on dual-stack (::) so both IPv4 and IPv6 clients connect with no fallback delay.
   // Without this, "localhost" resolves to ::1, the connection attempt fails, and the client
   // waits ~200ms before retrying on 127.0.0.1 — adding 200ms latency to every request.
