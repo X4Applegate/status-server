@@ -2815,11 +2815,8 @@ function filterServersForSseClient(res, all) {
   if (res._authed) {
     return all.filter(s => Array.isArray(s.group_ids) && s.group_ids.some(gid => res._allowed.has(gid)));
   }
-  // Public clients — only grouped servers
+  // Public / unauthenticated clients — only grouped servers, lat/lng always stripped
   const list = all.filter(s => Array.isArray(s.group_ids) && s.group_ids.length > 0);
-  // Group-slug dashboard visitors may see lat/lng (map is intentionally enabled for them)
-  if (res._slug) return list;
-  // Anonymous root-page visitors: strip lat/lng to hide server locations
   return list.map(({ lat, lng, ...rest }) => rest);
 }
 
@@ -4205,8 +4202,7 @@ app.get("/api/public/group/:slug", async (req, res) => {
         description: s.description, category: s.category || "", sub_category: s.sub_category || "", tags: s.tags, group_ids: s.group_ids,
         checks: s.checks || [],              // includes cert info for HTTPS checks
         overall: s.overall, lastChecked: s.lastChecked,
-        uptimeHistory: s.uptimeHistory,
-        lat: s.lat || null, lng: s.lng || null  // needed for map view on shared dashboards
+        uptimeHistory: s.uptimeHistory
       }));
     res.json({ group: g, servers });
   } catch(e) { res.status(500).json({ error: e.message }); }

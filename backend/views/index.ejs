@@ -619,7 +619,7 @@ function updateHealthBanner() {
 
 function updateMapBtnVisibility() {
   const mapBtn = document.getElementById("topbarMapBtn");
-  if (mapBtn) mapBtn.style.display = ((sidebarSession.loggedIn || !!GROUP_SLUG) && servers.some(s => s.lat!=null&&s.lng!=null)) ? "" : "none";
+  if (mapBtn) mapBtn.style.display = (sidebarSession.loggedIn && servers.some(s => s.lat!=null&&s.lng!=null)) ? "" : "none";
 }
 
 // ── Map view (MapLibre GL JS) ─────────────────────────────────────────────────
@@ -749,7 +749,7 @@ function _renderMainMarkers() {
     if (unmapped.length) unmappedEl.textContent = `${unmapped.length} server${unmapped.length>1?"s":""} without a location are not shown. Add one in Admin → Edit Server.`;
   }
   const mapBtn = document.getElementById("topbarMapBtn");
-  if (mapBtn) mapBtn.style.display = ((sidebarSession.loggedIn || !!GROUP_SLUG) && servers.some(s => s.lat!=null&&s.lng!=null)) ? "" : "none";
+  if (mapBtn) mapBtn.style.display = (sidebarSession.loggedIn && servers.some(s => s.lat!=null&&s.lng!=null)) ? "" : "none";
 }
 
 // ── Detail panel mini-map ─────────────────────────────────────────────────────
@@ -1489,7 +1489,7 @@ function renderDetail(s, uptime, heartbeat, incidents){
       </div>
     </div>
 
-    ${s.lat && s.lng && (sidebarSession.loggedIn || !!GROUP_SLUG) ? `<div class="detail-map-wrap" id="detailMapContainer"></div>` : ""}
+    ${s.lat && s.lng && sidebarSession.loggedIn ? `<div class="detail-map-wrap" id="detailMapContainer"></div>` : ""}
 
     <div class="uptime-row">${uptimeCards}</div>
 
