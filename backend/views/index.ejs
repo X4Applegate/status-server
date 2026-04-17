@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<html lang="en" data-theme="<%= defaultTheme %>">
+<html lang="en" data-theme="dark">
 <head>
 <%- include('partials/head', { title: pageTitle }) %>
 <% if (groupSlug) { %>
@@ -12,22 +12,9 @@
 <meta name="theme-color" content="<%= accentColor || '#2a7fff' %>">
 <% } %>
 <link href="https://unpkg.com/maplibre-gl@4/dist/maplibre-gl.css" rel="stylesheet">
-<script>
-// Pre-paint theme apply: read per-dashboard preference from localStorage if set,
-// otherwise use the server-rendered defaultTheme. Runs before any CSS so no flash.
-(function(){
-  try {
-    var key = "sm-dash-theme-" + <%- JSON.stringify(groupSlug || "_main") %>;
-    var saved = localStorage.getItem(key);
-    if (saved === "light" || saved === "dark") {
-      document.documentElement.setAttribute("data-theme", saved);
-    }
-  } catch(e) {}
-})();
-</script>
 <style>
 *,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
-:root,[data-theme="dark"]{
+:root{
   --bg:       #060c18;
   --bg2:      #0a1220;
   --sidebar:  #080f1c;
@@ -49,31 +36,6 @@
   --green-soft:rgba(16,232,138,0.10);
   --red:      #ff3d5a;
   --red-soft: rgba(255,61,90,0.10);
-  --mono:     'JetBrains Mono',monospace;
-  --sans:     'Inter',sans-serif;
-}
-[data-theme="light"]{
-  --bg:       #f4f7fb;
-  --bg2:      #ffffff;
-  --sidebar:  #ffffff;
-  --surface:  #ffffff;
-  --surface2: #f0f4f9;
-  --border:   rgba(30,100,200,0.12);
-  --border-hi:rgba(30,100,200,0.22);
-  --text:     #5a6a7e;
-  --text-2:   #8fa0b5;
-  --text-hi:  #2d3a4a;
-  --text-white:#1a2535;
-  --blue:     #2a7fff;
-  --blue-soft:rgba(42,127,255,0.08);
-  --blue-glow:rgba(42,127,255,0.20);
-  --orange:   #ff8c2a;
-  --orange-soft:rgba(255,140,42,0.10);
-  --orange-glow:rgba(255,140,42,0.25);
-  --green:    #10b87a;
-  --green-soft:rgba(16,184,122,0.10);
-  --red:      #ef3d5a;
-  --red-soft: rgba(239,61,90,0.10);
   --mono:     'JetBrains Mono',monospace;
   --sans:     'Inter',sans-serif;
 }
@@ -432,11 +394,6 @@ canvas#responseChart{width:100%!important}
 /* -- BRAND SUBTITLE (per-dashboard branding) -- */
 .topbar-subtitle{font-size:11px;color:var(--text-2);margin-top:1px;font-weight:400}
 
-/* -- THEME TOGGLE -- */
-.topbar-theme{width:30px;height:30px;border-radius:7px;border:1px solid var(--border-hi);background:var(--surface);color:var(--text-hi);cursor:pointer;display:flex;align-items:center;justify-content:center;transition:background .15s,border-color .15s,color .15s;padding:0}
-.topbar-theme:hover{background:var(--surface2);border-color:var(--blue);color:var(--blue)}
-[data-theme="dark"]  .topbar-theme .icon-sun  {display:none}
-[data-theme="light"] .topbar-theme .icon-moon {display:none}
 </style>
 <%
 // Color helpers (used to derive readable text + shaded surfaces from a custom bg)
@@ -499,7 +456,7 @@ function _shade(hex, amount) {
   const borderHi    = isDarkBg ? "rgba(255,255,255,0.22)" : "rgba(20,30,45,0.22)";
 %>
 <style id="custom-bg-overrides">
-:root, [data-theme="dark"], [data-theme="light"] {
+:root {
   --bg:        <%= bg %> !important;
   --bg2:       <%= bg2 %> !important;
   --sidebar:   <%= sidebar %> !important;
@@ -906,15 +863,6 @@ function toggleGroup(gid){
   else                          collapsedGroups.add(gid);
   try { localStorage.setItem(COLLAPSE_KEY, JSON.stringify(Array.from(collapsedGroups))); } catch(e){}
   renderSidebar();
-}
-
-// -- Theme toggle (per-dashboard preference, persisted in localStorage)
-const THEME_KEY = "sm-dash-theme-" + (GROUP_SLUG || "_main");
-function toggleTheme(){
-  const cur  = document.documentElement.getAttribute("data-theme") || "dark";
-  const next = cur === "dark" ? "light" : "dark";
-  document.documentElement.setAttribute("data-theme", next);
-  try { localStorage.setItem(THEME_KEY, next); } catch(e) {}
 }
 
 // -- Clock

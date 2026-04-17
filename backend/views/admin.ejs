@@ -6,21 +6,12 @@
 <style>
 *,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
 
-:root,[data-theme="dark"]{
+:root{
   --bg:#060c18;--bg2:#0a1220;--surface:#0d1829;--surface2:#111f35;--surface3:#182440;
   --border:rgba(30,100,200,0.15);--border-hi:rgba(30,100,200,0.28);
   --text:#7a9cc0;--text-2:#3d6080;--text-hi:#c8dff0;--text-white:#e8f4ff;
   --shadow:rgba(0,0,20,0.5);--input-bg:#060c18;
   --glow-a:rgba(42,127,255,0.07);--glow-o:rgba(255,140,42,0.04);
-}
-[data-theme="light"]{
-  --bg:#f0f5ff;--bg2:#e8f0fa;--surface:#fff;--surface2:#eef3fb;--surface3:#dde8f5;
-  --border:rgba(42,100,200,0.12);--border-hi:rgba(42,100,200,0.22);
-  --text:#4a6a90;--text-2:#8aaac8;--text-hi:#1a3a5c;--text-white:#0a1e3a;
-  --shadow:rgba(0,20,80,0.08);--input-bg:#f8faff;
-  --glow-a:rgba(42,127,255,0.05);--glow-o:rgba(255,140,42,0.03);
-}
-:root{
   --blue:#2a7fff;--blue-soft:rgba(42,127,255,0.12);--blue-glow:rgba(42,127,255,0.25);
   --orange:#ff8c2a;--orange-soft:rgba(255,140,42,0.12);--orange-glow:rgba(255,140,42,0.3);
   --green:#10e88a;--green-soft:rgba(16,232,138,0.10);
@@ -99,8 +90,6 @@ body{font-family:var(--sans);background:var(--bg);color:var(--text);min-height:1
 .log-badge{position:absolute;top:-5px;right:-5px;background:var(--red);color:#fff;font-size:9px;font-weight:700;min-width:15px;height:15px;border-radius:8px;display:flex;align-items:center;justify-content:center;padding:0 3px;border:2px solid var(--bg);opacity:0}
 .log-badge.show{opacity:1}
 .user-badge{font-family:var(--mono);font-size:11px;color:var(--text-2);background:var(--surface);border:1px solid var(--border);border-radius:var(--r-sm);padding:4px 10px}
-[data-theme="light"] .icon-moon{display:none}
-[data-theme="dark"]  .icon-sun{display:none}
 
 /* ── MAIN LAYOUT ── */
 .main-layout{display:flex;flex:1;min-height:calc(100vh - 54px);align-items:flex-start}
@@ -816,12 +805,6 @@ body{font-family:var(--sans);background:var(--bg);color:var(--text);min-height:1
               <span style="font-size:11px;color:var(--text-2)" id="gBgColorHint">Uncheck to use the default theme background</span>
             </div>
           </div>
-          <div class="fg full"><label class="flabel">Default Theme <span style="font-weight:400;text-transform:none;letter-spacing:0;color:var(--text-2)">(only used when no custom background — visitors can still toggle)</span></label>
-            <select class="fselect" id="gTheme">
-              <option value="dark">Dark (default)</option>
-              <option value="light">Light</option>
-            </select>
-          </div>
           <div class="fg full" style="display:flex;align-items:center;justify-content:space-between;padding:10px 14px;background:var(--surface2);border:1px solid var(--border);border-radius:var(--r-sm)">
             <div>
               <div style="font-size:13px;font-weight:600;color:var(--text-hi)">Public Status Page <span style="background:var(--blue-soft);color:var(--blue);font-size:10px;padding:2px 7px;border-radius:4px;font-weight:600;letter-spacing:.02em;vertical-align:middle;margin-left:6px">BETA</span></div>
@@ -927,11 +910,7 @@ body{font-family:var(--sans);background:var(--bg);color:var(--text);min-height:1
     <div class="topbar-right" id="topbarRight">
       <span class="user-badge" id="userBadge" style="display:none;font-size:12px"></span>
       <button class="btn btn-icon" id="loginBtn" onclick="window.location.href='/login'" style="display:none" title="Login"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M15 3h4a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2h-4"/><polyline points="10 17 15 12 10 7"/><line x1="15" y1="12" x2="3" y2="12"/></svg></button>
-      <button class="btn btn-icon theme-btn" onclick="toggleTheme()" title="Toggle theme">
-        <span class="icon-sun"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="5"/><line x1="12" y1="1" x2="12" y2="3"/><line x1="12" y1="21" x2="12" y2="23"/><line x1="4.22" y1="4.22" x2="5.64" y2="5.64"/><line x1="18.36" y1="18.36" x2="19.78" y2="19.78"/><line x1="1" y1="12" x2="3" y2="12"/><line x1="21" y1="12" x2="23" y2="12"/><line x1="4.22" y1="19.78" x2="5.64" y2="18.36"/><line x1="18.36" y1="5.64" x2="19.78" y2="4.22"/></svg></span>
-        <span class="icon-moon"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/></svg></span>
-      </button>
-      <button class="btn" id="adminMenuBtn" onclick="openAdmin()" style="display:none"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.07 4.93a10 10 0 0 1 0 14.14M4.93 4.93a10 10 0 0 0 0 14.14"/></svg>Manage</button>
+<button class="btn" id="adminMenuBtn" onclick="openAdmin()" style="display:none"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.07 4.93a10 10 0 0 1 0 14.14M4.93 4.93a10 10 0 0 0 0 14.14"/></svg>Manage</button>
       <button class="btn btn-icon" id="profileBtn" onclick="openProfile()" style="display:none" title="My profile"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg></button>
       <button class="btn btn-icon" id="pwdBtn" onclick="openChangePassword()" style="display:none" title="Change password"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="11" width="18" height="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg></button>
       <button class="btn btn-logs" id="logMenuBtn" onclick="openLogs()" style="display:none"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/></svg>Logs<span class="log-badge" id="logBadge">0</span></button>
@@ -1056,15 +1035,6 @@ function uptimeCls(pct){
   if (pct >= 95) return "good";
   if (pct >= 80) return "warn";
   return "bad";
-}
-
-// ── Theme ─────────────────────────────────────────────────────────────────────
-const html = document.documentElement;
-html.setAttribute("data-theme", localStorage.getItem("sm-theme") || "dark");
-function toggleTheme(){
-  const n = html.getAttribute("data-theme") === "dark" ? "light" : "dark";
-  html.setAttribute("data-theme", n);
-  localStorage.setItem("sm-theme", n);
 }
 
 // ── Clock ─────────────────────────────────────────────────────────────────────
@@ -3153,7 +3123,6 @@ async function showGroupForm(g){
   const lsz = g?.logo_size || 42;
   document.getElementById("gLogoSize").value = lsz;
   document.getElementById("gLogoSizeVal").textContent = lsz + "px";
-  document.getElementById("gTheme").value = g?.default_theme || "dark";
   document.getElementById("gCustomDomain").value = g?.custom_domain || "";
   document.getElementById("gPrivacyText").value = g?.privacy_text || "";
   document.getElementById("gTermsText").value   = g?.terms_text   || "";
@@ -3252,7 +3221,7 @@ async function submitGroupForm(){
     logo_size:      parseInt(document.getElementById("gLogoSize").value) || 42,
     accent_color:   document.getElementById("gColor").value,
     bg_color:       bgEnabled ? document.getElementById("gBgColor").value : "",
-    default_theme:  document.getElementById("gTheme").value,
+    default_theme:  "dark",
     custom_domain:  document.getElementById("gCustomDomain").value.trim(),
     privacy_text:   document.getElementById("gPrivacyText").value.trim() || null,
     terms_text:     document.getElementById("gTermsText").value.trim()   || null,

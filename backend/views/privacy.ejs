@@ -7,9 +7,7 @@
 <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
 <style>
 *,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
-:root,[data-theme="dark"]{--bg:#0b0e14;--surface:#141920;--surface2:#1a2030;--border:rgba(255,255,255,0.08);--border-hi:rgba(255,255,255,0.14);--text:#94a3b8;--text-2:#64748b;--text-hi:#e2e8f0;--text-white:#f8fafc;--shadow:rgba(0,0,0,0.4);--ga:rgba(99,102,241,0.1)}
-[data-theme="light"]{--bg:#f4f6f9;--surface:#fff;--surface2:#f0f3f7;--border:rgba(0,0,0,0.08);--border-hi:rgba(0,0,0,0.14);--text:#5a6a7e;--text-2:#8fa0b5;--text-hi:#2d3a4a;--text-white:#1a2535;--shadow:rgba(0,0,0,0.1);--ga:rgba(99,102,241,0.06)}
-:root{--accent:#6366f1;--accent-soft:rgba(99,102,241,0.12);--sans:'Plus Jakarta Sans',sans-serif;--mono:'JetBrains Mono',monospace;--r:12px;--r-sm:8px}
+:root{--bg:#0b0e14;--surface:#141920;--surface2:#1a2030;--border:rgba(255,255,255,0.08);--border-hi:rgba(255,255,255,0.14);--text:#94a3b8;--text-2:#64748b;--text-hi:#e2e8f0;--text-white:#f8fafc;--shadow:rgba(0,0,0,0.4);--ga:rgba(99,102,241,0.1);--accent:#6366f1;--accent-soft:rgba(99,102,241,0.12);--sans:'Plus Jakarta Sans',sans-serif;--mono:'JetBrains Mono',monospace;--r:12px;--r-sm:8px}
 body{font-family:var(--sans);background:var(--bg);color:var(--text);min-height:100vh;-webkit-font-smoothing:antialiased}
 .bg-glow{position:fixed;inset:0;pointer-events:none;background:radial-gradient(ellipse 70% 60% at 50% 20%,var(--ga) 0%,transparent 70%)}
 .wrap{position:relative;z-index:1;max-width:760px;margin:0 auto;padding:60px 24px 80px}
@@ -30,17 +28,10 @@ a{color:var(--accent);text-decoration:none}
 a:hover{text-decoration:underline}
 .contact-box{background:var(--surface);border:1px solid var(--border-hi);border-radius:var(--r);padding:20px 24px;margin-top:40px}
 .contact-box p{margin:0;font-size:14px}
-.theme-toggle{position:fixed;top:16px;right:16px;width:34px;height:34px;border-radius:8px;border:1px solid var(--border-hi);background:var(--surface);color:var(--text-hi);cursor:pointer;display:flex;align-items:center;justify-content:center;font-size:15px;z-index:10}
-[data-theme="light"] .icon-moon{display:none}
-[data-theme="dark"] .icon-sun{display:none}
 </style>
 </head>
 <body>
 <div class="bg-glow"></div>
-<button class="theme-toggle" onclick="toggleTheme()">
-  <span class="icon-sun">☀️</span>
-  <span class="icon-moon">🌙</span>
-</button>
 
 <div class="wrap">
   <a class="back" href="/">
@@ -111,15 +102,6 @@ a:hover{text-decoration:underline}
   </div>
 </div>
 
-<script>
-function toggleTheme(){
-  const t = document.documentElement.getAttribute("data-theme")==="dark"?"light":"dark";
-  document.documentElement.setAttribute("data-theme",t);
-  localStorage.setItem("sm-theme",t);
-}
-const saved = localStorage.getItem("sm-theme");
-if(saved) document.documentElement.setAttribute("data-theme",saved);
-</script>
 <footer style="text-align:center;padding:24px 16px;font-size:12px;color:var(--text-2)">
   <a href="https://github.com/X4Applegate/status-server" target="_blank" rel="noopener" style="color:var(--text-2);text-decoration:none;display:inline-flex;align-items:center;gap:5px" onmouseover="this.style.color='var(--text-hi)'" onmouseout="this.style.color='var(--text-2)'"><svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor"><path d="M12 0C5.37 0 0 5.37 0 12c0 5.3 3.438 9.8 8.205 11.385.6.113.82-.258.82-.577 0-.285-.01-1.04-.015-2.04-3.338.724-4.042-1.61-4.042-1.61-.546-1.387-1.333-1.756-1.333-1.756-1.089-.745.083-.729.083-.729 1.205.084 1.839 1.237 1.839 1.237 1.07 1.834 2.807 1.304 3.492.997.107-.775.418-1.305.762-1.604-2.665-.305-5.467-1.334-5.467-5.931 0-1.311.469-2.381 1.236-3.221-.124-.303-.535-1.524.117-3.176 0 0 1.008-.322 3.301 1.23A11.509 11.509 0 0 1 12 5.803c1.02.005 2.047.138 3.006.404 2.291-1.552 3.297-1.23 3.297-1.23.653 1.653.242 2.874.118 3.176.77.84 1.235 1.911 1.235 3.221 0 4.609-2.807 5.624-5.479 5.929.43.372.823 1.102.823 2.222 0 1.606-.015 2.896-.015 3.286 0 .315.216.694.825.576C20.565 21.795 24 17.295 24 12c0-6.63-5.37-12-12-12z"/></svg>Applegate Monitor on GitHub</a>
 </footer>

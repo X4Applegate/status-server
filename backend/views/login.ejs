@@ -7,9 +7,7 @@
 <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
 <style>
 *,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
-:root,[data-theme="dark"]{--bg:#0b0e14;--surface:#141920;--surface2:#1a2030;--border:rgba(255,255,255,0.08);--border-hi:rgba(255,255,255,0.14);--text:#94a3b8;--text-2:#64748b;--text-hi:#e2e8f0;--text-white:#f8fafc;--shadow:rgba(0,0,0,0.4);--input-bg:#0f1318;--ga:rgba(99,102,241,0.1)}
-[data-theme="light"]{--bg:#f4f6f9;--surface:#fff;--surface2:#f0f3f7;--border:rgba(0,0,0,0.08);--border-hi:rgba(0,0,0,0.14);--text:#5a6a7e;--text-2:#8fa0b5;--text-hi:#2d3a4a;--text-white:#1a2535;--shadow:rgba(0,0,0,0.1);--input-bg:#f8fafc;--ga:rgba(99,102,241,0.06)}
-:root{--accent:#6366f1;--accent-soft:rgba(99,102,241,0.12);--down:#ef4444;--sans:'Plus Jakarta Sans',sans-serif;--mono:'JetBrains Mono',monospace;--r:12px;--r-sm:8px}
+:root{--bg:#0b0e14;--surface:#141920;--surface2:#1a2030;--border:rgba(255,255,255,0.08);--border-hi:rgba(255,255,255,0.14);--text:#94a3b8;--text-2:#64748b;--text-hi:#e2e8f0;--text-white:#f8fafc;--shadow:rgba(0,0,0,0.4);--input-bg:#0f1318;--ga:rgba(99,102,241,0.1);--accent:#6366f1;--accent-soft:rgba(99,102,241,0.12);--down:#ef4444;--sans:'Plus Jakarta Sans',sans-serif;--mono:'JetBrains Mono',monospace;--r:12px;--r-sm:8px}
 body{font-family:var(--sans);background:var(--bg);color:var(--text);min-height:100vh;display:flex;align-items:center;justify-content:center;-webkit-font-smoothing:antialiased}
 .bg-glow{position:fixed;inset:0;pointer-events:none;background:radial-gradient(ellipse 70% 60% at 50% 30%,var(--ga) 0%,transparent 70%)}
 .card{position:relative;z-index:1;width:100%;max-width:380px;margin:24px;background:var(--surface);border:1px solid var(--border-hi);border-radius:var(--r);padding:36px 32px;box-shadow:0 20px 60px var(--shadow)}
@@ -30,9 +28,6 @@ body{font-family:var(--sans);background:var(--bg);color:var(--text);min-height:1
 .btn-login:disabled{opacity:.6;cursor:not-allowed}
 .error{background:rgba(239,68,68,.1);border:1px solid rgba(239,68,68,.25);border-radius:var(--r-sm);padding:10px 13px;font-size:13px;color:#fca5a5;margin-top:12px;display:none}
 .error.show{display:block}
-.theme-toggle{position:fixed;top:16px;right:16px;width:34px;height:34px;border-radius:8px;border:1px solid var(--border-hi);background:var(--surface);color:var(--text-hi);cursor:pointer;display:flex;align-items:center;justify-content:center;font-size:15px;z-index:10}
-[data-theme="light"] .icon-moon{display:none}
-[data-theme="dark"] .icon-sun{display:none}
 .divider{display:flex;align-items:center;gap:10px;margin:16px 0;color:var(--text-2);font-size:11px;font-weight:500;letter-spacing:.05em;text-transform:uppercase}
 .divider::before,.divider::after{content:"";flex:1;height:1px;background:var(--border-hi)}
 .btn-google{width:100%;padding:10px;background:var(--surface2);border:1px solid var(--border-hi);border-radius:var(--r-sm);color:var(--text-hi);font-family:var(--sans);font-size:14px;font-weight:500;cursor:pointer;display:flex;align-items:center;justify-content:center;gap:10px;transition:background .15s,border-color .15s}
@@ -42,10 +37,6 @@ body{font-family:var(--sans);background:var(--bg);color:var(--text);min-height:1
 </head>
 <body>
 <div class="bg-glow"></div>
-<button class="theme-toggle" onclick="toggleTheme()">
-  <span class="icon-sun"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="5"/><line x1="12" y1="1" x2="12" y2="3"/><line x1="12" y1="21" x2="12" y2="23"/><line x1="4.22" y1="4.22" x2="5.64" y2="5.64"/><line x1="18.36" y1="18.36" x2="19.78" y2="19.78"/><line x1="1" y1="12" x2="3" y2="12"/><line x1="21" y1="12" x2="23" y2="12"/><line x1="4.22" y1="19.78" x2="5.64" y2="18.36"/><line x1="18.36" y1="5.64" x2="19.78" y2="4.22"/></svg></span>
-  <span class="icon-moon"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/></svg></span>
-</button>
 <div class="card">
   <div class="brand">
     <div class="brand-icon"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="color:var(--accent)"><polygon points="12 2 22 8.5 22 15.5 12 22 2 15.5 2 8.5"/></svg></div>
@@ -82,10 +73,6 @@ body{font-family:var(--sans);background:var(--bg);color:var(--text);min-height:1
   <% } %>
 </div>
 <script>
-const html = document.documentElement;
-html.setAttribute("data-theme", localStorage.getItem("sm-theme") || "dark");
-function toggleTheme(){const n=html.getAttribute("data-theme")==="dark"?"light":"dark";html.setAttribute("data-theme",n);localStorage.setItem("sm-theme",n)}
-
 // Show OAuth error if redirected back from Google with ?error=
 (function(){
   const params = new URLSearchParams(window.location.search);
