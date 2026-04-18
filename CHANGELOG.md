@@ -6,6 +6,25 @@ All notable changes to this project are documented here.
 
 ---
 
+## [3.3.2] — 2026-04-18 *(high-availability support)*
+
+Adds a liveness endpoint and a full active/passive failover playbook so you can run a second box as a hot standby behind a load balancer.
+
+### New
+- **`GET /health`** — unauthenticated probe for Cloudflare LB, AWS ALB, or any HTTP uptime monitor. Returns `200` when the DB is reachable and the poll loop ran within the last 2 minutes; `503` otherwise. Body: `{ok, version, uptime_s, db, last_poll_s, servers, reason?}`. Never cached, never rate-limited. Pass `?strict=1` to additionally require `serverConfig.length > 0` — useful for keeping a replica out of rotation until it has finished loading config.
+- **HA playbook** — new `docs/HIGH_AVAILABILITY.md` walks through the complete active/passive setup: MariaDB binlog replication, Replica bootstrap with `mariadb-dump --master-data=2`, Cloudflare Load Balancing pool config, promotion, and post-failover rebuild. Covers the "don't split-brain" footguns explicitly.
+- **`scripts/promote-replica.sh`** — one-command Replica promotion: `STOP SLAVE; RESET SLAVE ALL; SET GLOBAL read_only=0;` then starts the app container and sanity-checks `/health`. Confirms with a typed `promote` prompt before running.
+- **`docker-compose.replica.example.yml`** — reference compose file for the Replica host. MariaDB has `--server-id=2 --read-only=1`; status-server is gated behind a `promoted` profile so it stays stopped until you run the promotion script (prevents write errors against a read-only replica).
+
+### Internal
+- `lastPollAt` state variable updated at the end of every `pollAll()` pass; used by `/health` to detect a stalled poll loop
+- `startedAt` captured at module load for `uptime_s` reporting
+
+### Why active/passive, not active/active?
+Automatic failover with a single-writer DB (MariaDB classic replication) requires fencing to avoid split-brain. For a self-hosted monitor, a 60-second Cloudflare health-probe + a 10-second manual promotion is the right trade-off — much simpler than Galera/Orchestrator and safer than trying to auto-promote on a network blip. See the playbook for the full rationale.
+
+---
+
 ## [3.3.1] — 2026-04-17 *(security patch)*
 
 Resolves three CodeQL high-severity alerts surfaced against 3.3.0.

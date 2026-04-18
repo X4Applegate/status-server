@@ -1,0 +1,65 @@
+# docker-compose for the REPLICA host.
+#
+# Deploy this on your second box (e.g. 50.191.208.171).
+# See docs/HIGH_AVAILABILITY.md for the full setup procedure.
+#
+# Differences from the Primary compose file:
+#   - mariadb has --server-id=2 and --read-only=1 (don't accept writes until promoted)
+#   - status-server is present but commented out by default — leave it off until
+#     you promote this node. Enables zero-risk "warm standby" mode.
+
+services:
+  status-server:
+    image: applegater/status-server:latest
+    container_name: status-server
+    restart: unless-stopped
+    # IMPORTANT: leave this service stopped (scale=0 or `docker compose stop status-server`)
+    # until you've run scripts/promote-replica.sh. Running status-server against a
+    # read-only DB will generate constant write errors.
+    profiles: ["promoted"]   # only starts when you `docker compose --profile promoted up`
+    ports:
+      - "3000:3000"
+    volumes:
+      - ./servers.json:/config/servers.json
+    environment:
+      - PORT=3000
+      - CHECK_INTERVAL=30000
+      - CONFIG_PATH=/config/servers.json
+      - DB_HOST=mariadb
+      - DB_PORT=3306
+      - DB_USER=statusadmin
+      - DB_PASSWORD=CHANGE_ME_SAME_AS_PRIMARY
+      - DB_NAME=status_monitor
+      # SESSION_SECRET must match Primary so sessions survive a failover
+      - SESSION_SECRET=CHANGE_ME_SAME_AS_PRIMARY
+      - EXTERNAL_URL=https://uptime.richardapplegate.io
+      - TZ=America/Los_Angeles
+    cap_add:
+      - NET_RAW
+    depends_on:
+      - mariadb
+
+  mariadb:
+    image: mariadb:11
+    container_name: mariadb
+    restart: unless-stopped
+    command:
+      - --server-id=2
+      - --log-bin=mysql-bin
+      - --binlog-format=ROW
+      - --expire-logs-days=7
+      - --binlog-row-image=MINIMAL
+      - --read-only=1                # Replica is read-only until promoted
+      - --relay-log=relay-bin
+      - --skip-slave-start=0          # auto-start replication on container restart
+    environment:
+      - MYSQL_ROOT_PASSWORD=CHANGE_ME_ROOT_PASSWORD
+      - MYSQL_DATABASE=status_monitor
+      - MYSQL_USER=statusadmin
+      - MYSQL_PASSWORD=CHANGE_ME_SAME_AS_PRIMARY
+    volumes:
+      - mariadb_data:/var/lib/mysql
+    # Do NOT expose port 3306 publicly on the Replica — it's internal only.
+
+volumes:
+  mariadb_data:

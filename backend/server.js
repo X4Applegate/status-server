@@ -317,6 +317,9 @@ const sentDownAlerts    = new Set(); // serverIds whose down-alert was actually 
 let maintenanceCache = new Map();
 let serverConfig = [];
 let eventLog     = [];
+// Liveness marker for /health — updated at the end of each pollAll() pass.
+let lastPollAt   = 0;
+const startedAt  = Date.now();
 
 // Returns true if the given serverId is currently inside an active maintenance window.
 function isUnderMaintenance(serverId) {
@@ -404,6 +407,46 @@ app.use(session({ // codeql[js/missing-token-validation] - CSRF mitigated via Cl
 
 // Apply general rate limiting to all /api/* routes.
 app.use("/api/", apiLimiter);
+
+// -- Health endpoint ---------------------------------------------------------
+// Unauthenticated probe for load balancers / uptime monitors. Returns 200 when
+// DB is reachable and the poll loop has run within the last 2 minutes, else 503.
+// Pass ?strict=1 to additionally require serverConfig.length > 0 (useful to keep
+// a replica out of rotation until it has fully loaded its config).
+// Response is tiny JSON and never cached.
+app.get("/health", async (req, res) => {
+  res.setHeader("Cache-Control", "no-store");
+  const strict = req.query.strict === "1" || req.query.strict === "true";
+  const body = {
+    ok:          true,
+    version:     require("./package.json").version,
+    uptime_s:    Math.floor((Date.now() - startedAt) / 1000),
+    db:          "unknown",
+    last_poll_s: lastPollAt ? Math.floor((Date.now() - lastPollAt) / 1000) : null,
+    servers:     Array.isArray(serverConfig) ? serverConfig.length : 0
+  };
+  // DB probe — 2s timeout so a hung DB never blocks the health check
+  try {
+    const probe = db
+      ? await Promise.race([
+          db.query("SELECT 1"),
+          new Promise((_, r) => setTimeout(() => r(new Error("db timeout")), 2000))
+        ]).then(() => true).catch(() => false)
+      : false;
+    body.db = probe ? "ok" : "down";
+    if (!probe) body.ok = false;
+  } catch(e) { body.db = "down"; body.ok = false; }
+  // Poll-loop staleness: up to 2 poll intervals (default 30s each = 60s) plus slack
+  if (body.last_poll_s !== null && body.last_poll_s > 120) {
+    body.ok = false;
+    body.reason = "poll_loop_stalled";
+  }
+  if (strict && body.servers === 0) {
+    body.ok = false;
+    body.reason = body.reason || "no_servers_loaded";
+  }
+  res.status(body.ok ? 200 : 503).json(body);
+});
 
 // -- Shared validation helpers -----------------------------------------------
 
@@ -2916,6 +2959,7 @@ async function pollAll(force = false) {
     const subset = filterServersForSseClient(r, all);
     r.write(`data: ${JSON.stringify(subset)}\n\n`);
   });
+  lastPollAt = Date.now();
 }
 
 // -- Auth routes ---------------------------------------------------------------
