@@ -6,6 +6,27 @@ All notable changes to this project are documented here.
 
 ---
 
+## [3.3.3] — 2026-04-18 *(HA playbook refinements — docs/compose only)*
+
+Battle-tested the 3.3.2 HA setup against a real second box and folded every sharp edge back into the docs and the replica compose example. **No image changes** — existing `applegater/status-server:3.3.2` and `:latest` are unaffected. Pull the repo if you're following `docs/HIGH_AVAILABILITY.md` to set up your own standby.
+
+### Doc fixes
+- **`MASTER_SSL = 0` is now the default** in the `CHANGE MASTER TO` example. Previously the doc had `MASTER_SSL = 1`, which silently fails with a confusing `'bogus data in log event'` 1236 error because the default MariaDB container doesn't ship with SSL certs. Added a sidebar explaining when to actually enable SSL (and recommending WireGuard/Tailscale over MariaDB self-signed TLS).
+- **Added `--max_allowed_packet=1G` to Primary's binlog flags** with an explanation of why (binlog events >16 MB crash replication with error 1236). A container restart is required — `SET GLOBAL` at runtime doesn't affect the existing binlog dump thread.
+- **Added `--replicate-wild-do-table=status_monitor.%` guidance** for Primaries that host multiple databases on the same MariaDB instance. Without the filter, replica crashes with 1146 on events for tables it doesn't have.
+- **Expanded Troubleshooting section** with verbatim error messages and fixes for: 1236/max_allowed_packet, 1236/bogus-data (SSL), 1236/impossible-position (stale coords), duplicate server-id, 1146/missing-table (multi-DB).
+
+### `docker-compose.replica.example.yml`
+- Adds `--max_allowed_packet=1G` and `--slave-max-allowed-packet=1G` to match Primary.
+- Adds `--log-slave-updates=1` (needed for chained replication / failback scenarios).
+- Adds commented-out `--replicate-wild-do-table=status_monitor.%` line with inline guidance on when to uncomment it.
+- All command flags now have explanatory inline comments.
+
+### Why no image rebuild
+This release is purely configuration/documentation. The runtime code in `backend/` is identical to 3.3.2. If you're not running HA, there's nothing to do.
+
+---
+
 ## [3.3.2] — 2026-04-18 *(high-availability support)*
 
 Adds a liveness endpoint and a full active/passive failover playbook so you can run a second box as a hot standby behind a load balancer.

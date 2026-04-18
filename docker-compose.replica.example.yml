@@ -44,14 +44,22 @@ services:
     container_name: mariadb
     restart: unless-stopped
     command:
-      - --server-id=2
-      - --log-bin=mysql-bin
+      - --server-id=2                          # MUST be different from Primary (which is 1)
+      - --log-bin=mysql-bin                    # so this node can itself become Primary after failover
       - --binlog-format=ROW
       - --expire-logs-days=7
       - --binlog-row-image=MINIMAL
-      - --read-only=1                # Replica is read-only until promoted
+      - --read-only=1                          # Replica is read-only until promoted
+      - --log-slave-updates=1                  # needed for chained replication / failback
       - --relay-log=relay-bin
-      - --skip-slave-start=0          # auto-start replication on container restart
+      - --skip-slave-start=0                   # auto-start replication on container restart
+      - --max_allowed_packet=1G                # prevent 1236 errors on large binlog events
+      - --slave-max-allowed-packet=1G          # must match Primary's max_allowed_packet
+      # If Primary hosts databases OTHER than status_monitor (e.g., another app on the
+      # same MariaDB instance), uncomment the next line so this Replica only applies
+      # status_monitor events. Without it you will hit "Table 'other_db.xxx' doesn't
+      # exist" (error 1146) and SQL thread will stop.
+      # - --replicate-wild-do-table=status_monitor.%
     environment:
       - MYSQL_ROOT_PASSWORD=CHANGE_ME_ROOT_PASSWORD
       - MYSQL_DATABASE=status_monitor

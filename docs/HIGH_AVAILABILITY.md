@@ -41,8 +41,13 @@ mariadb:
     - --binlog-format=ROW
     - --expire-logs-days=7
     - --binlog-row-image=MINIMAL
+    - --max_allowed_packet=1G        # prevents 1236 errors on large row events
   # ...rest unchanged
 ```
+
+> **Why `--max_allowed_packet=1G`:** MariaDB's default is 16 MB, but a single binlog event (especially a multi-row INSERT or a large session-store write) can exceed that. When it does, replication fails with:
+> `Got fatal error 1236 ... log event entry exceeded max_allowed_packet`.
+> Bumping to 1 GB here and on the replica (next section) avoids the problem entirely.
 
 Restart the container:
 
@@ -115,6 +120,8 @@ The `--master-data=2` flag embeds a `CHANGE MASTER TO` comment at the top of the
 On Replica, create `/opt/status-server/docker-compose.yml` using the replica example in this repo (`docker-compose.replica.example.yml`). Key differences from Primary:
 
 - `mariadb` command sets `--server-id=2` (must be unique per node) and `--read-only=1`
+- `--max_allowed_packet=1G` and `--slave-max-allowed-packet=1G` to match Primary
+- `--replicate-wild-do-table=status_monitor.%` — **important if Primary also hosts other databases** (e.g., another app's DB on the same MariaDB instance). Without this filter, replica receives binlog events for tables it doesn't have and crashes with `Table '<other_db>.<table>' doesn't exist` (error 1146). With it, replica only applies `status_monitor.*` events and silently ignores the rest.
 - `status-server` image is present but you can leave it stopped until failover if you want zero-risk read-only standby (recommended)
 
 ```bash
@@ -143,17 +150,20 @@ docker exec -it mariadb mariadb -uroot -p
 
 ```sql
 CHANGE MASTER TO
-  MASTER_HOST     = 'PRIMARY_IP',
-  MASTER_PORT     = 3306,
-  MASTER_USER     = 'replica',
-  MASTER_PASSWORD = 'REPLACE_WITH_THE_REPLICATION_PASSWORD',
-  MASTER_LOG_FILE = 'mysql-bin.000003',
-  MASTER_LOG_POS  = 1234567,
-  MASTER_SSL      = 1;
+  MASTER_HOST                   = 'PRIMARY_IP',
+  MASTER_PORT                   = 3306,
+  MASTER_USER                   = 'replica',
+  MASTER_PASSWORD               = 'REPLACE_WITH_THE_REPLICATION_PASSWORD',
+  MASTER_LOG_FILE               = 'mysql-bin.000003',
+  MASTER_LOG_POS                = 1234567,
+  MASTER_SSL                    = 0,
+  MASTER_SSL_VERIFY_SERVER_CERT = 0;
 
 START SLAVE;
 SHOW SLAVE STATUS\G
 ```
+
+> **About SSL:** The default MariaDB container does **not** ship with SSL certs configured. Setting `MASTER_SSL = 1` without certs on the Primary causes replica to read the un-wrapped TCP bytes as if they were TLS, producing the confusing `'bogus data in log event'` error. Leave SSL off unless you've explicitly set up `ssl-ca`/`ssl-cert`/`ssl-key` on Primary. For traffic between your two boxes, either trust the network or put the replication link over a WireGuard/Tailscale tunnel — that's simpler and at least as secure as MariaDB's self-signed TLS.
 
 You should see:
 - `Slave_IO_Running: Yes`
@@ -232,10 +242,25 @@ Bonus: write a small script that runs `SHOW SLAVE STATUS` on the Replica and ale
 ## Troubleshooting
 
 **`Slave_IO_Running: No` with `error connecting to master`**
-→ Network issue. Check Primary's firewall allows Replica's IP on 3306. Check the replication user's password.
+→ Network issue. Check Primary's firewall allows Replica's IP on 3306. Check the replication user's password. Verify from the replica host: `nc -zv PRIMARY_IP 3306` — should say "succeeded."
+
+**`Got fatal error 1236 ... log event entry exceeded max_allowed_packet`**
+→ Primary's binlog contains an event bigger than the replica is willing to accept. Fix by setting `--max_allowed_packet=1G` on **both** Primary's compose `command:` and the replica's `command:` (plus `--slave-max-allowed-packet=1G` on replica). A container restart (`docker compose down mariadb && docker compose up -d mariadb`) is required — `SET GLOBAL` at runtime does not affect the existing binlog dump thread.
+
+**`Got fatal error 1236 ... bogus data in log event`**
+→ You set `MASTER_SSL = 1` but Primary's MariaDB isn't configured for SSL. Replica is interpreting the un-TLS'd TCP stream as if it were encrypted. Fix with `CHANGE MASTER TO MASTER_SSL = 0, MASTER_SSL_VERIFY_SERVER_CERT = 0;` and restart the slave.
+
+**`Got fatal error 1236 ... Client requested master to start replication from impossible position`**
+→ The `MASTER_LOG_FILE` / `MASTER_LOG_POS` you provided don't exist on Primary (probably because Primary rotated its binlog after a restart). Run `SHOW MASTER STATUS;` on Primary *right now* to get the current File + Position, then re-issue `CHANGE MASTER TO` with those values.
+
+**`master and slave have equal MariaDB server ids`**
+→ Both nodes are running `--server-id=1`. Make sure Replica's `docker-compose.yml` has `--server-id=2` (or any unique number), then `docker compose down mariadb && docker compose up -d mariadb`. Verify with `SHOW VARIABLES LIKE 'server_id';` — **must** print 2 on Replica.
+
+**`Last_SQL_Error: Table '<other_db>.<table>' doesn't exist` (error 1146)**
+→ Primary hosts multiple databases on the same MariaDB instance. Your bootstrap dump only loaded `status_monitor`, but replica is receiving binlog events for the other DBs too. Fix: add `--replicate-wild-do-table=status_monitor.%` to Replica's `command:` block, restart, `RESET SLAVE;` and re-run `CHANGE MASTER TO` with fresh coordinates.
 
 **`Seconds_Behind_Master: NULL`**
-→ Replica can't talk to Primary. Usually network/firewall.
+→ Replica can't talk to Primary. Usually network/firewall. Also printed when the SQL thread has crashed — check `Last_SQL_Error`.
 
 **Replica fell way behind, catching up slowly**
 → Normal after large writes. If it's persistent, the Replica box is CPU/IO-starved.
@@ -244,4 +269,4 @@ Bonus: write a small script that runs `SHOW SLAVE STATUS` on the Replica and ale
 → You promoted Replica while Primary was still alive (Cloudflare flipped due to a network glitch, not an actual outage). Recovery: pick one as authoritative, dump it, re-bootstrap the other from scratch.
 
 **The app on Replica is crashing with "Table is read only"**
-→ That's working as intended — the Replica's DB is read-only until you promote. Either leave the container stopped, or expect errors until promotion.
+→ That's working as intended — the Replica's DB is read-only until you promote. Either leave the container stopped (recommended — the provided `docker-compose.replica.example.yml` gates it behind the `promoted` profile), or expect errors until promotion.
