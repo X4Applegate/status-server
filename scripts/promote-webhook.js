@@ -317,6 +317,43 @@ function parseCloudflareNotification(body) {
   };
 }
 
+// ── Is this payload a CF destination-verification / test ping? ───────────────
+// CF has THREE separate moments where it pings the webhook with a non-real
+// payload, and they DON'T all use the same shape:
+//
+//   1. "Save webhook destination" — fires when you create the destination.
+//      Historically sends {"cf":"...","text":"This is a test notification..."}
+//      but the exact fields have shifted over the years. Empty body in some
+//      dashboards.
+//   2. "Send test" button on an existing destination — sends
+//      {"data":{"test":true}, ...}
+//   3. A real alert — carries alert_type + policy_id + data with actual fields.
+//
+// Because the Create-webhook verification is the trickiest of the three, we
+// detect a test in *any* of these ways, preferring false positives (return 200
+// for a borderline-looking body) over false negatives (return 409 to CF and
+// block destination creation). Safety: auth still gates the endpoint, and a
+// genuine failover alert WILL have alert_type+data fields set, which is
+// exactly what distinguishes it from these test shapes.
+function isCfVerificationOrTest(body) {
+  if (!body || typeof body !== "object") return false;
+  // Empty body — CF sometimes sends this for destination verification.
+  if (Object.keys(body).length === 0) return true;
+  // Explicit test flag in the "Send test" button payload.
+  if (body.data && body.data.test === true) return true;
+  if (body.test === true) return true;
+  // CF verification payloads typically include "text" containing "test".
+  if (typeof body.text === "string" && /\btest\b/i.test(body.text)) return true;
+  // Some CF shapes put the verification hint in `alert_type` or `name`.
+  if (typeof body.alert_type === "string" && /test|verification|webhook/i.test(body.alert_type)) return true;
+  if (typeof body.name === "string" && /test|verification/i.test(body.name)) return true;
+  // CF dest-verify payloads sometimes have ONLY these keys and no alert_type.
+  // If the body has `cf` or `account_id` top-level but no alert_type/policy_id,
+  // it's almost certainly a verification ping, not a real alert.
+  if (("cf" in body || "account_id" in body) && !body.alert_type && !body.policy_id) return true;
+  return false;
+}
+
 // ── Response helper ──────────────────────────────────────────────────────────
 function sendJson(res, code, body) {
   const payload = JSON.stringify(body);
@@ -469,19 +506,16 @@ async function runSplitBrainCheck(force) {
 
 // ── Read a small JSON body from a request (for the force flag) ───────────────
 // Bounded to MAX_BODY_BYTES so a malicious caller can't DoS memory. Returns
-// {} on empty body or any parse error — the force flag defaults to false.
-// If the body exceeds the limit, we keep draining it (to unblock the socket)
-// but return a flag so the caller can send a proper 413 response.
+// { parsed, raw } — parsed is the JSON (or {}), raw is the original bytes
+// (truncated to 500 chars) for diagnostic logging. If the body exceeds the
+// limit, we keep draining it (to unblock the socket) but flag it.
 function readJsonBody(req) {
   return new Promise((resolve) => {
-    // Fast-path: honor Content-Length header if present so we don't even
-    // allocate buffers for an oversized body.
     const cl = parseInt(req.headers["content-length"] || "0", 10);
     if (cl > MAX_BODY_BYTES) {
-      // Still drain so the response can be written cleanly.
       req.on("data", () => {});
-      req.on("end", () => resolve({ _too_large: true }));
-      req.on("error", () => resolve({ _too_large: true }));
+      req.on("end", () => resolve({ parsed: { _too_large: true }, raw: "" }));
+      req.on("error", () => resolve({ parsed: { _too_large: true }, raw: "" }));
       return;
     }
     let total = 0;
@@ -491,19 +525,19 @@ function readJsonBody(req) {
       total += chunk.length;
       if (total > MAX_BODY_BYTES) {
         oversize = true;
-        // Stop accumulating but keep draining the stream so the response
-        // socket isn't half-open when we try to write 413.
         return;
       }
       chunks.push(chunk);
     });
     req.on("end", () => {
-      if (oversize) return resolve({ _too_large: true });
-      if (total === 0) return resolve({});
-      try { resolve(JSON.parse(Buffer.concat(chunks).toString("utf8"))); }
-      catch { resolve({}); }
+      if (oversize) return resolve({ parsed: { _too_large: true }, raw: "" });
+      if (total === 0) return resolve({ parsed: {}, raw: "" });
+      const rawBuf = Buffer.concat(chunks);
+      const rawStr = rawBuf.toString("utf8");
+      try { resolve({ parsed: JSON.parse(rawStr), raw: rawStr.slice(0, 500) }); }
+      catch { resolve({ parsed: {}, raw: rawStr.slice(0, 500) }); }
     });
-    req.on("error", () => resolve({}));
+    req.on("error", () => resolve({ parsed: {}, raw: "" }));
   });
 }
 
@@ -555,6 +589,29 @@ const server = http.createServer(async (req, res) => {
     return logLine(200, `guard=${guard.guard}`);
   }
 
+  // ── POST /promote/test (auth required) — always 200 ──
+  // Dedicated no-op endpoint for CF destination verification. Use this URL
+  // in CF's "Create webhook" form if you want zero risk of the verification
+  // ping colliding with the split-brain guard. Returns 200 for any auth'd
+  // POST — NEVER invokes the promote script, regardless of body shape.
+  // The real alert policy in CF should still point at /promote (not /promote/test).
+  if (req.method === "POST" && (req.url === "/promote/test" || req.url === "/promote/verify")) {
+    if (!checkToken(getAuthHeader(req))) {
+      sendJson(res, 401, { status: "unauthorized", message: "invalid or missing auth token (X-Promote-Token or cf-webhook-auth)" });
+      return logLine(401, "auth_failed");
+    }
+    const { raw } = await readJsonBody(req);
+    console.log(`[${ts}] /promote/test ping from ${ip} — body(${raw.length}): ${raw || "(empty)"}`);
+    sendJson(res, 200, {
+      status: "test_acknowledged",
+      message: "dedicated verify endpoint — no promote action ever runs here",
+      service: "promote-webhook",
+      version: PKG_VERSION
+    });
+    writeAuditLog({ ts, host: HOSTNAME, event: "promote_test_ack", status: "test_acknowledged_verify_endpoint", exit_code: null, http_status: 200, forced: false, guard_state: null, cf_notification: null, caller_ip: ip, raw_body_preview: raw });
+    return logLine(200, "verify_endpoint_ack");
+  }
+
   // ── POST /promote (auth required) ──
   if (req.method === "POST" && req.url === "/promote") {
     // Auth — accepts X-Promote-Token OR cf-webhook-auth (CF Notifications).
@@ -565,37 +622,47 @@ const server = http.createServer(async (req, res) => {
     }
 
     // Read body. May be:
-    //   - empty (simple curl trigger)
+    //   - empty (simple curl trigger OR CF destination-verify)
     //   - {"force":true} (operator override — our format)
     //   - CF Notification Webhook JSON (name/text/policy_id/...)
+    //   - CF "Send test" payload ({"data":{"test":true}})
+    //   - CF destination-creation verification (shape varies by dashboard vintage)
     // Size-capped so a malicious caller can't hang us or blow memory.
-    const body = await readJsonBody(req);
+    const { parsed: body, raw: rawBody } = await readJsonBody(req);
     if (body._too_large) {
       sendJson(res, 413, { status: "body_too_large", message: `body must be <= ${MAX_BODY_BYTES} bytes` });
       writeAuditLog({ ts, host: HOSTNAME, event: "promote_refused", status: "body_too_large", exit_code: null, http_status: 413, forced: false, guard_state: null, cf_notification: null, caller_ip: ip });
       return logLine(413, "body_too_large");
     }
+    // Diagnostic: log the raw body on every authenticated hit so operators
+    // can see exactly what CF sent when debugging verification failures.
+    // Bounded to 500 chars by readJsonBody — safe to journal.
+    console.log(`[${ts}] /promote body(${rawBody.length}): ${rawBody || "(empty)"}`);
+
     const force = body.force === true;
     const cfNotif = parseCloudflareNotification(body);
     if (cfNotif) {
       console.log(`[${ts}] CF notification: name="${cfNotif.name||"?"}" policy=${cfNotif.policy_id||"?"} alert_type=${cfNotif.alert_type||"?"}`);
     }
 
-    // CF destination-verification + "Send test" payloads include data.test=true.
-    // Without this short-circuit, the split-brain guard correctly returns 409,
-    // CF interprets the non-2xx as "destination unhealthy," and refuses to let
-    // you attach the destination to a Notification policy. Returning 200 here
-    // satisfies CF's verification WITHOUT actually invoking the promote
-    // script — the production flow (real pool-down event) omits data.test and
-    // runs through the full guard + script below.
+    // CF fires verification/test pings at THREE different moments (see
+    // isCfVerificationOrTest above). All three must ack with 200 or CF refuses
+    // to attach the destination to a Notification policy.
     //
     // Safety: this gate sits AFTER auth (so anonymous callers can't bypass
-    // the guard by sending {"data":{"test":true}}) and the guard itself still
-    // runs for every real CF notification because genuine events don't carry
-    // data.test. An attacker who stole the bearer token can send a test-flagged
-    // body and get a 200 back — but 200 here is a no-op, nothing promotes.
-    const isCfTest = !!(body && body.data && body.data.test === true);
-    if (isCfTest) {
+    // the guard by faking a test body) and the guard itself still runs for
+    // every real CF notification because genuine events carry alert_type +
+    // policy_id + data with real fields — none of those match the test
+    // heuristics. An attacker who stole the bearer token can send a
+    // test-flagged body and get a 200 back — but 200 here is a no-op,
+    // nothing promotes. Worst-case a forced-trigger attacker can send
+    // {"force":true} instead, which would fire the promote — they have the
+    // token so they already own the failover either way.
+    //
+    // Carve-out: {"force":true} explicitly opts in to promotion even if the
+    // body also matches a test heuristic, so operators doing a drill with
+    // `curl -X POST /promote -d '{"force":true,"test":true}'` still promote.
+    if (!force && isCfVerificationOrTest(body)) {
       console.log(`[${ts}] CF verification/test ping — returning 200 without running promote`);
       sendJson(res, 200, {
         status: "test_acknowledged",
@@ -603,7 +670,7 @@ const server = http.createServer(async (req, res) => {
         service: "promote-webhook",
         version: PKG_VERSION
       });
-      writeAuditLog({ ts, host: HOSTNAME, event: "promote_test_ack", status: "test_acknowledged", exit_code: null, http_status: 200, forced: false, guard_state: null, cf_notification: cfNotif, caller_ip: ip });
+      writeAuditLog({ ts, host: HOSTNAME, event: "promote_test_ack", status: "test_acknowledged", exit_code: null, http_status: 200, forced: false, guard_state: null, cf_notification: cfNotif, caller_ip: ip, raw_body_preview: rawBody });
       return logLine(200, "cf_test_ack");
     }
 
