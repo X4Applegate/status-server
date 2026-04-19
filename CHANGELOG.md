@@ -6,6 +6,25 @@ All notable changes to this project are documented here.
 
 ---
 
+## [Unreleased] — HA auto-failover foundation
+
+Groundwork for the automatic failover feature tracked in [issue #13](https://github.com/X4Applegate/status-server/issues/13). No image rebuild needed for this entry — script-only and docs-only changes.
+
+### `scripts/promote-replica.sh` — non-interactive mode
+- **New `--non-interactive` / `-y` flag** lets the promote script run unattended from a webhook or health-signal trigger. Skips the typed-confirmation prompt.
+- **`PROMOTE_ACK=yes` safety interlock.** Non-interactive mode refuses to run unless this env var is set, preventing accidents like typing `-y` in an unrelated shell. The forthcoming promote-webhook endpoint sets it after verifying its shared secret.
+- **New `--json` flag** emits one parseable JSON summary line at the end of every exit path (success, abort, preflight failure, SQL failure). Lets the webhook surface structured outcomes to the Cloudflare trigger and the admin audit log.
+- **Distinct exit codes:** `0` promoted, `1` user-aborted, `2` already-promoted (idempotent no-op), `3` preflight failure, `4` promotion-SQL failure. Webhook callers can map these directly to HTTP status codes.
+- **Idempotency check.** If `SHOW SLAVE STATUS` is empty and `@@global.read_only = 0` on entry, the script exits 2 cleanly with no side effects. Safe to re-invoke on a box that's already been promoted.
+- **`MARIADB_ROOT_PASSWORD` preflight.** The script now fails fast with a clear error if the password is missing from the environment, instead of letting `mariadb` surface a cryptic auth error mid-flow.
+- **`--help` / `-h`** prints the header block and exits 0.
+- **Exit-code trap.** Unexpected failures (e.g. from `set -e`) still emit a JSON status line so webhook callers are never left guessing.
+
+### Backwards compatibility
+Interactive use (`sudo ./promote-replica.sh` with no flags) is identical to previous behavior — same prompt, same output, same side effects.
+
+---
+
 ## [3.3.5] — 2026-04-18 *(update-checker semver fix)*
 
 ### Bug fix
