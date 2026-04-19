@@ -232,6 +232,22 @@ if [ -n "$DB_COMPOSE_FILE" ] && [ -f "$DB_COMPOSE_FILE" ]; then
 fi
 
 echo
+echo "=== Flipping REPLICA_MODE off in app .env ==="
+# Before promotion, status-server on this box ran with REPLICA_MODE=1 so it
+# wouldn't crash trying to CREATE TABLE against the read-only replica. Now
+# that the DB is writable we want full mode (schema init + check loop). If
+# the .env still says REPLICA_MODE=1 the container will come up in replica
+# mode on restart and silently stop running checks — bad.
+APP_ENV_FILE="$COMPOSE_DIR/.env"
+if [ -f "$APP_ENV_FILE" ] && grep -qE '^REPLICA_MODE=1' "$APP_ENV_FILE"; then
+  cp -n "$APP_ENV_FILE" "${APP_ENV_FILE}.pre-promote.bak"
+  sed -i -E 's|^REPLICA_MODE=1|REPLICA_MODE=0  # flipped by promote-replica.sh|' "$APP_ENV_FILE"
+  echo "✓ Set REPLICA_MODE=0 in $APP_ENV_FILE (backup at ${APP_ENV_FILE}.pre-promote.bak)"
+else
+  echo "(no REPLICA_MODE=1 in $APP_ENV_FILE — nothing to flip.)"
+fi
+
+echo
 echo "=== Starting status-server container ==="
 cd "$COMPOSE_DIR"
 # Detect whether this compose directory actually has a compose file. In

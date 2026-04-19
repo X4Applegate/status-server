@@ -141,6 +141,17 @@ const CONFIG_PATH   = process.env.CONFIG_PATH    || "/config/servers.json";
 const CHECK_INTERVAL= parseInt(process.env.CHECK_INTERVAL || "30000");
 const LOG_MAX       = 500;
 
+// REPLICA_MODE — set to "1" to force read-replica behaviour, or leave auto:
+// initDB() probes @@global.read_only on the server and flips IS_REPLICA to
+// true when it sees a read-only MariaDB. In replica mode we skip schema
+// init (every CREATE TABLE IF NOT EXISTS fails on a --read-only replica
+// with ER_OPTION_PREVENTS_STATEMENT, even when the table already exists),
+// the check loop (writes wouldn't replicate back to primary and would
+// either collide with replication or just churn error logs), and the
+// weekly report (writes sent-state). Reads keep working so the LB probe
+// hits a live /health and users get dashboards while we're standby.
+let IS_REPLICA = process.env.REPLICA_MODE === "1";
+
 // -- DB config (from env) ------------------------------------------------------
 const DB_HOST = process.env.DB_HOST     || "mariadb";
 const DB_PORT = parseInt(process.env.DB_PORT || "3306");
@@ -379,16 +390,23 @@ app.use("/api", (req, res, next) => {
 // Uses its own small connection (connectionLimit: 2) separate from the main pool
 // so session reads/writes never queue behind heavy monitoring queries.
 const MySQLStore  = require("express-mysql-session")(session);
+// In replica mode we can't write to the DB at all — so MySQLStore must NOT
+// try to create its table or run the expired-row sweeper. The sessions
+// table still exists via replication from primary; reads work fine. We
+// gate on the env var (not the auto-detect flag) because MySQLStore is
+// constructed at module load, before initDB() has had a chance to probe
+// @@global.read_only on the live server.
+const REPLICA_STATIC = process.env.REPLICA_MODE === "1";
 const sessionStore = new MySQLStore({
   host:                    DB_HOST,
   port:                    DB_PORT,
   user:                    DB_USER,
   password:                DB_PASS,
   database:                DB_NAME,
-  clearExpired:            true,
+  clearExpired:            !REPLICA_STATIC,
   checkExpirationInterval: 15 * 60 * 1000,  // prune expired rows every 15 min
   expiration:              24 * 60 * 60 * 1000, // match cookie maxAge
-  createDatabaseTable:     true,
+  createDatabaseTable:     !REPLICA_STATIC,
   connectionLimit:         2,
   endConnectionOnClose:    true
 });
@@ -717,6 +735,25 @@ async function initDB() {
       if (attempt === 10) throw err;
       await new Promise(r => setTimeout(r, 3000));
     }
+  }
+
+  // Detect read-only replica BEFORE any DDL runs. If the server is
+  // --read-only, every CREATE TABLE / ALTER below would throw
+  // ER_OPTION_PREVENTS_STATEMENT and crash the boot. In replica mode we
+  // trust that schema already exists here via replication from primary
+  // and skip all bootstrap writes. The env override (REPLICA_MODE=1) wins
+  // either way so operators can force-disable writes even when the DB
+  // itself is writable (e.g. during a controlled drill).
+  try {
+    const [roRows] = await db.query("SELECT @@global.read_only AS ro");
+    if (roRows && roRows[0] && Number(roRows[0].ro) === 1) IS_REPLICA = true;
+  } catch(e) {
+    addLog({ level:"warn", server:"system", message:`read_only probe failed: ${e.message}` });
+  }
+  if (IS_REPLICA) {
+    addLog({ level:"info", server:"system",
+      message:"REPLICA MODE — skipping schema init, check loop, and scheduled writes. Reads only." });
+    return;
   }
 
   // Create tables
@@ -5934,18 +5971,24 @@ app.use((err, req, res, next) => {
   await initDB();
   await loadConfig();
   await refreshMaintenanceCache();
-  await pollAll(true);  // force everything on startup
-  // Tick every 5 seconds — pollAll() picks only servers that are DUE based on their
-  // own poll_interval_sec. This lets fast servers (20s) and slow ones (5 min) coexist.
-  const TICK = 5000;
-  setInterval(async () => { await loadConfig(); await pollAll(); }, TICK);
-  // Refresh maintenance cache every 60s — CRUD endpoints also refresh inline, this is
-  // a safety net for windows that become active/inactive purely by time passing.
+  if (!IS_REPLICA) {
+    await pollAll(true);  // force everything on startup
+    // Tick every 5 seconds — pollAll() picks only servers that are DUE based on their
+    // own poll_interval_sec. This lets fast servers (20s) and slow ones (5 min) coexist.
+    const TICK = 5000;
+    setInterval(async () => { await loadConfig(); await pollAll(); }, TICK);
+    // Hourly check: fire the weekly uptime report on Monday ≥09:00 UTC (once per week)
+    setInterval(() => { maybeSendScheduledWeeklyReport().catch(() => {}); }, 60 * 60 * 1000);
+    // Also attempt shortly after startup so a restart right at the trigger window still fires
+    setTimeout(() => { maybeSendScheduledWeeklyReport().catch(() => {}); }, 30 * 1000);
+  } else {
+    addLog({ level:"info", server:"system",
+      message:"Replica mode: check loop + weekly report disabled. loadConfig() still runs so UI shows current server list." });
+  }
+  // Refresh maintenance cache every 60s — read-only, safe in replica mode too. CRUD
+  // endpoints also refresh inline on primary; this is a safety net for windows that
+  // become active/inactive purely by time passing.
   setInterval(() => { refreshMaintenanceCache().catch(() => {}); }, 60 * 1000);
-  // Hourly check: fire the weekly uptime report on Monday ≥09:00 UTC (once per week)
-  setInterval(() => { maybeSendScheduledWeeklyReport().catch(() => {}); }, 60 * 60 * 1000);
-  // Also attempt shortly after startup so a restart right at the trigger window still fires
-  setTimeout(() => { maybeSendScheduledWeeklyReport().catch(() => {}); }, 30 * 1000);
   // Listen on dual-stack (::) so both IPv4 and IPv6 clients connect with no fallback delay.
   // Without this, "localhost" resolves to ::1, the connection attempt fails, and the client
   // waits ~200ms before retrying on 127.0.0.1 — adding 200ms latency to every request.
