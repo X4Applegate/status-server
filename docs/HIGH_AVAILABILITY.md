@@ -330,6 +330,59 @@ During cooldown, `POST /promote` returns `429` with the remaining seconds:
 { "status": "cooldown", "message": "in cooldown window; retry after 247s", "cooldown_remaining_s": 247 }
 ```
 
+### Split-brain guard (strongly recommended)
+
+Before every promotion, the webhook verifies that the primary is actually down from multiple independent network paths. This is the most important safeguard against a misfiring health-signal trigger causing split-brain.
+
+**Configure with `PROMOTE_PRIMARY_CHECKS`** — comma-separated list of URLs. On `POST /promote`, the webhook GETs each in parallel. If ANY return 2xx within `PROMOTE_CHECKS_TIMEOUT_MS` (default 5s), promotion is refused with `409 split_brain_refused` and the evidence is included in the response.
+
+**Pass URLs that route via DIFFERENT network paths.** Example:
+
+```
+PROMOTE_PRIMARY_CHECKS=https://gateway.example.com/health,http://10.0.0.1:3200/health
+```
+
+- URL 1 goes through Cloudflare edge → primary's tunnel connector
+- URL 2 goes direct to primary's IP via VPN or LAN
+
+If both paths fail, the primary is very likely really down. If one succeeds, you're probably looking at a network partition, not a primary outage.
+
+#### States the guard can report
+
+| `guard` value | Meaning | Promotion allowed? |
+|---|---|---|
+| `passed` | All configured URLs failed — primary confirmed down | ✅ yes |
+| `blocked` | At least one URL returned 2xx — primary appears alive | ❌ 409 refused |
+| `forced` | Caller sent `{"force":true}` in body, bypassing the check | ✅ yes (audit-flagged) |
+| `bypassed` | `PROMOTE_CHECKS_BYPASS=1` in service env | ✅ yes (startup warning) |
+| `not_configured` | `PROMOTE_PRIMARY_CHECKS` is empty | ✅ yes (startup warning) |
+
+The webhook prints its guard config on startup and includes `split_brain_guard: {configured_checks, bypassed}` in every `/health` response.
+
+#### Debug the guard without promoting
+
+```bash
+curl -s -H "X-Promote-Token: $TOKEN" http://127.0.0.1:9876/check-primary | jq .
+```
+
+Returns the same per-URL results the guard would use, plus `would_promote: true/false`. Useful for "why is my promotion getting refused" investigations.
+
+#### Operator force-bypass
+
+If the checks are misbehaving (e.g. both URLs flap during a partial outage) but you've independently confirmed the primary is down, retry with:
+
+```bash
+curl -sS -X POST \
+  -H "X-Promote-Token: $TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"force":true}' \
+  http://127.0.0.1:9876/promote | jq .
+```
+
+Force uses the same shared secret — if you have the token, you have the power. The force flag is audited in both logs and the response body (`split_brain_guard.forced: true`) so you can see later why a promotion proceeded despite the guard.
+
+> **Known limitation — single-box blind spot.** The guard runs on the standby. If the standby's own WAN is partitioned (it sees the world as unreachable even though the primary is fine from the internet's view), both checks will fail and promotion proceeds. Full protection requires a third observer, which is tracked as a follow-up in [issue #13](https://github.com/X4Applegate/status-server/issues/13). Until then, the cooldown (Step 3) and email notifications (Step 7) are your safety nets.
+
 ### Security notes
 
 - **Constant-time token compare** (`crypto.timingSafeEqual`) — no response-time leak differentiates a wrong token from an unrecognised URL.

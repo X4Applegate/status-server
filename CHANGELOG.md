@@ -10,6 +10,18 @@ All notable changes to this project are documented here.
 
 Groundwork for the automatic failover feature tracked in [issue #13](https://github.com/X4Applegate/status-server/issues/13). No image rebuild needed for this entry — script-only and docs-only changes.
 
+### `scripts/promote-webhook.js` — split-brain guard (new)
+Before every promotion, the webhook now verifies via multiple independent network paths that the primary is actually down. This is the most important safeguard against a misfiring health-signal trigger causing split-brain.
+
+- **`PROMOTE_PRIMARY_CHECKS`** — comma-separated list of URLs. On `POST /promote`, each is GET'd in parallel with `PROMOTE_CHECKS_TIMEOUT_MS` timeout (default 5s). If ANY return 2xx, promotion is refused with `409 split_brain_refused` and the raw per-URL evidence (URL, status, duration_ms, reason) is included in the response body. Typical config passes URLs via different network paths — one via Cloudflare edge, one direct to primary's IP — so a single-path partition can't look like a primary outage.
+- **Five guard states** surfaced in both `/health` and the audit payload of every promotion response: `passed` (all checks failed → safe to promote), `blocked` (at least one 2xx → refuse), `forced` (caller override), `bypassed` (env kill-switch), `not_configured` (startup warning).
+- **Operator force-bypass** via `{"force":true}` in the request body — same shared secret, but the override is audit-flagged. Use when the checks are flapping but you've manually verified the primary is down.
+- **`PROMOTE_CHECKS_BYPASS=1`** nuclear option disables the guard entirely; logs a warning at startup.
+- **New `GET /check-primary`** (auth required) runs the guard checks without promoting. Returns `would_promote: true/false` plus the same per-URL evidence — useful for "why is my promotion getting refused" debugging.
+- **Startup banner** prints the guard config: configured URL count, timeout, and all URLs. Explicit `⚠ NOT CONFIGURED` or `⚠ BYPASSED` warnings when the guard isn't doing its job.
+- **Request-body hardening** — `Content-Length > 1KB` rejected with 413 before allocation; even if `Content-Length` is missing, streaming cap stops accumulation past 1KB while still draining the socket so 413 can be sent cleanly.
+- **Known limitation** (documented in `docs/HIGH_AVAILABILITY.md`): if the standby's own WAN is partitioned, both checks fail and promotion proceeds. Full protection requires a third observer (follow-up in issue #13). Cooldown + Step 7 email notifications are the current safety net.
+
 ### `scripts/promote-webhook.js` — host-side failover trigger (new)
 Standalone Node.js HTTP service that invokes `promote-replica.sh --non-interactive --json` when POSTed to with a valid bearer token. Runs on the **host** as a systemd service, not inside the status-server container — so it stays reachable even if the container is dead (which is the scenario that triggers failover).
 

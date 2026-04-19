@@ -40,7 +40,8 @@
 
 "use strict";
 
-const http = require("http");
+const http  = require("http");
+const https = require("https");
 const crypto = require("crypto");
 const { spawn } = require("child_process");
 const fs = require("fs");
@@ -54,6 +55,27 @@ const SCRIPT = process.env.PROMOTE_SCRIPT_PATH || "/opt/status-server/scripts/pr
 const COOLDOWN_SECONDS = parseInt(process.env.PROMOTE_COOLDOWN_SECONDS || "300", 10);
 const STATE_FILE = process.env.PROMOTE_STATE_FILE || "/var/lib/status-server/promote-webhook.state";
 const TIMEOUT_MS = parseInt(process.env.PROMOTE_TIMEOUT_MS || "120000", 10);
+
+// ── Split-brain guard config ─────────────────────────────────────────────────
+// Comma-separated list of URLs the webhook hits before promotion to verify
+// the primary is really down. Pass URLs that route via DIFFERENT network
+// paths so a single-path partition doesn't look like a primary outage.
+// Example:
+//   PROMOTE_PRIMARY_CHECKS=https://gateway.example.com/health,http://10.0.0.1:3200/health
+// The first goes through Cloudflare edge → primary's tunnel; the second
+// goes direct to the primary's IP. Both must fail for promotion to proceed.
+const PRIMARY_CHECKS = (process.env.PROMOTE_PRIMARY_CHECKS || "")
+  .split(",")
+  .map(s => s.trim())
+  .filter(Boolean);
+const CHECKS_TIMEOUT_MS = parseInt(process.env.PROMOTE_CHECKS_TIMEOUT_MS || "5000", 10);
+// Operator kill-switch — bypass the guard entirely (NOT recommended, but
+// useful during drills or when you know the checks are misconfigured).
+const CHECKS_BYPASS = process.env.PROMOTE_CHECKS_BYPASS === "1";
+
+// Maximum size of a POST body we'll read (force flag). 1KB is way more
+// than needed — anything larger is malicious or a bug.
+const MAX_BODY_BYTES = 1024;
 const PKG_VERSION = (() => {
   try { return require(path.join(__dirname, "..", "backend", "package.json")).version; }
   catch { return "unknown"; }
@@ -190,6 +212,117 @@ function runPromote() {
   });
 }
 
+// ── Split-brain guard: HTTP liveness check on one URL ───────────────────────
+// Resolves with:
+//   { url, alive: bool, status?: number, reason?: string, duration_ms: number }
+// "alive" means we got a 2xx within the timeout. Non-2xx, connection errors,
+// and timeouts all count as "not alive" — but the detail is preserved so the
+// response body can show exactly what each check saw.
+function checkUrl(url) {
+  return new Promise((resolve) => {
+    const started = Date.now();
+    let parsed;
+    try { parsed = new URL(url); }
+    catch (e) {
+      return resolve({ url, alive: false, reason: `invalid_url: ${e.message}`, duration_ms: 0 });
+    }
+    const mod = parsed.protocol === "https:" ? https : http;
+    let settled = false;
+    const done = (result) => {
+      if (settled) return;
+      settled = true;
+      resolve({ duration_ms: Date.now() - started, ...result });
+    };
+    const req = mod.get(url, { timeout: CHECKS_TIMEOUT_MS }, (res) => {
+      const alive = res.statusCode >= 200 && res.statusCode < 300;
+      res.resume(); // drain body, we only care about status
+      done({ url, alive, status: res.statusCode });
+    });
+    req.on("timeout", () => {
+      try { req.destroy(); } catch {}
+      done({ url, alive: false, reason: "timeout" });
+    });
+    req.on("error", (err) => {
+      done({ url, alive: false, reason: err.code || err.message || "error" });
+    });
+  });
+}
+
+// ── Split-brain guard: run all configured checks in parallel ─────────────────
+// Returns:
+//   guard:   "passed" | "blocked" | "bypassed" | "forced" | "not_configured"
+//   reason:  human-readable explanation of that state
+//   checks:  raw per-URL results
+//   aliveAny: true iff at least one check returned 2xx
+async function runSplitBrainCheck(force) {
+  if (force) {
+    return { guard: "forced", reason: "force:true in request body — operator override", checks: [], aliveAny: false };
+  }
+  if (CHECKS_BYPASS) {
+    return { guard: "bypassed", reason: "PROMOTE_CHECKS_BYPASS=1 set in service env", checks: [], aliveAny: false };
+  }
+  if (PRIMARY_CHECKS.length === 0) {
+    // Explicit non-configuration is still a "pass" so the webhook is useful
+    // out of the box — but we flag it in the response so operators notice.
+    return {
+      guard: "not_configured",
+      reason: "PROMOTE_PRIMARY_CHECKS is empty; split-brain guard is disabled. Configure URLs for safety.",
+      checks: [],
+      aliveAny: false
+    };
+  }
+  const results = await Promise.all(PRIMARY_CHECKS.map(checkUrl));
+  const aliveAny = results.some(r => r.alive);
+  return {
+    guard: aliveAny ? "blocked" : "passed",
+    reason: aliveAny
+      ? "primary responded 2xx from at least one vantage point — refusing to promote"
+      : "all configured vantage points confirm primary is unreachable",
+    checks: results,
+    aliveAny
+  };
+}
+
+// ── Read a small JSON body from a request (for the force flag) ───────────────
+// Bounded to MAX_BODY_BYTES so a malicious caller can't DoS memory. Returns
+// {} on empty body or any parse error — the force flag defaults to false.
+// If the body exceeds the limit, we keep draining it (to unblock the socket)
+// but return a flag so the caller can send a proper 413 response.
+function readJsonBody(req) {
+  return new Promise((resolve) => {
+    // Fast-path: honor Content-Length header if present so we don't even
+    // allocate buffers for an oversized body.
+    const cl = parseInt(req.headers["content-length"] || "0", 10);
+    if (cl > MAX_BODY_BYTES) {
+      // Still drain so the response can be written cleanly.
+      req.on("data", () => {});
+      req.on("end", () => resolve({ _too_large: true }));
+      req.on("error", () => resolve({ _too_large: true }));
+      return;
+    }
+    let total = 0;
+    let oversize = false;
+    const chunks = [];
+    req.on("data", (chunk) => {
+      total += chunk.length;
+      if (total > MAX_BODY_BYTES) {
+        oversize = true;
+        // Stop accumulating but keep draining the stream so the response
+        // socket isn't half-open when we try to write 413.
+        return;
+      }
+      chunks.push(chunk);
+    });
+    req.on("end", () => {
+      if (oversize) return resolve({ _too_large: true });
+      if (total === 0) return resolve({});
+      try { resolve(JSON.parse(Buffer.concat(chunks).toString("utf8"))); }
+      catch { resolve({}); }
+    });
+    req.on("error", () => resolve({}));
+  });
+}
+
 // ── Request dispatch ─────────────────────────────────────────────────────────
 const server = http.createServer(async (req, res) => {
   const ts = new Date().toISOString();
@@ -209,9 +342,33 @@ const server = http.createServer(async (req, res) => {
       ready: true,
       cooldown_remaining_s: remaining,
       script_path: SCRIPT,
-      port: PORT
+      port: PORT,
+      split_brain_guard: {
+        configured_checks: PRIMARY_CHECKS.length,
+        bypassed: CHECKS_BYPASS
+      }
     });
     return logLine(200);
+  }
+
+  // ── GET /check-primary (auth required) ──
+  // Runs the split-brain guard checks without promoting — useful for
+  // debugging "why is my promotion refused" issues. Returns the raw
+  // per-URL results so operators can see exactly what the webhook sees.
+  if (req.method === "GET" && req.url === "/check-primary") {
+    if (!checkToken(req.headers["x-promote-token"])) {
+      sendJson(res, 401, { status: "unauthorized", message: "invalid or missing X-Promote-Token" });
+      return logLine(401, "auth_failed");
+    }
+    const guard = await runSplitBrainCheck(false);
+    sendJson(res, 200, {
+      status: "check_only",
+      guard: guard.guard,
+      reason: guard.reason,
+      would_promote: !guard.aliveAny,
+      checks: guard.checks
+    });
+    return logLine(200, `guard=${guard.guard}`);
   }
 
   // ── POST /promote (auth required) ──
@@ -223,7 +380,17 @@ const server = http.createServer(async (req, res) => {
       return logLine(401, "auth_failed");
     }
 
-    // Cooldown
+    // Read body for the optional {"force":true} flag. Bounded so a
+    // malicious caller can't hang us or blow memory.
+    const body = await readJsonBody(req);
+    if (body._too_large) {
+      sendJson(res, 413, { status: "body_too_large", message: `body must be <= ${MAX_BODY_BYTES} bytes` });
+      return logLine(413, "body_too_large");
+    }
+    const force = body.force === true;
+
+    // Cooldown — applies even to force:true, because "I'm sure" doesn't
+    // make ping-pong safer.
     const remaining = cooldownRemainingSeconds();
     if (remaining > 0) {
       sendJson(res, 429, {
@@ -234,12 +401,23 @@ const server = http.createServer(async (req, res) => {
       return logLine(429, `cooldown_${remaining}s`);
     }
 
-    // TODO (Step 4 — split-brain guard): verify via a second signal that
-    // the primary is actually down before proceeding. For now, we trust
-    // the caller to have verified this.
+    // Split-brain guard — verify from multiple vantage points that the
+    // primary really is down before promoting. See runSplitBrainCheck().
+    const guard = await runSplitBrainCheck(force);
+    if (guard.guard === "blocked") {
+      sendJson(res, 409, {
+        status: "split_brain_refused",
+        message: guard.reason,
+        primary_check_results: guard.checks,
+        hint: "If you have independently verified the primary is down, retry with {\"force\":true} in the request body.",
+        force_supported: true
+      });
+      return logLine(409, `split_brain_refused aliveAny=${guard.aliveAny}`);
+    }
+    console.log(`[${ts}] split-brain guard: ${guard.guard} — ${guard.reason}`);
 
     // Invoke promote script.
-    console.log(`[${ts}] promote triggered by ${ip} — invoking ${SCRIPT}`);
+    console.log(`[${ts}] promote triggered by ${ip}${force ? " (forced)" : ""} — invoking ${SCRIPT}`);
     const result = await runPromote();
 
     if (result.timedOut) {
@@ -260,18 +438,24 @@ const server = http.createServer(async (req, res) => {
       writeLastPromoteTs(Date.now());
     }
 
-    const body = {
+    const respBody = {
       status: mapped.slug,
       exit_code: result.exitCode,
       script: result.scriptJson || null,
       message: result.scriptJson ? result.scriptJson.message : undefined,
       host: result.scriptJson ? result.scriptJson.host : undefined,
+      // Audit trail: what the guard saw before promotion was allowed.
+      split_brain_guard: {
+        state:  guard.guard,
+        reason: guard.reason,
+        forced: force
+      },
       // Include stderr tail on failures so the webhook caller can diagnose
       // without SSH'ing to the box. Success responses stay minimal.
       stderr_tail: mapped.http >= 500 ? result.stderr.slice(-2000) : undefined
     };
-    sendJson(res, mapped.http, body);
-    return logLine(mapped.http, `exit=${result.exitCode} status=${mapped.slug}`);
+    sendJson(res, mapped.http, respBody);
+    return logLine(mapped.http, `exit=${result.exitCode} status=${mapped.slug} guard=${guard.guard}`);
   }
 
   // ── Anything else ──
@@ -295,4 +479,13 @@ server.listen(PORT, BIND, () => {
   console.log(`  cooldown: ${COOLDOWN_SECONDS}s`);
   console.log(`  timeout:  ${TIMEOUT_MS}ms`);
   console.log(`  version:  ${PKG_VERSION}`);
+  if (CHECKS_BYPASS) {
+    console.log(`  ⚠ split-brain guard: BYPASSED (PROMOTE_CHECKS_BYPASS=1)`);
+  } else if (PRIMARY_CHECKS.length === 0) {
+    console.log(`  ⚠ split-brain guard: NOT CONFIGURED (PROMOTE_PRIMARY_CHECKS is empty)`);
+    console.log(`     Configure URLs so a misfiring trigger can't cause split-brain.`);
+  } else {
+    console.log(`  split-brain guard: ${PRIMARY_CHECKS.length} check(s) configured, ${CHECKS_TIMEOUT_MS}ms timeout`);
+    for (const u of PRIMARY_CHECKS) console.log(`    • ${u}`);
+  }
 });
