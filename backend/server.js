@@ -3167,12 +3167,32 @@ async function fetchLatestVersion() {
   return _versionCache.latest;
 }
 
+// Numeric semver comparison: returns true iff `latest` is strictly newer
+// than `current`. Ignores any pre-release suffix on the core numbers (parseInt
+// picks off the leading integer), and treats missing segments as 0 so that
+// e.g. "3.3" is equal to "3.3.0". This is the minimum we need for "should the
+// 'Update available' banner appear?" — a running dev build ahead of the last
+// GitHub release should NOT trigger the banner (previous code compared with
+// `!==`, which flagged any difference including downgrades).
+function isNewerVersion(latest, current) {
+  if (!latest || !current) return false;
+  const a = String(latest).split(".").map(s => parseInt(s, 10) || 0);
+  const b = String(current).split(".").map(s => parseInt(s, 10) || 0);
+  const len = Math.max(a.length, b.length);
+  for (let i = 0; i < len; i++) {
+    const av = a[i] || 0, bv = b[i] || 0;
+    if (av > bv) return true;
+    if (av < bv) return false;
+  }
+  return false; // equal
+}
+
 app.get("/api/version", requireAdmin, async (req, res) => {
   const latest = await fetchLatestVersion();
   res.json({
     current: APP_VERSION,
     latest:  latest || APP_VERSION,
-    update_available: latest ? latest !== APP_VERSION : false,
+    update_available: isNewerVersion(latest, APP_VERSION),
     release_url: `https://github.com/${GITHUB_REPO}/releases/latest`
   });
 });

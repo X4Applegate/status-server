@@ -6,6 +6,48 @@ All notable changes to this project are documented here.
 
 ---
 
+## [3.3.5] — 2026-04-18 *(update-checker semver fix)*
+
+### Bug fix
+- **`/api/version` was flagging downgrades as "update available."** The check was `latest !== APP_VERSION`, which is true whenever the two differ — including when the running version is *newer* than the latest published GitHub release (e.g. running a just-built 3.3.4 against a repo where the latest tagged release is still 3.3.3). Visible as an "Applegate Monitor v3.3.3 is available — you're running v3.3.4" banner in the admin UI. Replaced with a proper numeric semver comparison (`isNewerVersion(latest, current)` — returns true iff latest is strictly newer). Unit-tested against the 9 obvious edge cases (equal, higher, lower, missing segments, null, pre-release suffix, two-digit minor).
+
+### Why an image rebuild
+Pure bug fix to the admin-only version check endpoint. Upgrade whenever convenient — the banner just misleads admins, it doesn't affect monitoring.
+
+---
+
+## [3.3.4] — 2026-04-18 *(HA failover test — scripts/docs/compose fixes)*
+
+Ran a full end-to-end failover + failback drill against the reference deployment and folded everything that misbehaved back into the repo. The app itself didn't need any code changes, but the automation around it surfaced several real sharp edges.
+
+### `scripts/promote-replica.sh` — hardening
+- **Auto-comments `--read-only=1` in the mariadb compose file** post-promotion. The runtime `SET GLOBAL read_only = 0` worked, but was silently reverted on the next compose-up because the flag was still in `command:`. Script now auto-detects the mariadb compose file via container labels and edits it in place with a `.pre-promote.bak` backup.
+- **Detects separate compose projects.** Most real deployments run mariadb in a different compose project than status-server (shared with Nextcloud, Cloudron, etc.). Script now uses `docker inspect --format '{{ index .Config.Labels "com.docker.compose.project.config_files" }}'` instead of assuming one directory.
+- **Detects Portainer-managed `status-server`.** When `$COMPOSE_DIR` has no compose file (because the real one is under `/data/compose/<id>/`), the script prints the detected path and tells you to start the container via Portainer, instead of failing with `no configuration file provided: not found`.
+- **Verifies `RESET SLAVE ALL` actually cleared state.** On some MariaDB versions a stale `Master_Host` lingers in `multi-master.info` or `relay-log.info` and causes `error 1236 Could not find first log file` on the next restart. Script re-runs cleanup and removes those files if it sees leftover state.
+- **More robust cloudflared unit detection.** Switched from `systemctl list-unit-files | grep` (which misses drop-in and override units on some layouts) to `systemctl cat`.
+- **Port auto-detection for `/health` check.** Reads the actual mapped port from `docker port` instead of hard-coding `3000`, so the sanity check works on setups using `127.0.0.1:3200:3000` to avoid Cloudron conflicts.
+- **Documents the IDEMPOTENT catch-up dance** in the printed next-steps block — needed when failback hits `Duplicate entry for key 'PRIMARY'` during the bootstrap overlap window.
+
+### `docker-compose.replica.example.yml` — default for Cloudflare Tunnel + Cloudron hosts
+- **status-server port defaults to `"127.0.0.1:3200:3000"`** (was `"3000:3000"`). Loopback-only because Cloudflare Tunnel connects outbound and doesn't need external ports. Port 3200 avoids collision with Cloudron (and Grafana, Next.js, Gitea, and others that want 3000). Inline comment explains when to change it back to 3000.
+- **Expanded 3306 comments** with the failback scenario — when this box is promoted and the old primary comes back as a replica, that old box needs inbound 3306 on this one. Includes the 3307 alternative for hosts where Cloudron already owns 3306.
+
+### `docs/HIGH_AVAILABILITY.md` — new "Known gotchas" section
+Seven real failure modes hit during the drill, each with verbatim error messages and fixes:
+1. **Duplicate-key errors during bootstrap catch-up** — the `--flush-logs` + live-writes race. Fix: `slave_exec_mode=IDEMPOTENT` for the overlap window, then back to `STRICT`.
+2. **`--read-only=1` not durable.** Runtime `SET GLOBAL` alone silently reverts on compose restart.
+3. **DB and app in separate compose projects.** Promote script breaks without the label-based compose detection.
+4. **Port 3000 collision with Cloudron.** Use 3200 on loopback.
+5. **`RESET SLAVE ALL` leaving stale `.info` files.**
+6. **Running destructive SQL on the wrong SSH session** — hostname guards on every destructive command.
+7. **Bash history expansion eating passwords with `!` or `#`.** `set +H` + single-quoted env vars.
+
+### Why an image rebuild for a config/docs release
+`/health` logic is unchanged, but the `3.3.2` / `3.3.3` images were tagged `:latest` and several deployments are pinning `:latest`. Rebuilding as `3.3.4` refreshes the Alpine base layer (picks up CVE fixes that have landed since 3.3.2 was built) and keeps the version string in `/health` responses aligned with the compose/docs bundle. No runtime behavior change.
+
+---
+
 ## [3.3.3] — 2026-04-18 *(HA playbook refinements — docs/compose only)*
 
 Battle-tested the 3.3.2 HA setup against a real second box and folded every sharp edge back into the docs and the replica compose example. **No image changes** — existing `applegater/status-server:3.3.2` and `:latest` are unaffected. Pull the repo if you're following `docs/HIGH_AVAILABILITY.md` to set up your own standby.

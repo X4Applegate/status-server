@@ -18,7 +18,17 @@ services:
     # read-only DB will generate constant write errors.
     profiles: ["promoted"]   # only starts when you `docker compose --profile promoted up`
     ports:
-      - "3000:3000"
+      # Loopback-only. Traffic reaches this container via cloudflared's tunnel
+      # connector (`service: http://localhost:3200` in ~/.cloudflared/config.yml),
+      # NOT from the public internet. Binding to 127.0.0.1 means a misconfigured
+      # firewall or a dead tunnel can never expose the app raw.
+      #
+      # Why 3200 instead of 3000? 3000 collides with Cloudron (and a bunch of
+      # other self-hosted apps — Grafana, Next.js, Gitea, etc.). If you're on a
+      # bare host with nothing else on 3000 you can use "127.0.0.1:3000:3000".
+      # If you DO use 3200, your Cloudflare Tunnel service URL on BOTH boxes
+      # must be http://localhost:3200 — see docs/HIGH_AVAILABILITY.md.
+      - "127.0.0.1:3200:3000"
     volumes:
       - ./servers.json:/config/servers.json
     environment:
@@ -67,7 +77,24 @@ services:
       - MYSQL_PASSWORD=CHANGE_ME_SAME_AS_PRIMARY
     volumes:
       - mariadb_data:/var/lib/mysql
-    # Do NOT expose port 3306 publicly on the Replica — it's internal only.
+    # Do NOT expose 3306 to the PUBLIC internet. Replica only needs to reach
+    # OUT to Primary's 3306 — nothing needs to come in to this box's 3306
+    # during normal Replica operation.
+    #
+    # HOWEVER — when THIS box gets promoted and the OLD primary eventually
+    # comes back online as the NEW replica, that old box needs to connect
+    # inbound to 3306 on this one. At that point you'll uncomment:
+    #
+    # ports:
+    #   - "3306:3306"     # if no other mariadb is on the host
+    #   # - "3307:3306"   # if Cloudron or another mariadb already owns 3306
+    #
+    # and firewall it to the other box's IP only:
+    #   sudo ufw allow from <OTHER_BOX_IP> to any port 3306 proto tcp
+    #   sudo ufw deny  3306
+    #
+    # If you use port 3307 instead of 3306, the failback CHANGE MASTER TO
+    # must include MASTER_PORT=3307.
 
 volumes:
   mariadb_data:

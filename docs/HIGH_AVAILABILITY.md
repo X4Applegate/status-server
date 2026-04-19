@@ -270,3 +270,107 @@ Bonus: write a small script that runs `SHOW SLAVE STATUS` on the Replica and ale
 
 **The app on Replica is crashing with "Table is read only"**
 → That's working as intended — the Replica's DB is read-only until you promote. Either leave the container stopped (recommended — the provided `docker-compose.replica.example.yml` gates it behind the `promoted` profile), or expect errors until promotion.
+
+---
+
+## Known gotchas (surfaced during real failover testing)
+
+These are the sharp edges that **actually bit** during a real end-to-end failover + failback on the reference deployment. Worth scanning once before you run this in anger.
+
+### 1. Duplicate-key errors during the catch-up window after bootstrap
+
+**Symptom**: after `CHANGE MASTER TO ... START SLAVE;`, `SHOW SLAVE STATUS\G` shows `Slave_SQL_Running: No` with `Last_SQL_Error: Could not execute Write_rows_v1 event on table status_monitor.status_history; Duplicate entry '...' for key 'PRIMARY'`.
+
+**Cause**: `mariadb-dump --master-data=2 --flush-logs --single-transaction` is *not* atomic across flush and snapshot. Between the `FLUSH LOGS` rotation and the `START TRANSACTION WITH CONSISTENT SNAPSHOT`, other sessions can commit rows. Those rows end up **both** in the dump (because the snapshot is taken after them) **and** at the start of the new binlog (because the flush happened before them). When replication replays from position 0 of the new binlog, it tries to re-insert rows that are already in the loaded dump.
+
+**Fix**: use `slave_exec_mode=IDEMPOTENT` for the catch-up window, then flip back to `STRICT`:
+
+```sql
+-- On the replica, after loading the bootstrap dump:
+STOP SLAVE;
+SET GLOBAL slave_exec_mode='IDEMPOTENT';
+START SLAVE;
+
+-- Wait until Exec_Master_Log_Pos = Read_Master_Log_Pos AND primary's
+-- MAX(id) on the busiest table clearly exceeds the last dup id in any
+-- past error. Give it a good 1-2 minutes past the point where it looks
+-- caught up — the overlap window is sometimes wider than one pass.
+SHOW SLAVE STATUS\G
+
+-- Then flip back to strict so real divergence gets caught, not swallowed:
+STOP SLAVE;
+SET GLOBAL slave_exec_mode='STRICT';
+START SLAVE;
+```
+
+`IDEMPOTENT` silently ignores duplicate-key and key-not-found errors during row-based replication. That's exactly what you want during bootstrap and *exactly what you don't want* during steady-state — hence the flip back.
+
+**Alternative (cleaner but intrusive)**: stop status-server on Primary for the duration of the dump (30-60s), so there are no writes racing the flush. No overlap, no IDEMPOTENT needed.
+
+### 2. `--read-only=1` survives `SET GLOBAL` but not a container restart
+
+**Symptom**: you promote with `SET GLOBAL read_only = 0`, everything works, but after an unrelated `docker compose up -d` the DB silently reverts to read-only and writes start failing.
+
+**Cause**: `--read-only=1` in the compose `command:` block overrides runtime `SET GLOBAL`. The runtime flip only persists until the next container restart.
+
+**Fix**: the provided `scripts/promote-replica.sh` now auto-comments `--read-only=1` in the mariadb compose file post-promotion (with a `.pre-promote.bak` backup for failback). If you're doing the steps by hand, edit the compose file manually after `SET GLOBAL read_only = 0`.
+
+### 3. DB and status-server often live in separate compose projects
+
+**Symptom**: `promote-replica.sh` succeeds on the SQL step but fails with `no configuration file provided: not found` on the compose step.
+
+**Cause**: in real deployments, MariaDB is often shared across apps (status-server + nextcloud + another app on the same box), which means the mariadb container's compose file is in a different directory from `status-server`'s. Also, if status-server is managed by Portainer, the compose file lives under `/data/compose/<id>/` and isn't visible from `/opt/status-server`.
+
+**Fix**: the script now auto-detects the mariadb compose file via container labels (`com.docker.compose.project.config_files`) and skips the status-server compose step gracefully when the directory has no compose file — printing a hint that you likely need to start it via Portainer/whatever external manager owns it.
+
+### 4. Port 3000 collision with Cloudron and similar hosts
+
+**Symptom**: `docker compose up -d status-server` on the replica fails with `failed to bind host port 127.0.0.1:3000/tcp: address already in use`.
+
+**Cause**: Cloudron (and other self-hosted-app hosts) bind to 3000 for their management interface.
+
+**Fix**: the default `docker-compose.replica.example.yml` now uses `127.0.0.1:3200:3000`. If you change this, your Cloudflare Tunnel service URL on **both** boxes must match (because both boxes share one tunnel Service URL — see the tunnel section above).
+
+### 5. `RESET SLAVE ALL` doesn't always fully clear state
+
+**Symptom**: you run `STOP SLAVE; RESET SLAVE ALL;` after a promotion. Everything looks clean. Then on the next container restart the node tries to start replication again and hits `Got fatal error 1236 ... Could not find first log file name in binary log index file` against the box that *used to* be its master.
+
+**Cause**: on some MariaDB versions, `RESET SLAVE ALL` leaves stale bytes in `multi-master.info` or `relay-log.info` under `/var/lib/mysql/`. Those get re-read at startup and auto-connection retries begin.
+
+**Fix**: the promote script now verifies `SHOW SLAVE STATUS` is fully empty after `RESET SLAVE ALL` and, if a `Master_Host` is still visible, runs `STOP ALL SLAVES; RESET SLAVE ALL;` again and deletes the leftover `.info` files. Doing it by hand:
+
+```bash
+docker exec mariadb mariadb -uroot -p -e "STOP ALL SLAVES; RESET SLAVE ALL;"
+docker exec mariadb sh -c 'rm -f /var/lib/mysql/multi-master.info /var/lib/mysql/relay-log.info'
+docker restart mariadb
+```
+
+### 6. Running destructive SQL on the wrong box
+
+**Symptom**: you run `DROP DATABASE status_monitor;` as part of a replica rebootstrap and realize thirty seconds later the prompt said `root@primary` instead of `root@secondary`. Primary's production data is gone.
+
+**Cause**: SSH session confusion. Especially easy when you jump between boxes repeatedly during failover + rebootstrap.
+
+**Fix**: guard every destructive command with a hostname check:
+
+```bash
+[ "$(hostname)" = "secondary-hostname" ] || { echo "WRONG HOST — ABORT"; exit 1; }
+
+# now safe to run destructive SQL
+```
+
+Also: always take a fresh `mariadb-dump --all-databases` backup on primary before *any* HA procedure. A 3 GB dump file saved the day during testing.
+
+### 7. Bash history expansion eats passwords containing `!`
+
+**Symptom**: `docker exec mariadb mariadb -uroot -pFoo!Bar -e "..."` prints 200 lines of mariadb's help output and nothing happens.
+
+**Cause**: `!Bar` triggers bash history expansion, which mangles the command line before the client ever sees it. Also applies to `#` (start-of-comment).
+
+**Fix**: either single-quote the password (`'Foo!Bar'`), disable history expansion for the session (`set +H`), or set it once as an env var and reference it:
+
+```bash
+set +H
+export DBPW='Foo!Bar'
+docker exec mariadb mariadb -uroot -p"$DBPW" -e "..."
+```
