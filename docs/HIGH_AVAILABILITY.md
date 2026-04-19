@@ -393,9 +393,139 @@ Force uses the same shared secret — if you have the token, you have the power.
 
 ### Not yet shipped
 
-- **Split-brain guard** — verifying via a second vantage point that the primary really is down before promoting. Right now the webhook trusts its caller. Tracked as Step 4 in [issue #13](https://github.com/X4Applegate/status-server/issues/13).
-- **Health-signal source** — the actual Cloudflare Worker / LB trigger that POSTs to `/promote` when the primary fails. Tracked as Step 5.
-- **Auto-notification** — emailing the admin when an auto-promotion fires. Tracked as Step 7.
+- **Auto-notification** — emailing the admin when an auto-promotion fires. Tracked as Step 7 in [issue #13](https://github.com/X4Applegate/status-server/issues/13).
+- **Third-observer vote** — fixing the single-box blind spot in the split-brain guard. Tracked as a follow-up in issue #13.
+
+---
+
+## Part 4c — Cloudflare Load Balancer as health-signal source
+
+Part 4b described the webhook that executes the promotion. This section describes the thing that **calls** it: Cloudflare Load Balancer, which already monitors origin health from multiple CF POPs and can POST to an HTTPS endpoint (our webhook) when an origin pool goes unhealthy.
+
+### Why CF Load Balancer vs. a Worker cron
+
+| | Load Balancer | Worker cron |
+|---|---|---|
+| Health checks from CF's POPs | ✅ built in, multi-region | ⚠ you implement |
+| Minimum check interval | 15s | 60s |
+| Traffic steering during failover | ✅ shifts traffic to secondary pool automatically | ❌ DNS-only |
+| Cost | ~\$5/mo + per-check | \$5/mo Workers Paid |
+| Requires a middleware Worker? | ❌ CF posts directly to the webhook | ✅ (or it IS the Worker) |
+
+If you already pay for Load Balancer (as in this deployment), use it. No Worker needed — CF Notification Webhooks authenticate with the `cf-webhook-auth` header, which `promote-webhook.js` accepts natively alongside `X-Promote-Token`.
+
+### Topology
+
+```
+┌──────────────────┐
+│  Cloudflare LB   │ monitors primary + secondary pools, 15s multi-POP checks
+│  multi-POP       │
+└────────┬─────────┘
+         │ pool goes unhealthy
+         ▼
+┌──────────────────┐
+│ CF Notification  │ POST JSON with cf-webhook-auth: <shared secret>
+│     Webhook      │
+└────────┬─────────┘
+         │ https://promote-standby.example.com/promote
+         ▼
+┌──────────────────┐
+│ promote-webhook  │ (Part 4b) — split-brain guard → promote-replica.sh
+│  on standby host │
+└──────────────────┘
+```
+
+### Set it up (Cloudflare dashboard)
+
+Assumes you already have Part 3 (Cloudflare Load Balancing) configured with both boxes as origins.
+
+**1. Configure the health monitor**
+
+Dashboard → Traffic → Load Balancing → Monitors → Create.
+
+- **Type:** HTTPS
+- **Path:** `/health` (status-server has a built-in health endpoint)
+- **Interval:** 15s (minimum)
+- **Consecutive failures to mark unhealthy:** 2 (avoids single-check flaps; 30s detection window)
+- **Consecutive successes to mark healthy:** 2
+- **Check regions:** pick at least 3 geographically diverse POPs (e.g. WNAM, ENAM, WEU) so a single-POP issue can't falsely trip promotion
+
+**2. Attach the monitor to each pool**
+
+Edit the **primary-pool** and attach the monitor. Do the same for **secondary-pool**.
+
+**3. Create the notification policy**
+
+Dashboard → Notifications → Add → **Health Check Notification** (or **Load Balancing Pool Health**, depending on UI version).
+
+- **Pool:** primary-pool
+- **Status to alert on:** `unhealthy`
+- **Delivery:** Webhook → Create new webhook
+  - **Name:** `promote-standby`
+  - **URL:** `https://promote-standby.example.com/promote`
+  - **Secret:** paste the same value you set as `PROMOTE_SHARED_SECRET` in `/etc/status-server/promote-webhook.env`
+
+CF sends that secret as the `cf-webhook-auth` header on every POST. The webhook constant-time compares it against `PROMOTE_SHARED_SECRET`. No Worker translation layer needed.
+
+**4. (Optional) Notify on recovery too**
+
+Add a second notification policy on the SAME pool with status `healthy` and a separate email destination — this tells you "primary is back" so you can run the fail-back procedure (Part 5) at a time of your choosing.
+
+### What the POST body looks like
+
+CF Notification Webhooks send a JSON body roughly shaped like:
+
+```json
+{
+  "name": "Health Check event",
+  "text": "Origin pool primary-pool transitioned to unhealthy",
+  "data": { "pool_name": "primary-pool", "previous_health": "healthy", "new_health": "unhealthy" },
+  "policy_id": "abc-123-def",
+  "alert_type": "load_balancing_health_alert",
+  "ts": 1734567890
+}
+```
+
+The webhook doesn't care about the body contents for authentication — the `cf-webhook-auth` header is the auth boundary. But it DOES parse `name`, `policy_id`, and `alert_type` out of the body so every auto-triggered promotion gets an audit line in the webhook log:
+
+```
+[2026-04-19T03:14:15Z] CF notification: name="Health Check event" policy=abc-123-def alert_type=load_balancing_health_alert
+[2026-04-19T03:14:15Z] promote triggered by 162.158.x.x — invoking /opt/status-server/scripts/promote-replica.sh
+```
+
+### Verify end to end (dry run)
+
+Before trusting CF to flip your prod, manually simulate the exact call CF will make:
+
+```bash
+SECRET=$(sudo grep PROMOTE_SHARED_SECRET /etc/status-server/promote-webhook.env | cut -d= -f2)
+
+curl -sS -X POST \
+  -H "cf-webhook-auth: $SECRET" \
+  -H "Content-Type: application/json" \
+  -d '{"name":"Health Check event","text":"test","policy_id":"manual-test","alert_type":"load_balancing_health_alert"}' \
+  https://promote-standby.example.com/promote | jq .
+```
+
+If everything is wired right and the primary is actually up, you should see:
+
+```json
+{
+  "status": "split_brain_refused",
+  "message": "primary responded 2xx from at least one vantage point — refusing to promote",
+  "primary_check_results": [ ... ],
+  "hint": "If you have independently verified the primary is down, retry with {\"force\":true} ..."
+}
+```
+
+That 409 response confirms: auth works, the network path from CF (or your test machine) to the webhook works, and the split-brain guard is actively protecting you from a misfiring notification.
+
+### Gotchas
+
+- **Notification delivery is best-effort.** CF doesn't retry with exponential backoff — if the first POST fails, you may get ONE follow-up and then silence. Combine with the `consecutive failures = 2` setting so a single CF-edge hiccup doesn't cost you a promotion.
+- **Secret rotation requires two steps.** Update `PROMOTE_SHARED_SECRET` on the host and `systemctl restart promote-webhook`, THEN update the notification webhook's secret in the CF dashboard. Do it in that order — if you flip CF first, legitimate calls start getting 401s before the host knows the new secret.
+- **`promote-standby.example.com` needs its own cloudflared hostname** (separate from the main app hostname) — see Part 4b → "Making the webhook reachable from Cloudflare." If the app tunnel is down, the promote tunnel must NOT also be down, or you can't self-heal.
+- **No fail-back automation.** CF will happily route traffic back to primary when it recovers, but the old primary is still configured as writable while the new primary (ex-standby) is also writable. Run the Part 5 re-bootstrap procedure manually when you're ready — don't let both boxes accept writes.
 
 ---
 

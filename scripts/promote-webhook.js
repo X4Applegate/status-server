@@ -124,6 +124,11 @@ function cooldownRemainingSeconds() {
 }
 
 // ── Auth — constant-time compare ─────────────────────────────────────────────
+// Accepts the token via either:
+//   X-Promote-Token: <value>      — our preferred custom header
+//   cf-webhook-auth: <value>      — Cloudflare Notifications' stock header
+// Accepting both lets CF Notification Webhooks call us directly without
+// needing a Worker in the middle to rewrite headers.
 function checkToken(header) {
   if (typeof header !== "string" || !header) return false;
   const a = Buffer.from(header);
@@ -131,6 +136,31 @@ function checkToken(header) {
   if (a.length !== b.length) return false;
   try { return crypto.timingSafeEqual(a, b); }
   catch { return false; }
+}
+function getAuthHeader(req) {
+  return req.headers["x-promote-token"] || req.headers["cf-webhook-auth"] || "";
+}
+
+// ── Cloudflare notification detection ────────────────────────────────────────
+// CF Notification Webhooks POST a JSON body with a stable shape:
+//   { "name": "Health Check event", "text": "...", "data": {...}, "ts": N, "policy_id": "..." }
+// We don't need to validate the shape — the cf-webhook-auth header is the
+// auth boundary — but parsing out the name/text/policy_id enriches the
+// audit log so operators can see WHICH CF event fired the promotion.
+function parseCloudflareNotification(body) {
+  if (!body || typeof body !== "object") return null;
+  // Heuristic: CF payloads have these top-level keys. Don't care about the
+  // values, just whether this looks like a CF notification vs our own
+  // {"force":true} body.
+  const looksLikeCF = "name" in body || "policy_id" in body || "alert_type" in body;
+  if (!looksLikeCF) return null;
+  return {
+    name:       typeof body.name       === "string" ? body.name.slice(0, 200)       : undefined,
+    text:       typeof body.text       === "string" ? body.text.slice(0, 500)       : undefined,
+    policy_id:  typeof body.policy_id  === "string" ? body.policy_id.slice(0, 100)  : undefined,
+    alert_type: typeof body.alert_type === "string" ? body.alert_type.slice(0, 100) : undefined,
+    ts:         body.ts
+  };
 }
 
 // ── Response helper ──────────────────────────────────────────────────────────
@@ -356,8 +386,8 @@ const server = http.createServer(async (req, res) => {
   // debugging "why is my promotion refused" issues. Returns the raw
   // per-URL results so operators can see exactly what the webhook sees.
   if (req.method === "GET" && req.url === "/check-primary") {
-    if (!checkToken(req.headers["x-promote-token"])) {
-      sendJson(res, 401, { status: "unauthorized", message: "invalid or missing X-Promote-Token" });
+    if (!checkToken(getAuthHeader(req))) {
+      sendJson(res, 401, { status: "unauthorized", message: "invalid or missing auth token (X-Promote-Token or cf-webhook-auth)" });
       return logLine(401, "auth_failed");
     }
     const guard = await runSplitBrainCheck(false);
@@ -373,21 +403,28 @@ const server = http.createServer(async (req, res) => {
 
   // ── POST /promote (auth required) ──
   if (req.method === "POST" && req.url === "/promote") {
-    // Auth
-    const token = req.headers["x-promote-token"];
+    // Auth — accepts X-Promote-Token OR cf-webhook-auth (CF Notifications).
+    const token = getAuthHeader(req);
     if (!checkToken(token)) {
-      sendJson(res, 401, { status: "unauthorized", message: "invalid or missing X-Promote-Token" });
+      sendJson(res, 401, { status: "unauthorized", message: "invalid or missing auth token (X-Promote-Token or cf-webhook-auth)" });
       return logLine(401, "auth_failed");
     }
 
-    // Read body for the optional {"force":true} flag. Bounded so a
-    // malicious caller can't hang us or blow memory.
+    // Read body. May be:
+    //   - empty (simple curl trigger)
+    //   - {"force":true} (operator override — our format)
+    //   - CF Notification Webhook JSON (name/text/policy_id/...)
+    // Size-capped so a malicious caller can't hang us or blow memory.
     const body = await readJsonBody(req);
     if (body._too_large) {
       sendJson(res, 413, { status: "body_too_large", message: `body must be <= ${MAX_BODY_BYTES} bytes` });
       return logLine(413, "body_too_large");
     }
     const force = body.force === true;
+    const cfNotif = parseCloudflareNotification(body);
+    if (cfNotif) {
+      console.log(`[${ts}] CF notification: name="${cfNotif.name||"?"}" policy=${cfNotif.policy_id||"?"} alert_type=${cfNotif.alert_type||"?"}`);
+    }
 
     // Cooldown — applies even to force:true, because "I'm sure" doesn't
     // make ping-pong safer.

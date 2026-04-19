@@ -10,6 +10,15 @@ All notable changes to this project are documented here.
 
 Groundwork for the automatic failover feature tracked in [issue #13](https://github.com/X4Applegate/status-server/issues/13). No image rebuild needed for this entry — script-only and docs-only changes.
 
+### `scripts/promote-webhook.js` — Cloudflare Load Balancer integration (new)
+The webhook can now be the direct target of a Cloudflare Notification Webhook fired by a Load Balancer health check — no Worker middleman required. CF LB already runs multi-POP health checks from geographically diverse vantage points and natively supports webhook notifications with a shared secret, so it's a better health-signal source than a Worker cron (15s interval vs. 60s minimum, plus traffic steering during the transition).
+
+- **Dual-header auth.** `POST /promote` and `GET /check-primary` now accept the bearer token via either `X-Promote-Token` (our custom header) **or** `cf-webhook-auth` (Cloudflare's stock header). Both use the same `PROMOTE_SHARED_SECRET` value and the same constant-time compare — pick whichever one matches your caller. 401 response text updated to reference both header names.
+- **CF notification body parsing.** When the POST body looks like a CF notification (has `name`, `policy_id`, or `alert_type` top-level keys), the webhook extracts `name`, `text`, `policy_id`, and `alert_type` with length caps and logs a dedicated audit line before promotion: `[ts] CF notification: name="..." policy=... alert_type=...`. This makes it trivial to see WHICH CF health policy fired a given auto-promotion when reading `journalctl -u promote-webhook`.
+- **Non-CF bodies still work.** Empty bodies (simple curl triggers) and our own `{"force":true}` override remain unchanged; the CF parser is a heuristic that returns null if the body doesn't look CF-shaped, so there's no behavioral change for existing callers.
+- **Docs** — new **Part 4c** in `docs/HIGH_AVAILABILITY.md` walks through the CF dashboard setup end-to-end: monitor config (HTTPS /health, 15s, 2-of-2 thresholds, ≥3 POPs), pool attachment, notification policy with webhook URL + shared secret, a pre-flight `curl` dry-run that should return 409 `split_brain_refused` when the primary is actually up, and three gotchas (delivery-is-best-effort, secret-rotation ordering, dedicated cloudflared hostname for the webhook).
+- **`.env.example`** — `PROMOTE_SHARED_SECRET` comment now documents that the same value serves as CF's `cf-webhook-auth` secret when using Load Balancer as the trigger.
+
 ### `scripts/promote-webhook.js` — split-brain guard (new)
 Before every promotion, the webhook now verifies via multiple independent network paths that the primary is actually down. This is the most important safeguard against a misfiring health-signal trigger causing split-brain.
 
