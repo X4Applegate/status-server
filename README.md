@@ -5,6 +5,19 @@
 [![Node](https://img.shields.io/badge/node-%E2%89%A518-green)](https://nodejs.org)
 [![License](https://img.shields.io/badge/license-source--available-blue)](./LICENSE)
 
+> ## 🚧 Active Development Notice — HA / Automatic Failover Work In Progress
+>
+> **Expect frequent updates over the next several releases.** Active work is underway on the high-availability backup solution. The goal: if the **primary** goes down (power loss, internet loss, hardware failure), a **Cloudflare-triggered script** automatically promotes the **secondary** — which is normally running a **read-only replica database** — to active status and begins serving traffic with zero manual intervention.
+>
+> **Current state** (as of the most recent release):
+> - ✅ Manual failover works end-to-end (`scripts/promote-replica.sh`)
+> - ✅ MariaDB classic replication tuned and tested (primary → read-only replica)
+> - ✅ Cloudflare Tunnel multi-connector topology (cold-standby connector on secondary)
+> - 🚧 **In progress:** automatic promotion trigger driven by Cloudflare health signals
+> - 🚧 **In progress:** automated failback (old primary rejoins as read-only replica when it recovers)
+>
+> Until the automatic trigger ships, follow the manual runbook in [`docs/HIGH_AVAILABILITY.md`](./docs/HIGH_AVAILABILITY.md). Breaking changes to compose files, env vars, or the promote script may occur — pin to a specific release tag if stability matters for your deployment.
+
 A self-hosted, multi-tenant server and network status monitoring platform built with Node.js, Express, and MariaDB. Designed for operators who need separate branded dashboards for different teams or clients — each with their own login, branding, and server visibility — from a single deployment.
 
 🌐 **Live demo:** [uptime.richardapplegate.io](https://uptime.richardapplegate.io) · 📄 **Landing page:** [applegatemonitor.richardapplegate.io](https://applegatemonitor.richardapplegate.io)
