@@ -581,6 +581,32 @@ const server = http.createServer(async (req, res) => {
       console.log(`[${ts}] CF notification: name="${cfNotif.name||"?"}" policy=${cfNotif.policy_id||"?"} alert_type=${cfNotif.alert_type||"?"}`);
     }
 
+    // CF destination-verification + "Send test" payloads include data.test=true.
+    // Without this short-circuit, the split-brain guard correctly returns 409,
+    // CF interprets the non-2xx as "destination unhealthy," and refuses to let
+    // you attach the destination to a Notification policy. Returning 200 here
+    // satisfies CF's verification WITHOUT actually invoking the promote
+    // script — the production flow (real pool-down event) omits data.test and
+    // runs through the full guard + script below.
+    //
+    // Safety: this gate sits AFTER auth (so anonymous callers can't bypass
+    // the guard by sending {"data":{"test":true}}) and the guard itself still
+    // runs for every real CF notification because genuine events don't carry
+    // data.test. An attacker who stole the bearer token can send a test-flagged
+    // body and get a 200 back — but 200 here is a no-op, nothing promotes.
+    const isCfTest = !!(body && body.data && body.data.test === true);
+    if (isCfTest) {
+      console.log(`[${ts}] CF verification/test ping — returning 200 without running promote`);
+      sendJson(res, 200, {
+        status: "test_acknowledged",
+        message: "CF destination verification or test notification — no promote action taken",
+        service: "promote-webhook",
+        version: PKG_VERSION
+      });
+      writeAuditLog({ ts, host: HOSTNAME, event: "promote_test_ack", status: "test_acknowledged", exit_code: null, http_status: 200, forced: false, guard_state: null, cf_notification: cfNotif, caller_ip: ip });
+      return logLine(200, "cf_test_ack");
+    }
+
     // Cooldown — applies even to force:true, because "I'm sure" doesn't
     // make ping-pong safer.
     const remaining = cooldownRemainingSeconds();
