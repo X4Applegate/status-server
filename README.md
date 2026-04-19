@@ -17,6 +17,8 @@
 > - 🚧 **In progress:** automated failback (old primary rejoins as read-only replica when it recovers)
 >
 > Until the automatic trigger ships, follow the manual runbook in [`docs/HIGH_AVAILABILITY.md`](./docs/HIGH_AVAILABILITY.md). Breaking changes to compose files, env vars, or the promote script may occur — pin to a specific release tag if stability matters for your deployment.
+>
+> 📋 **Track progress:** [#13 — Automatic HA failover tracking issue](https://github.com/X4Applegate/status-server/issues/13)
 
 A self-hosted, multi-tenant server and network status monitoring platform built with Node.js, Express, and MariaDB. Designed for operators who need separate branded dashboards for different teams or clients — each with their own login, branding, and server visibility — from a single deployment.
 
