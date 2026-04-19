@@ -6,71 +6,28 @@ All notable changes to this project are documented here.
 
 ---
 
-## [Unreleased] — HA auto-failover foundation
+## [3.4.0] — HA / automatic failover feature removed
 
-Groundwork for the automatic failover feature tracked in [issue #13](https://github.com/X4Applegate/status-server/issues/13). No image rebuild needed for this entry — script-only and docs-only changes.
+The high-availability auto-failover work tracked in [issue #13](https://github.com/X4Applegate/status-server/issues/13) has been **fully removed** from the project. The code worked end-to-end — an end-to-end CF-driven failover drill did successfully promote the standby — but the operational complexity (bidirectional MariaDB replication, the promote webhook service, split-brain guard, Cloudflare Load Balancer + Notification policy, the post-failover resync procedure) is genuinely out of proportion to the uptime gains for a self-hosted status monitor.
 
-### `scripts/promote-webhook.js` — notifications + audit log (new)
-Auto-failover was silent by default — you found out a promotion fired by reading `journalctl`. Step 7 closes that gap with three independent sinks, zero added dependencies, and a deliberate split between "audit everything" and "notify only what matters."
+For most deployments the right model is a **single-server + hourly off-box backup** pattern: one primary running the full stack, plus a cron job somewhere that pulls `mysqldump` snapshots to a second machine (or cloud object storage). Recovery from a hard primary loss becomes "restore the latest dump, swing DNS" — a 15–30 minute manual operation — instead of a 30-second automatic promotion, at roughly 10% of the day-to-day complexity cost.
 
-- **Audit log** (JSONL file, default `/var/lib/status-server/promote-audit.jsonl`). Every authenticated `/promote` attempt is recorded: success, failure, refused-by-guard, refused-by-cooldown, body-too-large. Synchronous appends so nothing is lost on crash. Auth failures (401) are **not** audited — they'd be a log-flood DoS vector, so they stay in the ephemeral `journalctl` log only.
-- **Email** via `sendmail -t -i` shell-out (opt-in via `PROMOTE_NOTIFY_EMAIL_TO`). Works with every standard Linux MTA — postfix, sendmail, msmtp-mta, nullmailer. Fires on success + failure only (refused events are audit-only to avoid alert fatigue when CF flaps). Subject line differentiates `✓ promoted` vs `✗ FAILED`; failure emails include the last 1 KB of stderr so you can triage without SSH. Configurable From address, subject prefix, and sendmail path.
-- **Outbound JSON webhook** (opt-in via `PROMOTE_NOTIFY_WEBHOOK_URL`). One HTTPS POST per success/failure event with the same envelope as the audit log. Points at Slack/Discord/PagerDuty/n8n/anything that accepts JSON. Fire-and-forget with a 10s timeout — the HTTP response to Cloudflare is never blocked by a slow notification target.
-- **Event envelope** includes: timestamp, hostname, event type (`promote_success` / `promote_failure` / `promote_refused`), status slug, exit code, HTTP status, forced flag, guard state + reason, parsed CF notification metadata (name/policy_id/alert_type), caller IP, script message, stderr tail (failures only), timed_out flag. Same shape across all three sinks.
-- **Zero new deps** — the webhook still uses Node built-ins only (`http`, `https`, `crypto`, `child_process`, `fs`, `path`, `os`). No nodemailer, no Axios.
-- **Startup banner** prints which sinks are configured: `notify: email=<addr|off>  webhook=<on|off>`. Explicit audit log path too.
-- **Docs** — new **Part 4d** in `docs/HIGH_AVAILABILITY.md`: sink matrix, event format with example JSONL lines, useful `jq` queries, email setup with sample body, outbound webhook notes for each target platform, and a drop-in `logrotate.d` config for when the audit log eventually grows.
-- **`.env.example`** — new "Notifications & audit log" section with all tunables documented.
+### Removed
+- **`backend/server.js`** — `REPLICA_MODE` / `IS_REPLICA` env flag, the `@@global.read_only` probe in `initDB()`, the `createDatabaseTable`/`clearExpired` gating on `MySQLStore`, and the `if (!IS_REPLICA)` guard around the check loop + scheduled weekly report. The server now unconditionally initialises its schema, runs the check loop, and fires the weekly report — exactly how it behaved before the HA work started.
+- **`scripts/promote-replica.sh`** — the promote/failover script.
+- **`scripts/promote-webhook.js`**, **`scripts/promote-webhook.service`**, **`scripts/promote-webhook.env.example`** — the standalone host-side HTTP trigger service and its systemd unit + config template.
+- **`docs/HIGH_AVAILABILITY.md`** — the full HA operator runbook.
+- **`docker-compose.replica.example.yml`** — the replica-mode compose example.
+- **`docker-compose.example.yml`** — stripped of the HA-specific commented blocks (replication `command:` flags on the mariadb service, inbound 3306 port exposure, and the "same SESSION_SECRET across both boxes" note).
+- **`README.md`** — removed the "Active Development Notice — HA / Automatic Failover Work In Progress" banner.
 
-### `scripts/promote-webhook.js` — Cloudflare Load Balancer integration (new)
-The webhook can now be the direct target of a Cloudflare Notification Webhook fired by a Load Balancer health check — no Worker middleman required. CF LB already runs multi-POP health checks from geographically diverse vantage points and natively supports webhook notifications with a shared secret, so it's a better health-signal source than a Worker cron (15s interval vs. 60s minimum, plus traffic steering during the transition).
+### What you need to do if you were running the HA pair
+- **Standby box** (typically the one with `REPLICA_MODE=1` in its `.env`) — stop `promote-webhook.service`, `systemctl disable --now` it, delete `/etc/systemd/system/promote-webhook.service`, delete `/etc/status-server/promote-webhook.env`. `STOP SLAVE; RESET SLAVE ALL;` on its MariaDB to cut replication. The rest of the box can be powered off, repurposed, or kept as a backup-dump target.
+- **Primary box** — remove the replication `command:` flags from the mariadb service in your local compose, remove the `ports:` 3306 exposure if you added it, `RESET MASTER;` on MariaDB if you want the binlogs gone (optional; purely housekeeping).
+- **Cloudflare** — delete the Load Balancer(s) and their pools, delete the Notification policy + webhook destination. Point the hostname that was fronting the LB at a plain A/CNAME record pointing to the primary's tunnel. This frees up the LB endpoint quota — if you were on a paid pool you can downgrade.
+- **`.env` files** — delete any `REPLICA_MODE=…` line if present. Safe to leave; the code no longer reads it, but tidiness helps.
 
-- **Dual-header auth.** `POST /promote` and `GET /check-primary` now accept the bearer token via either `X-Promote-Token` (our custom header) **or** `cf-webhook-auth` (Cloudflare's stock header). Both use the same `PROMOTE_SHARED_SECRET` value and the same constant-time compare — pick whichever one matches your caller. 401 response text updated to reference both header names.
-- **CF notification body parsing.** When the POST body looks like a CF notification (has `name`, `policy_id`, or `alert_type` top-level keys), the webhook extracts `name`, `text`, `policy_id`, and `alert_type` with length caps and logs a dedicated audit line before promotion: `[ts] CF notification: name="..." policy=... alert_type=...`. This makes it trivial to see WHICH CF health policy fired a given auto-promotion when reading `journalctl -u promote-webhook`.
-- **Non-CF bodies still work.** Empty bodies (simple curl triggers) and our own `{"force":true}` override remain unchanged; the CF parser is a heuristic that returns null if the body doesn't look CF-shaped, so there's no behavioral change for existing callers.
-- **Docs** — new **Part 4c** in `docs/HIGH_AVAILABILITY.md` walks through the CF dashboard setup end-to-end: monitor config (HTTPS /health, 15s, 2-of-2 thresholds, ≥3 POPs), pool attachment, notification policy with webhook URL + shared secret, a pre-flight `curl` dry-run that should return 409 `split_brain_refused` when the primary is actually up, and three gotchas (delivery-is-best-effort, secret-rotation ordering, dedicated cloudflared hostname for the webhook).
-- **`.env.example`** — `PROMOTE_SHARED_SECRET` comment now documents that the same value serves as CF's `cf-webhook-auth` secret when using Load Balancer as the trigger.
-
-### `scripts/promote-webhook.js` — split-brain guard (new)
-Before every promotion, the webhook now verifies via multiple independent network paths that the primary is actually down. This is the most important safeguard against a misfiring health-signal trigger causing split-brain.
-
-- **`PROMOTE_PRIMARY_CHECKS`** — comma-separated list of URLs. On `POST /promote`, each is GET'd in parallel with `PROMOTE_CHECKS_TIMEOUT_MS` timeout (default 5s). If ANY return 2xx, promotion is refused with `409 split_brain_refused` and the raw per-URL evidence (URL, status, duration_ms, reason) is included in the response body. Typical config passes URLs via different network paths — one via Cloudflare edge, one direct to primary's IP — so a single-path partition can't look like a primary outage.
-- **Five guard states** surfaced in both `/health` and the audit payload of every promotion response: `passed` (all checks failed → safe to promote), `blocked` (at least one 2xx → refuse), `forced` (caller override), `bypassed` (env kill-switch), `not_configured` (startup warning).
-- **Operator force-bypass** via `{"force":true}` in the request body — same shared secret, but the override is audit-flagged. Use when the checks are flapping but you've manually verified the primary is down.
-- **`PROMOTE_CHECKS_BYPASS=1`** nuclear option disables the guard entirely; logs a warning at startup.
-- **New `GET /check-primary`** (auth required) runs the guard checks without promoting. Returns `would_promote: true/false` plus the same per-URL evidence — useful for "why is my promotion getting refused" debugging.
-- **Startup banner** prints the guard config: configured URL count, timeout, and all URLs. Explicit `⚠ NOT CONFIGURED` or `⚠ BYPASSED` warnings when the guard isn't doing its job.
-- **Request-body hardening** — `Content-Length > 1KB` rejected with 413 before allocation; even if `Content-Length` is missing, streaming cap stops accumulation past 1KB while still draining the socket so 413 can be sent cleanly.
-- **Known limitation** (documented in `docs/HIGH_AVAILABILITY.md`): if the standby's own WAN is partitioned, both checks fail and promotion proceeds. Full protection requires a third observer (follow-up in issue #13). Cooldown + Step 7 email notifications are the current safety net.
-
-### `scripts/promote-webhook.js` — host-side failover trigger (new)
-Standalone Node.js HTTP service that invokes `promote-replica.sh --non-interactive --json` when POSTed to with a valid bearer token. Runs on the **host** as a systemd service, not inside the status-server container — so it stays reachable even if the container is dead (which is the scenario that triggers failover).
-
-- **`POST /promote`** with `X-Promote-Token: <shared secret>` header — triggers promotion. Exit codes from the script map cleanly to HTTP status: `0/2 → 200`, `401 → 401`, `429 → cooldown`, `3/4 → 500`, timeout → `504`.
-- **`GET /health`** — unauthenticated, returns service version + current cooldown remaining. Useful for liveness probes from the Cloudflare trigger.
-- **Constant-time token compare** (`crypto.timingSafeEqual`) so a wrong token returns in the same time as a missing one — no side-channel leak.
-- **Token length floor** — webhook refuses to start with a secret shorter than 32 chars. Generated via `openssl rand -hex 32`.
-- **5-minute cooldown window** after a successful promotion — refuses further `/promote` calls to prevent ping-pong. State persisted to `/var/lib/status-server/promote-webhook.state` so webhook restart doesn't reset it. Tunable via `PROMOTE_COOLDOWN_SECONDS`.
-- **120-second script timeout** with SIGTERM on expiry — webhook returns 504 so the caller can retry or escalate instead of hanging forever.
-- **Graceful SIGTERM/SIGINT shutdown** — systemd restarts are clean.
-- **No user input ever reaches shell.** The script path, flags, and `PROMOTE_ACK=yes` env are all hardcoded — the only thing the HTTP request controls is whether the script runs at all.
-- **Zero dependencies.** Node built-ins only (`http`, `crypto`, `child_process`, `fs`, `path`).
-
-### `scripts/promote-webhook.service` + `.env.example` (new)
-Systemd unit and config template. Installs to `/etc/systemd/system/` and `/etc/status-server/promote-webhook.env` (mode 600). Runs as `root` because the promote script touches `/etc`, `/opt`, systemd services, and the docker socket; sudoers-limited unprivileged user is documented as the alternative.
-
-### `scripts/promote-replica.sh` — non-interactive mode
-- **New `--non-interactive` / `-y` flag** lets the promote script run unattended from a webhook or health-signal trigger. Skips the typed-confirmation prompt.
-- **`PROMOTE_ACK=yes` safety interlock.** Non-interactive mode refuses to run unless this env var is set, preventing accidents like typing `-y` in an unrelated shell. The forthcoming promote-webhook endpoint sets it after verifying its shared secret.
-- **New `--json` flag** emits one parseable JSON summary line at the end of every exit path (success, abort, preflight failure, SQL failure). Lets the webhook surface structured outcomes to the Cloudflare trigger and the admin audit log.
-- **Distinct exit codes:** `0` promoted, `1` user-aborted, `2` already-promoted (idempotent no-op), `3` preflight failure, `4` promotion-SQL failure. Webhook callers can map these directly to HTTP status codes.
-- **Idempotency check.** If `SHOW SLAVE STATUS` is empty and `@@global.read_only = 0` on entry, the script exits 2 cleanly with no side effects. Safe to re-invoke on a box that's already been promoted.
-- **`MARIADB_ROOT_PASSWORD` preflight.** The script now fails fast with a clear error if the password is missing from the environment, instead of letting `mariadb` surface a cryptic auth error mid-flow.
-- **`--help` / `-h`** prints the header block and exits 0.
-- **Exit-code trap.** Unexpected failures (e.g. from `set -e`) still emit a JSON status line so webhook callers are never left guessing.
-
-### Backwards compatibility
-Interactive use (`sudo ./promote-replica.sh` with no flags) is identical to previous behavior — same prompt, same output, same side effects.
+Interactive single-box operation is identical to pre-HA behaviour. No schema migration, no image rebuild strictly required (the server.js change is purely code-cleanup — the removed flag was opt-in), though a rebuild is recommended so the running image reflects main.
 
 ---
 

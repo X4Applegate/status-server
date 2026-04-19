@@ -26,8 +26,6 @@ services:
       - DB_NAME=status_monitor
 
       # Session signing secret — change to a long random string.
-      # In an HA pair, this MUST be identical on both primary and replica so
-      # logged-in sessions survive a failover.
       - SESSION_SECRET=changeme_use_a_long_random_string
 
       # Base URL used for dashboard links in webhook alerts
@@ -61,28 +59,6 @@ services:
     image: mariadb:11
     container_name: mariadb
     restart: unless-stopped
-    # ── Standalone install ────────────────────────────────────────────────────
-    # The default mariadb image is fine as-is for a single-box deployment.
-    #
-    # ── HA PRIMARY? Uncomment the `command:` block below. ─────────────────────
-    # Required if this box will replicate to a standby replica
-    # (see docker-compose.replica.example.yml + docs/HIGH_AVAILABILITY.md).
-    # Without these flags the replica has no binlog to follow.
-    #
-    # command:
-    #   - --server-id=1                          # MUST be unique; replica uses 2
-    #   - --log-bin=mysql-bin                    # enables binary logging for replication
-    #   - --binlog-format=ROW
-    #   - --binlog-row-image=MINIMAL
-    #   - --expire-logs-days=7
-    #   - --log-slave-updates=1                  # needed for failback / chained replication
-    #   - --relay-log=relay-bin
-    #   - --max_allowed_packet=1G
-    #   - --slave-max-allowed-packet=1G          # must match replica's slave-max-allowed-packet
-    #   # If this MariaDB instance hosts OTHER databases besides status_monitor
-    #   # (e.g. shared with Nextcloud, Cloudron apps, etc.), uncomment to avoid
-    #   # replicating them to the standby:
-    #   # - --replicate-wild-do-table=status_monitor.%
     environment:
       - MYSQL_ROOT_PASSWORD=rootpassword
       - MYSQL_DATABASE=status_monitor
@@ -90,14 +66,6 @@ services:
       - MYSQL_PASSWORD=changeme
     volumes:
       - mariadb_data:/var/lib/mysql
-    # ── HA PRIMARY? Expose 3306 to the replica. ───────────────────────────────
-    # The standby must be able to reach this box on 3306 to pull binlog events.
-    # Uncomment the ports block AND firewall it to the replica's IP only:
-    #   sudo ufw allow from <REPLICA_IP> to any port 3306 proto tcp
-    #   sudo ufw deny  3306
-    #
-    # ports:
-    #   - "3306:3306"
 
 volumes:
   mariadb_data:
