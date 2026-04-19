@@ -10,6 +10,22 @@ All notable changes to this project are documented here.
 
 Groundwork for the automatic failover feature tracked in [issue #13](https://github.com/X4Applegate/status-server/issues/13). No image rebuild needed for this entry — script-only and docs-only changes.
 
+### `scripts/promote-webhook.js` — host-side failover trigger (new)
+Standalone Node.js HTTP service that invokes `promote-replica.sh --non-interactive --json` when POSTed to with a valid bearer token. Runs on the **host** as a systemd service, not inside the status-server container — so it stays reachable even if the container is dead (which is the scenario that triggers failover).
+
+- **`POST /promote`** with `X-Promote-Token: <shared secret>` header — triggers promotion. Exit codes from the script map cleanly to HTTP status: `0/2 → 200`, `401 → 401`, `429 → cooldown`, `3/4 → 500`, timeout → `504`.
+- **`GET /health`** — unauthenticated, returns service version + current cooldown remaining. Useful for liveness probes from the Cloudflare trigger.
+- **Constant-time token compare** (`crypto.timingSafeEqual`) so a wrong token returns in the same time as a missing one — no side-channel leak.
+- **Token length floor** — webhook refuses to start with a secret shorter than 32 chars. Generated via `openssl rand -hex 32`.
+- **5-minute cooldown window** after a successful promotion — refuses further `/promote` calls to prevent ping-pong. State persisted to `/var/lib/status-server/promote-webhook.state` so webhook restart doesn't reset it. Tunable via `PROMOTE_COOLDOWN_SECONDS`.
+- **120-second script timeout** with SIGTERM on expiry — webhook returns 504 so the caller can retry or escalate instead of hanging forever.
+- **Graceful SIGTERM/SIGINT shutdown** — systemd restarts are clean.
+- **No user input ever reaches shell.** The script path, flags, and `PROMOTE_ACK=yes` env are all hardcoded — the only thing the HTTP request controls is whether the script runs at all.
+- **Zero dependencies.** Node built-ins only (`http`, `crypto`, `child_process`, `fs`, `path`).
+
+### `scripts/promote-webhook.service` + `.env.example` (new)
+Systemd unit and config template. Installs to `/etc/systemd/system/` and `/etc/status-server/promote-webhook.env` (mode 600). Runs as `root` because the promote script touches `/etc`, `/opt`, systemd services, and the docker socket; sudoers-limited unprivileged user is documented as the alternative.
+
 ### `scripts/promote-replica.sh` — non-interactive mode
 - **New `--non-interactive` / `-y` flag** lets the promote script run unattended from a webhook or health-signal trigger. Skips the typed-confirmation prompt.
 - **`PROMOTE_ACK=yes` safety interlock.** Non-interactive mode refuses to run unless this env var is set, preventing accidents like typing `-y` in an unrelated shell. The forthcoming promote-webhook endpoint sets it after verifying its shared secret.

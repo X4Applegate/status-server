@@ -1,0 +1,69 @@
+# promote-webhook.service — HA auto-failover trigger (host-side)
+#
+# Installs the standalone Node.js webhook that the Cloudflare health-signal
+# source POSTs to when it decides this standby box should take over.
+#
+# Install:
+#   sudo cp scripts/promote-webhook.service /etc/systemd/system/
+#   sudo cp scripts/promote-webhook.env.example /etc/status-server/promote-webhook.env
+#   sudo chmod 600 /etc/status-server/promote-webhook.env
+#   sudo $EDITOR /etc/status-server/promote-webhook.env    # set the shared secret + DB password
+#   sudo systemctl daemon-reload
+#   sudo systemctl enable --now promote-webhook
+#   sudo systemctl status promote-webhook
+#
+# Verify:
+#   curl -s http://127.0.0.1:9876/health | jq .
+#
+# Tail the log:
+#   journalctl -u promote-webhook -f
+
+[Unit]
+Description=Applegate Monitor — HA promote webhook (standby failover trigger)
+Documentation=https://github.com/X4Applegate/status-server/blob/main/docs/HIGH_AVAILABILITY.md
+After=network-online.target docker.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+# Runs as root so it can invoke promote-replica.sh (which edits compose
+# files, starts/stops systemd services, and reaches the docker socket).
+# The webhook itself doesn't accept any user input beyond a single bearer
+# token — nothing flows to shell. If your threat model demands it, run as
+# an unprivileged user with a sudoers entry limited to:
+#   <user> ALL=NOPASSWD: /opt/status-server/scripts/promote-replica.sh
+User=root
+Group=root
+
+# Config lives in a separate file so the unit itself can be committed to
+# the repo. The env file is mode 600 and holds the shared secret + DB pw.
+EnvironmentFile=/etc/status-server/promote-webhook.env
+
+# The script location and port are overridable via the env file too; these
+# are just defaults.
+Environment=PROMOTE_SCRIPT_PATH=/opt/status-server/scripts/promote-replica.sh
+Environment=PROMOTE_WEBHOOK_BIND=127.0.0.1
+Environment=PROMOTE_WEBHOOK_PORT=9876
+Environment=PROMOTE_COOLDOWN_SECONDS=300
+Environment=PROMOTE_STATE_FILE=/var/lib/status-server/promote-webhook.state
+Environment=PROMOTE_TIMEOUT_MS=120000
+
+ExecStart=/usr/bin/node /opt/status-server/scripts/promote-webhook.js
+
+# Restart on crash but not on clean exit (clean exit = intentional stop).
+Restart=on-failure
+RestartSec=5s
+
+# Writable state dir for the cooldown timestamp file.
+StateDirectory=status-server
+StateDirectoryMode=0750
+
+# Light hardening — we still need sudo + systemctl + docker, so we can't
+# go full lockdown, but these don't cost anything:
+NoNewPrivileges=no          # must be 'no' — we sudo
+ProtectSystem=false         # promote-replica.sh writes to /etc, /opt, /var
+ProtectHome=yes
+PrivateTmp=yes
+
+[Install]
+WantedBy=multi-user.target

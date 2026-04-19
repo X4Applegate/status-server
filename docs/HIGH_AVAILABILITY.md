@@ -216,6 +216,136 @@ The Replica now serves writes. Cloudflare has already routed traffic to it (from
 
 ---
 
+## Part 4b — Automatic promotion webhook (optional, early access)
+
+> 🚧 **Work in progress** — tracking in [issue #13](https://github.com/X4Applegate/status-server/issues/13). The webhook and non-interactive promote script shipped; the Cloudflare-side health-signal trigger that calls the webhook is still being built. Until that lands, you can drive the webhook by hand with `curl` or your own monitoring system.
+
+For full automation, `scripts/promote-webhook.js` is a tiny standalone Node.js HTTP service that invokes `promote-replica.sh` non-interactively when POSTed to with a valid bearer token. It runs on the **host** (not inside the container) as a systemd service, so it stays reachable even if the status-server container is dead — which is exactly the scenario that triggers failover.
+
+### Architecture
+
+```
+Cloudflare Worker cron / LB health check / your monitoring
+    │
+    │  POST https://<standby-host>/promote
+    │  Header:  X-Promote-Token: <shared secret>
+    ▼
+[promote-webhook.service on standby host]
+    │
+    │  spawn  sudo -E /opt/status-server/scripts/promote-replica.sh
+    │         --non-interactive --json
+    │  env:   PROMOTE_ACK=yes, MARIADB_ROOT_PASSWORD=..., CLOUDFLARED_SVC=...
+    ▼
+Response: HTTP status mapped from script exit code
+  200  promoted  OR  already_promoted (idempotent)
+  429  cooldown — refused because last promotion was < 5 min ago
+  401  unauthorized — token mismatch
+  500  preflight_fail / promotion_sql_failed (stderr_tail in response body)
+  504  timeout — script exceeded PROMOTE_TIMEOUT_MS (default 120s)
+```
+
+### Install
+
+```bash
+# 1. Install the systemd unit and env file
+sudo cp /opt/status-server/scripts/promote-webhook.service /etc/systemd/system/
+sudo mkdir -p /etc/status-server
+sudo cp /opt/status-server/scripts/promote-webhook.env.example /etc/status-server/promote-webhook.env
+sudo chmod 600 /etc/status-server/promote-webhook.env
+
+# 2. Generate a strong shared secret and edit the env file
+echo "PROMOTE_SHARED_SECRET=$(openssl rand -hex 32)"   # copy this into the env file
+sudo $EDITOR /etc/status-server/promote-webhook.env    # also set MARIADB_ROOT_PASSWORD
+
+# 3. Start and enable
+sudo systemctl daemon-reload
+sudo systemctl enable --now promote-webhook
+sudo systemctl status promote-webhook
+
+# 4. Verify /health responds
+curl -s http://127.0.0.1:9876/health | jq .
+```
+
+Expected `/health` response:
+
+```json
+{
+  "ok": true,
+  "service": "promote-webhook",
+  "version": "3.3.5",
+  "ready": true,
+  "cooldown_remaining_s": 0,
+  "script_path": "/opt/status-server/scripts/promote-replica.sh",
+  "port": 9876
+}
+```
+
+### Manually trigger a promotion via the webhook
+
+```bash
+# From the same host (webhook binds 127.0.0.1 by default)
+TOKEN="<value of PROMOTE_SHARED_SECRET>"
+curl -sS -X POST -H "X-Promote-Token: $TOKEN" http://127.0.0.1:9876/promote | jq .
+```
+
+Expected success response:
+
+```json
+{
+  "status": "promoted",
+  "exit_code": 0,
+  "script": {
+    "exit_code": 0,
+    "status": "promoted",
+    "message": "replica promoted to primary; cloudflared started; status-server serving",
+    "host": "serve162",
+    "ts": "2026-04-19T16:00:00-07:00"
+  }
+}
+```
+
+### Making the webhook reachable from Cloudflare
+
+The webhook binds to `127.0.0.1:9876` by default so random internet traffic can't hit it. To let Cloudflare reach it, expose it via **a separate Cloudflare Tunnel hostname** that's independent of the main app tunnel — e.g. `promote-standby.example.com`. This way a dead app tunnel doesn't take the promote trigger down with it.
+
+Minimal `~/.cloudflared/config.yml` addition:
+
+```yaml
+ingress:
+  # existing rules for status-server above...
+  - hostname: promote-standby.example.com
+    service: http://localhost:9876
+  - service: http_status:404
+```
+
+Then apply Cloudflare Access policies on that hostname so only your Worker's service-token can reach `/promote`.
+
+### Cooldown
+
+After a successful promotion, the webhook refuses further `/promote` calls for `PROMOTE_COOLDOWN_SECONDS` (default 300s = 5 minutes). This prevents ping-pong if both sides briefly see each other as down. The timestamp is persisted to `/var/lib/status-server/promote-webhook.state` so restarts of the webhook service don't reset the cooldown.
+
+During cooldown, `POST /promote` returns `429` with the remaining seconds:
+
+```json
+{ "status": "cooldown", "message": "in cooldown window; retry after 247s", "cooldown_remaining_s": 247 }
+```
+
+### Security notes
+
+- **Constant-time token compare** (`crypto.timingSafeEqual`) — no response-time leak differentiates a wrong token from an unrecognised URL.
+- **Token length floor** — webhook refuses to start with a secret shorter than 32 chars.
+- **Idempotency** — if the box is already promoted, the script exits 2 and the webhook returns 200. Retries and double-triggers from redundant health signals are safe.
+- **Run as root** in the shipped systemd unit because the promote script needs to touch `/etc`, `/opt`, systemd, and the docker socket. If your threat model demands an unprivileged service user, swap in a sudoers entry: `<user> ALL=NOPASSWD: /opt/status-server/scripts/promote-replica.sh`.
+- **The webhook does NOT accept any user input** beyond the bearer token and the HTTP method/path. No query parameters, request body, or headers flow into the spawned script.
+
+### Not yet shipped
+
+- **Split-brain guard** — verifying via a second vantage point that the primary really is down before promoting. Right now the webhook trusts its caller. Tracked as Step 4 in [issue #13](https://github.com/X4Applegate/status-server/issues/13).
+- **Health-signal source** — the actual Cloudflare Worker / LB trigger that POSTs to `/promote` when the primary fails. Tracked as Step 5.
+- **Auto-notification** — emailing the admin when an auto-promotion fires. Tracked as Step 7.
+
+---
+
 ## Part 5 — After failover: re-bootstrap the old Primary as the new Replica
 
 The old Primary came back. **Do not just start it** — its DB is now out-of-sync with the new Primary (the promoted Replica). You must re-bootstrap:
