@@ -26,9 +26,18 @@
 //   JSON response mapping script exit code → HTTP status
 //
 // Endpoints:
-//   POST /promote    — auth required; invokes promote script
-//   GET  /health     — no auth; { ok, version, ready, cooldown_remaining_s }
-//   GET  /           — 404 (no directory listing)
+//   POST /promote        — auth required; invokes promote script
+//   GET  /check-primary  — auth required; runs split-brain guard checks only
+//   GET  /health         — no auth; { ok, version, ready, cooldown_remaining_s, ... }
+//   GET  /               — 404 (no directory listing)
+//
+// Notifications (Step 7):
+//   Every promote attempt that passes auth is recorded to a JSONL audit log.
+//   Success + failure events additionally fire (optional, fire-and-forget):
+//     - outbound JSON webhook (Slack/Discord/PagerDuty/custom)
+//     - email via sendmail -t
+//   Refused states (cooldown, split-brain, body too large) are audited but
+//   do NOT trigger email/webhook to avoid alert fatigue.
 //
 // Exit-code → HTTP mapping:
 //   0  promoted              → 200 { status: "promoted", ... }
@@ -46,6 +55,8 @@ const crypto = require("crypto");
 const { spawn } = require("child_process");
 const fs = require("fs");
 const path = require("path");
+const os = require("os");
+const HOSTNAME = os.hostname();
 
 // ── Config (env vars) ────────────────────────────────────────────────────────
 const PORT   = parseInt(process.env.PROMOTE_WEBHOOK_PORT || "9876", 10);
@@ -73,6 +84,30 @@ const CHECKS_TIMEOUT_MS = parseInt(process.env.PROMOTE_CHECKS_TIMEOUT_MS || "500
 // useful during drills or when you know the checks are misconfigured).
 const CHECKS_BYPASS = process.env.PROMOTE_CHECKS_BYPASS === "1";
 
+// ── Notification / audit config ──────────────────────────────────────────────
+// Three independent sinks, all optional (except the audit log, which is
+// always on when its directory is writable). Zero external deps — we use
+// Node built-ins only, so SMTP goes through `sendmail -t` shell-out and
+// the outbound webhook uses the same http/https modules we already loaded.
+//
+//   Audit log — file-based JSON-lines, one record per promotion attempt
+//     (success, failure, refused by guard/cooldown, oversize body). Auth
+//     failures are NOT logged to prevent a log-flood DoS vector.
+//
+//   Outbound webhook — one JSON POST per promote_success / promote_failure.
+//     Point it at a Slack/Discord webhook or any endpoint that accepts JSON.
+//
+//   Email — fires for the same two events via `sendmail -t` if NOTIFY_EMAIL_TO
+//     is set. Uses whatever MTA is on the host (standard on most Linux boxes;
+//     install msmtp-mta or nullmailer on minimal images).
+const NOTIFY_WEBHOOK_URL = process.env.PROMOTE_NOTIFY_WEBHOOK_URL || "";
+const NOTIFY_EMAIL_TO    = process.env.PROMOTE_NOTIFY_EMAIL_TO    || "";
+const NOTIFY_EMAIL_FROM  = process.env.PROMOTE_NOTIFY_EMAIL_FROM  || `promote-webhook@${HOSTNAME}`;
+const NOTIFY_EMAIL_SUBJECT_PREFIX = process.env.PROMOTE_NOTIFY_EMAIL_SUBJECT_PREFIX || "[Applegate Monitor HA]";
+const SENDMAIL_PATH      = process.env.PROMOTE_SENDMAIL_PATH     || "/usr/sbin/sendmail";
+const AUDIT_LOG_FILE     = process.env.PROMOTE_AUDIT_LOG_FILE    || "/var/lib/status-server/promote-audit.jsonl";
+const NOTIFY_TIMEOUT_MS  = parseInt(process.env.PROMOTE_NOTIFY_TIMEOUT_MS || "10000", 10);
+
 // Maximum size of a POST body we'll read (force flag). 1KB is way more
 // than needed — anything larger is malicious or a bug.
 const MAX_BODY_BYTES = 1024;
@@ -96,9 +131,10 @@ if (!fs.existsSync(SCRIPT)) {
   process.exit(1);
 }
 
-// Ensure state directory exists.
-try { fs.mkdirSync(path.dirname(STATE_FILE), { recursive: true, mode: 0o750 }); }
-catch (e) { /* ignore — best effort */ }
+// Ensure state directory exists (covers both STATE_FILE and AUDIT_LOG_FILE
+// if they share a parent, which is the default).
+try { fs.mkdirSync(path.dirname(STATE_FILE),      { recursive: true, mode: 0o750 }); } catch (e) { /* ignore */ }
+try { fs.mkdirSync(path.dirname(AUDIT_LOG_FILE),  { recursive: true, mode: 0o750 }); } catch (e) { /* ignore */ }
 
 // ── Cooldown state (Step 3 preview — minimal implementation) ─────────────────
 // Tracks the last successful promotion time so we refuse to promote again
@@ -121,6 +157,124 @@ function cooldownRemainingSeconds() {
   if (!last) return 0;
   const elapsed = Math.floor((Date.now() - last) / 1000);
   return Math.max(0, COOLDOWN_SECONDS - elapsed);
+}
+
+// ── Audit log (file-based JSON lines) ────────────────────────────────────────
+// One JSON record per line, appended synchronously so we never lose an event
+// on crash. Intentional — this file is tiny (a few hundred bytes per entry,
+// maybe a dozen entries per year even under heavy failover testing) so the
+// sync-write cost is negligible compared to losing an auditable record.
+function writeAuditLog(event) {
+  try {
+    fs.appendFileSync(AUDIT_LOG_FILE, JSON.stringify(event) + "\n", { mode: 0o640 });
+  } catch (e) {
+    console.error(`WARN: audit log write failed (${AUDIT_LOG_FILE}): ${e.message}`);
+  }
+}
+
+// ── Outbound webhook notifier ────────────────────────────────────────────────
+// Fire-and-forget JSON POST to a single URL (Slack incoming webhook, Discord,
+// PagerDuty events API v2, or anything that accepts JSON). Caller chooses the
+// target via PROMOTE_NOTIFY_WEBHOOK_URL. We don't try to be clever about
+// per-vendor payload shapes — we send our standard event envelope and let the
+// operator stick a translator in front if they need one.
+function sendNotifyWebhook(event) {
+  if (!NOTIFY_WEBHOOK_URL) return Promise.resolve();
+  return new Promise((resolve) => {
+    let parsed;
+    try { parsed = new URL(NOTIFY_WEBHOOK_URL); }
+    catch (e) { console.error(`WARN: invalid NOTIFY_WEBHOOK_URL: ${e.message}`); return resolve(); }
+    const mod = parsed.protocol === "https:" ? https : http;
+    const body = JSON.stringify(event);
+    let settled = false;
+    const done = () => { if (!settled) { settled = true; resolve(); } };
+    const req = mod.request(NOTIFY_WEBHOOK_URL, {
+      method: "POST",
+      timeout: NOTIFY_TIMEOUT_MS,
+      headers: {
+        "Content-Type": "application/json",
+        "Content-Length": Buffer.byteLength(body),
+        "User-Agent": `promote-webhook/${PKG_VERSION}`
+      }
+    }, (res) => {
+      res.resume();
+      res.on("end", done);
+      res.on("error", done);
+      if (res.statusCode >= 400) {
+        console.error(`WARN: notify webhook returned ${res.statusCode}`);
+      }
+    });
+    req.on("timeout", () => { try { req.destroy(); } catch {}; console.error("WARN: notify webhook timeout"); done(); });
+    req.on("error", (err) => { console.error(`WARN: notify webhook failed: ${err.message}`); done(); });
+    req.write(body);
+    req.end();
+  });
+}
+
+// ── Email notifier (sendmail shell-out) ──────────────────────────────────────
+// Shells to `sendmail -t -i` — reads recipient from headers in stdin,
+// ignores lone dots in body. Works with every standard Linux MTA (postfix,
+// sendmail, msmtp-mta, nullmailer, etc.). If no MTA is installed this silently
+// warns and continues — we never block the HTTP reply on a failing SMTP send.
+function sendEmail(event) {
+  if (!NOTIFY_EMAIL_TO) return Promise.resolve();
+  return new Promise((resolve) => {
+    const ok = event.event === "promote_success";
+    const subject = `${NOTIFY_EMAIL_SUBJECT_PREFIX} ${ok ? "✓ promoted" : "✗ FAILED"} — ${event.host}`;
+    const lines = [
+      `To: ${NOTIFY_EMAIL_TO}`,
+      `From: ${NOTIFY_EMAIL_FROM}`,
+      `Subject: ${subject}`,
+      `Content-Type: text/plain; charset=utf-8`,
+      ``,
+      `Host:        ${event.host}`,
+      `Event:       ${event.event}`,
+      `Status:      ${event.status}`,
+      `Exit code:   ${event.exit_code}`,
+      `HTTP status: ${event.http_status}`,
+      `Timestamp:   ${event.ts}`,
+      `Guard:       ${event.guard_state || "n/a"}${event.forced ? " (forced override)" : ""}`,
+      `Caller IP:   ${event.caller_ip || "?"}`,
+      event.cf_notification ? `CF trigger:  ${event.cf_notification.name || "?"} (policy ${event.cf_notification.policy_id || "?"}, alert_type ${event.cf_notification.alert_type || "?"})` : null,
+      event.script_message ? `Message:     ${event.script_message}` : null,
+      ``,
+      !ok && event.stderr_tail ? `── stderr tail (last 1KB) ──\n${event.stderr_tail}\n` : null,
+      `(auto-sent by promote-webhook on ${event.host})`,
+    ].filter(l => l !== null && l !== undefined);
+    const body = lines.join("\n") + "\n";
+
+    let settled = false;
+    const done = () => { if (!settled) { settled = true; resolve(); } };
+    let child;
+    try {
+      child = spawn(SENDMAIL_PATH, ["-t", "-i"], { stdio: ["pipe", "ignore", "pipe"] });
+    } catch (e) {
+      console.error(`WARN: cannot spawn sendmail (${SENDMAIL_PATH}): ${e.message}`);
+      return done();
+    }
+    let stderr = "";
+    child.stderr.on("data", d => { stderr += d.toString(); });
+    const t = setTimeout(() => { try { child.kill("SIGTERM"); } catch {} }, NOTIFY_TIMEOUT_MS);
+    child.on("error", (err) => { clearTimeout(t); console.error(`WARN: email send failed: ${err.message}`); done(); });
+    child.on("close", (code) => {
+      clearTimeout(t);
+      if (code !== 0) console.error(`WARN: sendmail exit ${code}: ${stderr.slice(-500)}`);
+      else console.log(`[${new Date().toISOString()}] email sent to ${NOTIFY_EMAIL_TO}`);
+      done();
+    });
+    try { child.stdin.end(body); } catch (e) { /* child already exited */ }
+  });
+}
+
+// ── Unified notify — audit + webhook + email ─────────────────────────────────
+// Audit log is always written (sync, cheap). Webhook + email are fired in
+// parallel, fire-and-forget — the POST /promote response path never awaits
+// them. Failures are logged but don't affect the caller.
+function notify(event) {
+  writeAuditLog(event);
+  // Fire-and-forget — don't await in the request handler.
+  sendNotifyWebhook(event).catch(() => {});
+  sendEmail(event).catch(() => {});
 }
 
 // ── Auth — constant-time compare ─────────────────────────────────────────────
@@ -418,6 +572,7 @@ const server = http.createServer(async (req, res) => {
     const body = await readJsonBody(req);
     if (body._too_large) {
       sendJson(res, 413, { status: "body_too_large", message: `body must be <= ${MAX_BODY_BYTES} bytes` });
+      writeAuditLog({ ts, host: HOSTNAME, event: "promote_refused", status: "body_too_large", exit_code: null, http_status: 413, forced: false, guard_state: null, cf_notification: null, caller_ip: ip });
       return logLine(413, "body_too_large");
     }
     const force = body.force === true;
@@ -435,6 +590,7 @@ const server = http.createServer(async (req, res) => {
         message: `in cooldown window; retry after ${remaining}s`,
         cooldown_remaining_s: remaining
       });
+      writeAuditLog({ ts, host: HOSTNAME, event: "promote_refused", status: "cooldown", exit_code: null, http_status: 429, forced: force, guard_state: null, cf_notification: cfNotif, caller_ip: ip, cooldown_remaining_s: remaining });
       return logLine(429, `cooldown_${remaining}s`);
     }
 
@@ -449,6 +605,7 @@ const server = http.createServer(async (req, res) => {
         hint: "If you have independently verified the primary is down, retry with {\"force\":true} in the request body.",
         force_supported: true
       });
+      writeAuditLog({ ts, host: HOSTNAME, event: "promote_refused", status: "split_brain_refused", exit_code: null, http_status: 409, forced: false, guard_state: guard.guard, guard_reason: guard.reason, guard_checks: guard.checks, cf_notification: cfNotif, caller_ip: ip });
       return logLine(409, `split_brain_refused aliveAny=${guard.aliveAny}`);
     }
     console.log(`[${ts}] split-brain guard: ${guard.guard} — ${guard.reason}`);
@@ -463,6 +620,20 @@ const server = http.createServer(async (req, res) => {
         message: `promote script exceeded ${TIMEOUT_MS}ms`,
         stdout_tail: result.stdout.slice(-2000),
         stderr_tail: result.stderr.slice(-2000)
+      });
+      notify({
+        ts, host: HOSTNAME,
+        event: "promote_failure",
+        status: "timeout",
+        exit_code: -1,
+        http_status: 504,
+        forced: force,
+        guard_state: guard.guard,
+        cf_notification: cfNotif,
+        caller_ip: ip,
+        script_message: `script exceeded ${TIMEOUT_MS}ms`,
+        stderr_tail: result.stderr.slice(-1000),
+        timed_out: true
       });
       return logLine(504, "timeout");
     }
@@ -492,6 +663,25 @@ const server = http.createServer(async (req, res) => {
       stderr_tail: mapped.http >= 500 ? result.stderr.slice(-2000) : undefined
     };
     sendJson(res, mapped.http, respBody);
+
+    // Fire notifications AFTER the response is sent (notify is sync for the
+    // audit log but fire-and-forget for the webhook/email sends).
+    const isSuccess = result.exitCode === 0 || result.exitCode === 2;
+    notify({
+      ts, host: HOSTNAME,
+      event: isSuccess ? "promote_success" : "promote_failure",
+      status: mapped.slug,
+      exit_code: result.exitCode,
+      http_status: mapped.http,
+      forced: force,
+      guard_state: guard.guard,
+      guard_reason: guard.reason,
+      cf_notification: cfNotif,
+      caller_ip: ip,
+      script_message: result.scriptJson ? result.scriptJson.message : undefined,
+      stderr_tail: isSuccess ? undefined : result.stderr.slice(-1000),
+      timed_out: false
+    });
     return logLine(mapped.http, `exit=${result.exitCode} status=${mapped.slug} guard=${guard.guard}`);
   }
 
@@ -525,4 +715,6 @@ server.listen(PORT, BIND, () => {
     console.log(`  split-brain guard: ${PRIMARY_CHECKS.length} check(s) configured, ${CHECKS_TIMEOUT_MS}ms timeout`);
     for (const u of PRIMARY_CHECKS) console.log(`    • ${u}`);
   }
+  console.log(`  audit log:    ${AUDIT_LOG_FILE}`);
+  console.log(`  notify:       email=${NOTIFY_EMAIL_TO || "off"}  webhook=${NOTIFY_WEBHOOK_URL ? "on" : "off"}`);
 });

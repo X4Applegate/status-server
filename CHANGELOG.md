@@ -10,6 +10,18 @@ All notable changes to this project are documented here.
 
 Groundwork for the automatic failover feature tracked in [issue #13](https://github.com/X4Applegate/status-server/issues/13). No image rebuild needed for this entry — script-only and docs-only changes.
 
+### `scripts/promote-webhook.js` — notifications + audit log (new)
+Auto-failover was silent by default — you found out a promotion fired by reading `journalctl`. Step 7 closes that gap with three independent sinks, zero added dependencies, and a deliberate split between "audit everything" and "notify only what matters."
+
+- **Audit log** (JSONL file, default `/var/lib/status-server/promote-audit.jsonl`). Every authenticated `/promote` attempt is recorded: success, failure, refused-by-guard, refused-by-cooldown, body-too-large. Synchronous appends so nothing is lost on crash. Auth failures (401) are **not** audited — they'd be a log-flood DoS vector, so they stay in the ephemeral `journalctl` log only.
+- **Email** via `sendmail -t -i` shell-out (opt-in via `PROMOTE_NOTIFY_EMAIL_TO`). Works with every standard Linux MTA — postfix, sendmail, msmtp-mta, nullmailer. Fires on success + failure only (refused events are audit-only to avoid alert fatigue when CF flaps). Subject line differentiates `✓ promoted` vs `✗ FAILED`; failure emails include the last 1 KB of stderr so you can triage without SSH. Configurable From address, subject prefix, and sendmail path.
+- **Outbound JSON webhook** (opt-in via `PROMOTE_NOTIFY_WEBHOOK_URL`). One HTTPS POST per success/failure event with the same envelope as the audit log. Points at Slack/Discord/PagerDuty/n8n/anything that accepts JSON. Fire-and-forget with a 10s timeout — the HTTP response to Cloudflare is never blocked by a slow notification target.
+- **Event envelope** includes: timestamp, hostname, event type (`promote_success` / `promote_failure` / `promote_refused`), status slug, exit code, HTTP status, forced flag, guard state + reason, parsed CF notification metadata (name/policy_id/alert_type), caller IP, script message, stderr tail (failures only), timed_out flag. Same shape across all three sinks.
+- **Zero new deps** — the webhook still uses Node built-ins only (`http`, `https`, `crypto`, `child_process`, `fs`, `path`, `os`). No nodemailer, no Axios.
+- **Startup banner** prints which sinks are configured: `notify: email=<addr|off>  webhook=<on|off>`. Explicit audit log path too.
+- **Docs** — new **Part 4d** in `docs/HIGH_AVAILABILITY.md`: sink matrix, event format with example JSONL lines, useful `jq` queries, email setup with sample body, outbound webhook notes for each target platform, and a drop-in `logrotate.d` config for when the audit log eventually grows.
+- **`.env.example`** — new "Notifications & audit log" section with all tunables documented.
+
 ### `scripts/promote-webhook.js` — Cloudflare Load Balancer integration (new)
 The webhook can now be the direct target of a Cloudflare Notification Webhook fired by a Load Balancer health check — no Worker middleman required. CF LB already runs multi-POP health checks from geographically diverse vantage points and natively supports webhook notifications with a shared secret, so it's a better health-signal source than a Worker cron (15s interval vs. 60s minimum, plus traffic steering during the transition).
 

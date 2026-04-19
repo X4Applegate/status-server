@@ -393,8 +393,7 @@ Force uses the same shared secret — if you have the token, you have the power.
 
 ### Not yet shipped
 
-- **Auto-notification** — emailing the admin when an auto-promotion fires. Tracked as Step 7 in [issue #13](https://github.com/X4Applegate/status-server/issues/13).
-- **Third-observer vote** — fixing the single-box blind spot in the split-brain guard. Tracked as a follow-up in issue #13.
+- **Third-observer vote** — fixing the single-box blind spot in the split-brain guard. Tracked as a follow-up in [issue #13](https://github.com/X4Applegate/status-server/issues/13).
 
 ---
 
@@ -526,6 +525,122 @@ That 409 response confirms: auth works, the network path from CF (or your test m
 - **Secret rotation requires two steps.** Update `PROMOTE_SHARED_SECRET` on the host and `systemctl restart promote-webhook`, THEN update the notification webhook's secret in the CF dashboard. Do it in that order — if you flip CF first, legitimate calls start getting 401s before the host knows the new secret.
 - **`promote-standby.example.com` needs its own cloudflared hostname** (separate from the main app hostname) — see Part 4b → "Making the webhook reachable from Cloudflare." If the app tunnel is down, the promote tunnel must NOT also be down, or you can't self-heal.
 - **No fail-back automation.** CF will happily route traffic back to primary when it recovers, but the old primary is still configured as writable while the new primary (ex-standby) is also writable. Run the Part 5 re-bootstrap procedure manually when you're ready — don't let both boxes accept writes.
+
+---
+
+## Part 4d — Notifications and audit log
+
+Every authenticated call to `POST /promote` is recorded. Two-ish reasons this matters:
+
+1. **Auto-failover is silent by default.** A healthy promotion completes in ~30 seconds and you find out by reading `journalctl -u promote-webhook`. The notifications described here push that event to where you'll actually see it — your inbox, a Slack channel, a PagerDuty incident.
+2. **Compliance and post-mortem.** "Did the box fail over last night?" gets an answer from a file on disk, not from log-tail archaeology.
+
+### Three sinks, all independent
+
+| Sink | On by default | Triggers on |
+|---|---|---|
+| Audit log (JSONL file) | yes (directory must be writable) | all authenticated attempts — success, failure, refused-by-guard, refused-by-cooldown, body-too-large |
+| Email via `sendmail -t` | no (set `PROMOTE_NOTIFY_EMAIL_TO`) | success + failure only |
+| Outbound JSON webhook | no (set `PROMOTE_NOTIFY_WEBHOOK_URL`) | success + failure only |
+
+**Why auth failures aren't audited:** a misconfigured caller (or someone probing) can flood the log with `401`s. Audit entries live forever; normal `journalctl` output rotates. 401s go to the latter only.
+
+**Why refused events don't email:** if CF flaps health and fires 5 notifications in a row, all 5 get blocked by the split-brain guard — you don't want 5 emails about a partial network blip. The audit log still captures them for later forensics.
+
+### Audit log format (JSONL)
+
+Default path: `/var/lib/status-server/promote-audit.jsonl` — one record per line, appended synchronously so nothing is lost on crash.
+
+```json
+{"ts":"2026-04-19T03:14:15.100Z","host":"serve162","event":"promote_success","status":"promoted","exit_code":0,"http_status":200,"forced":false,"guard_state":"passed","guard_reason":"all configured vantage points confirm primary is unreachable","cf_notification":{"name":"Health Check event","policy_id":"abc-123","alert_type":"load_balancing_health_alert"},"caller_ip":"162.158.x.x","script_message":"promoted successfully","timed_out":false}
+{"ts":"2026-04-19T03:20:02.800Z","host":"serve162","event":"promote_refused","status":"cooldown","exit_code":null,"http_status":429,"forced":false,"cooldown_remaining_s":247,"cf_notification":null,"caller_ip":"162.158.x.x"}
+```
+
+Useful grep-fu:
+
+```bash
+# All successful promotions in the last month
+jq -c 'select(.event == "promote_success")' /var/lib/status-server/promote-audit.jsonl
+
+# All CF-triggered events regardless of outcome
+jq -c 'select(.cf_notification != null)' /var/lib/status-server/promote-audit.jsonl
+
+# Reasons we refused promotion this week
+jq -c 'select(.event == "promote_refused") | {ts, status, guard_reason}' /var/lib/status-server/promote-audit.jsonl
+```
+
+### Email (sendmail shell-out)
+
+Zero-dependency by design — we shell to `/usr/sbin/sendmail -t -i`, which is available on every standard Linux box with any MTA installed (postfix, sendmail, msmtp-mta, nullmailer). If your host is minimal and doesn't have one, either install `msmtp-mta` (relays through an external SMTP like SES/Mailgun) or skip email and use the outbound-webhook sink instead.
+
+In `/etc/status-server/promote-webhook.env`:
+
+```ini
+PROMOTE_NOTIFY_EMAIL_TO=admin@example.com
+# Optional overrides with sensible defaults:
+PROMOTE_NOTIFY_EMAIL_FROM=promote-webhook@serve162.example.com
+PROMOTE_NOTIFY_EMAIL_SUBJECT_PREFIX=[Applegate Monitor HA]
+PROMOTE_SENDMAIL_PATH=/usr/sbin/sendmail
+```
+
+Example email body on success:
+
+```
+Subject: [Applegate Monitor HA] ✓ promoted — serve162
+
+Host:        serve162
+Event:       promote_success
+Status:      promoted
+Exit code:   0
+HTTP status: 200
+Timestamp:   2026-04-19T03:14:15.100Z
+Guard:       passed
+Caller IP:   162.158.x.x
+CF trigger:  Health Check event (policy abc-123, alert_type load_balancing_health_alert)
+Message:     promoted successfully
+
+(auto-sent by promote-webhook on serve162)
+```
+
+Failure emails additionally include the last 1 KB of stderr from the promote script so you can triage without SSH-ing to the standby.
+
+### Outbound JSON webhook
+
+One HTTPS POST per success/failure, with the same event envelope as the audit log. Works with:
+
+- **Slack** incoming webhooks — the JSON isn't Slack-formatted, but Slack displays the raw JSON readably in a code block. Or put a one-line Worker translator in front if you want pretty formatting.
+- **Discord** webhooks — same deal.
+- **PagerDuty events API v2** — wrap with a Worker to translate our envelope into their `event_action` / `payload` shape.
+- **Any JSON-accepting endpoint** — n8n, Zapier webhook, your own tiny collector.
+
+In `/etc/status-server/promote-webhook.env`:
+
+```ini
+PROMOTE_NOTIFY_WEBHOOK_URL=https://hooks.slack.com/services/XXX/YYY/ZZZ
+# Optional — applies to both email and webhook sinks:
+PROMOTE_NOTIFY_TIMEOUT_MS=10000
+```
+
+**Fire-and-forget** with a 10s timeout. A slow or broken downstream target will NEVER delay the HTTP response to Cloudflare — the actual promotion is already done and committed to the audit log before we even attempt to notify.
+
+### Rotating the audit log
+
+It's a plain text file. `logrotate(8)` with `copytruncate` works fine:
+
+```
+# /etc/logrotate.d/promote-webhook
+/var/lib/status-server/promote-audit.jsonl {
+  weekly
+  rotate 12
+  compress
+  delaycompress
+  missingok
+  notifempty
+  copytruncate
+}
+```
+
+In practice the file grows very slowly — a few records per failover test, maybe a dozen real events per year. You can probably leave it alone for a very long time.
 
 ---
 
