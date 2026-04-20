@@ -5,3 +5,4 @@ servers.json
 .claude/
 docker-compose.yml
 backups/*.sql.gz
+grafana.db
