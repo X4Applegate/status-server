@@ -2,7 +2,7 @@
 # latest Alpine release paired with it — choosing an explicit pair means we
 # pick up security patches from both streams on each rebuild and keeps Docker
 # Scout's "outdated base image" check green.
-FROM node:24-alpine3.21
+FROM node:25-alpine3.21
 
 # Pull the latest Alpine security patches into the base layer before adding
 # anything else. `apk upgrade` picks up CVE fixes that land between base-image
