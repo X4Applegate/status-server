@@ -304,6 +304,8 @@ status.acmecorp.com {
 
 The server detects the `Host` header and serves the correct branded dashboard automatically.
 
+> **Using a commercial TLS cert (ZeroSSL, Sectigo, etc.) with Caddy UI?** You must upload the *full certificate chain*, not just the leaf. Node.js `fetch` inside containers will silently fail with `fetch failed` otherwise. See [docs/caddy-cert-renewal.md](./docs/caddy-cert-renewal.md) for why, how to spot the problem, and the exact commands to build `fullchain.pem`.
+
 ---
 
 ## License
