@@ -6,6 +6,28 @@ All notable changes to this project are documented here.
 
 ---
 
+## [3.4.3] — 2026-04-29 *(theme polish + bug fixes for v3.4.2)*
+
+### Bug fixes
+- **Light theme rendered with a dark background.** When a group set `default_theme = 'light'` but didn't also set `bg_color_light`, the dashboard fell back to the dark `#060c18` default — text was light-on-light and unreadable. Fixed in **`backend/views/index.ejs`** by hard-defaulting the active background to `#f6f8fb` whenever the active theme is light and no per-group light background is set.
+- **`card-style: glass` was invisible in light theme.** The glass effect tinted cards with `rgba(255,255,255,0.04)` — a white wash on a white background. Added an `html[data-theme="light"] body.card-style-glass` override that flips to a `rgba(0,0,0,0.03)` black wash so the cards remain visible regardless of theme.
+
+### UI polish (admin Theme & Visual Style section)
+- **Preset chips now show their actual palette.** Instead of one solid swatch + a name, each chip renders a 3-square mini-preview (accent · up · down) so admins can see what each preset's colors look like before clicking. Same chip layout as before; just more useful.
+- **Optional-color rows** are now self-contained cards with `:has()`-driven "active" highlighting — when the enable checkbox is on, the row's border tints with the accent so it's obvious which overrides are live. Replaces the inline-style soup with reusable `.theme-color-row` / `.theme-color-grid` classes that follow the same design tokens (`--r-sm`, `--surface`, `--border`) as the rest of the admin form.
+- **Light-mode hint** appears below the Light-mode Palette grid only when the group picks Default Theme = Light but hasn't enabled at least one of the light-palette overrides — explains the neutral fallback so admins aren't surprised by a generic light look.
+- **Section heading** now matches the style of the existing "Legal Pages" divider (uppercase, letter-spaced label) for consistency with the rest of the form.
+
+### Code cleanup
+- Merged `onStatusColorToggle()` and `onLightPaletteToggle()` into a single generic `onOptColorToggle(baseId)` — they did the same thing with different field-name conventions.
+- Extracted `setOptColor(baseId, val, defaultHex)` as one shared helper used by both `showGroupForm()` (load from DB) and `applyThemePreset()` (load from preset). Removes three near-identical inline closures.
+- Dropped the redundant `swatch` field from `THEME_PRESETS` — the chip swatches are now derived from each preset's actual color values.
+
+### Migration / safety
+No schema changes. `index.ejs` and `admin.ejs` template-only — re-rendered on next request, no DB touch. All 30 (card × corner × theme) combinations render-tested.
+
+---
+
 ## [3.4.2] — 2026-04-29 *(per-group theme features)*
 
 ### New

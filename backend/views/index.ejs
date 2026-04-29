@@ -512,6 +512,16 @@ body.card-style-glass .welcome-box {
   backdrop-filter:blur(14px) saturate(140%);
   -webkit-backdrop-filter:blur(14px) saturate(140%);
 }
+/* Glass on light backgrounds: invert the white-tint-on-dark to a black-tint-on-light
+   so the cards remain visible (white-on-white is invisible). The data-theme attribute
+   is set server-side from defaultTheme; bg luminance further protects unusual setups. */
+html[data-theme="light"] body.card-style-glass .srv-row,
+html[data-theme="light"] body.card-style-glass .uptime-card,
+html[data-theme="light"] body.card-style-glass .srv-subgroup-head,
+html[data-theme="light"] body.card-style-glass .welcome-box {
+  background:rgba(0,0,0,0.03);
+  border:1px solid rgba(0,0,0,0.08);
+}
 
 body.card-style-glow .srv-row,
 body.card-style-glow .uptime-card,
@@ -560,12 +570,15 @@ function _shade(hex, amount) {
   const toHex = (v) => v.toString(16).padStart(2, "0");
   return `#${toHex(adj(c.r))}${toHex(adj(c.g))}${toHex(adj(c.b))}`;
 }
-// Per-group active palette: light vs dark. The light-mode columns are the
-// values used when default_theme === 'light'; both fall back to the dark pair
-// (which is itself optional — accentColor always has a fallback default).
+// Per-group active palette: light vs dark. accentColorLight / bgColorLight are
+// the dedicated light-mode values; both fall back to the dark pair when null.
+// Critical light-mode default: if the group picks Light but hasn't set a light
+// background, force a sensible #f6f8fb so the dashboard isn't dark-bg + dark-text.
 const _isLightTheme = (typeof defaultTheme !== 'undefined' && defaultTheme === 'light');
 const _activeAccent = _isLightTheme && (typeof accentColorLight !== 'undefined' && accentColorLight) ? accentColorLight : accentColor;
-const _activeBg     = _isLightTheme && (typeof bgColorLight     !== 'undefined' && bgColorLight)     ? bgColorLight     : bgColor;
+const _activeBg = _isLightTheme
+  ? ((typeof bgColorLight !== 'undefined' && bgColorLight) ? bgColorLight : '#f6f8fb')
+  : bgColor;
 const _upColor       = (typeof upColor       !== 'undefined' && upColor)       ? upColor       : null;
 const _downColor     = (typeof downColor     !== 'undefined' && downColor)     ? downColor     : null;
 const _degradedColor = (typeof degradedColor !== 'undefined' && degradedColor) ? degradedColor : null;
