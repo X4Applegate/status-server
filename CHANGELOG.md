@@ -6,6 +6,20 @@ All notable changes to this project are documented here.
 
 ---
 
+## [3.4.1] — 2026-04-29 *(Omada token re-auth on controller reboot)*
+
+### Bug fix
+- **Omada checks stalled for up to ~2 hours after a controller reboot.** The status server caches the Omada Open API access token with the `expiresIn` value the controller hands back (default 7200s), but a controller reboot invalidates server-side tokens immediately. During the window between reboot and natural cache expiry, every check returned `"The access token has expired. Please re-initiate the refreshToken process to obtain the access token"` from Omada and surfaced that message in the dashboard "detail" field.
+- Fixed in **`backend/server.js`** — added `isOmadaTokenRejected()` (matches HTTP 401/403, errorCodes -44104/-44109/-44112/-44113, and a token/expired/refreshToken message regex) and refactored the standard + MSP API helpers through a shared `omadaAuthedGet()` that drops the cached token and retries once with a freshly issued one when the controller rejects the previous one. Both standard and MSP modes benefit.
+
+### Why an image rebuild
+Required for anyone using the Omada controller integration — without the fix, every Omada controller reboot causes a multi-hour outage in the Omada portion of the dashboard. Non-Omada checks are unaffected.
+
+### Also in this release
+- New **`.github/workflows/preview.yml`** — manual `workflow_dispatch` that builds `linux/amd64` only and pushes `applegater/status-server:preview` (plus a `preview-<short-sha>` pin) for Portainer-driven preview deploys ahead of a release.
+
+---
+
 ## [3.4.0] — HA / automatic failover feature removed
 
 The high-availability auto-failover work tracked in [issue #13](https://github.com/X4Applegate/status-server/issues/13) has been **fully removed** from the project. The code worked end-to-end — an end-to-end CF-driven failover drill did successfully promote the standby — but the operational complexity (bidirectional MariaDB replication, the promote webhook service, split-brain guard, Cloudflare Load Balancer + Notification policy, the post-failover resync procedure) is genuinely out of proportion to the uptime gains for a self-hosted status monitor.
