@@ -2,14 +2,18 @@
 <html lang="en" data-theme="<%= (typeof defaultTheme !== 'undefined' && defaultTheme === 'light') ? 'light' : 'dark' %>">
 <head>
 <%- include('partials/head', { title: pageTitle }) %>
-<% if (groupSlug) { %>
+<% if (groupSlug) {
+  // theme-color drives the OS chrome tint (Android nav bar, iOS Safari toolbar).
+  // Match the active palette so a Light-theme group doesn't get a dark accent.
+  const _pwaAccent = (defaultTheme === 'light' && accentColorLight) ? accentColorLight : accentColor;
+%>
 <link rel="manifest" href="/dashboard/<%= groupSlug %>/manifest.json">
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-title" content="<%= groupName %>">
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
 <link rel="apple-touch-icon" href="/api/icon/<%= groupSlug %>">
-<meta name="theme-color" content="<%= accentColor || '#2a7fff' %>">
+<meta name="theme-color" content="<%= _pwaAccent || '#2a7fff' %>">
 <% } %>
 <link href="https://unpkg.com/maplibre-gl@4/dist/maplibre-gl.css" rel="stylesheet">
 <style>

@@ -6,6 +6,22 @@ All notable changes to this project are documented here.
 
 ---
 
+## [3.4.4] — 2026-04-29 *(PWA splash + theme-color match the active palette)*
+
+### Bug fix
+The Web App Manifest (`/dashboard/<slug>/manifest.json`) and the `<meta name="theme-color">` tag both always emitted the dark `bg_color` / `accent_color` values, even when the group's `default_theme` was `light`. Practical effect: a Light-theme installed PWA flashed a dark splash screen on launch, and Android's nav bar tinted with the dark accent until the page finished loading.
+
+Fixed in **`backend/server.js`** (manifest endpoint) and **`backend/views/index.ejs`** (theme-color meta) by mirroring the active-palette logic already used for the dashboard CSS:
+- `default_theme === 'light'` + `bg_color_light` set → splash uses `bg_color_light`.
+- `default_theme === 'light'` + `bg_color_light` blank → splash uses the same neutral `#f6f8fb` fallback the dashboard uses.
+- `default_theme === 'light'` + `accent_color_light` set → OS chrome tints with the light accent.
+- Dark groups behave exactly as before (uses `bg_color` / `accent_color`).
+
+### Migration
+Pure server-side rendering change. Manifest is cached for 5 minutes (`Cache-Control: public, max-age=300`) — installed PWAs will pick up the new manifest on their next launch / refresh, no reinstall needed.
+
+---
+
 ## [3.4.3] — 2026-04-29 *(theme polish + bug fixes for v3.4.2)*
 
 ### Bug fixes

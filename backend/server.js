@@ -5433,6 +5433,15 @@ app.get("/dashboard/:slug/manifest.json", pageLimiter, async (req, res) => {
     if (!rows.length) return res.status(404).json({ error: "Not found" });
     const g = rows[0];
     const shortName = g.name.length > 14 ? g.name.substring(0, 14).trimEnd() + "…" : g.name;
+    // Pick the active palette the same way index.ejs does, so the PWA splash
+    // (background_color) and OS chrome tint (theme_color) match the rendered
+    // dashboard rather than always showing the dark defaults. Without this a
+    // Light-theme group would briefly flash a dark splash on launch.
+    const isLight       = g.default_theme === "light";
+    const activeAccent  = (isLight && g.accent_color_light) ? g.accent_color_light : (g.accent_color || "#2a7fff");
+    const activeBg      = isLight
+      ? (g.bg_color_light || "#f6f8fb")
+      : (g.bg_color || "#060c18");
     res.setHeader("Content-Type", "application/manifest+json");
     res.setHeader("Cache-Control", "public, max-age=300");
     res.json({
@@ -5443,8 +5452,8 @@ app.get("/dashboard/:slug/manifest.json", pageLimiter, async (req, res) => {
       scope:            `/dashboard/${g.slug}`,
       display:          "standalone",
       orientation:      "portrait-primary",
-      theme_color:      g.accent_color || "#2a7fff",
-      background_color: g.bg_color     || "#060c18",
+      theme_color:      activeAccent,
+      background_color: activeBg,
       icons: [
         { src: `/api/icon/${g.slug}`, sizes: "any", type: "image/svg+xml", purpose: "any"      },
         { src: `/api/icon/${g.slug}`, sizes: "any", type: "image/svg+xml", purpose: "maskable" }
