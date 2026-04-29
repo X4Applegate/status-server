@@ -1561,6 +1561,43 @@ async function omadaGetToken(controller) {
   return accessToken;
 }
 
+// True if an Omada response indicates the access token is no longer accepted
+// (e.g. controller was rebooted and invalidated server-side tokens before our
+// cache expiry says they should be gone). Match by both errorCode and message
+// text since codes vary across controller versions.
+function isOmadaTokenRejected(httpStatus, data) {
+  if (httpStatus === 401 || httpStatus === 403) return true;
+  if (!data) return false;
+  const code = Number(data.errorCode);
+  if (code === -44104 || code === -44109 || code === -44112 || code === -44113) return true;
+  const msg = String(data.msg || "").toLowerCase();
+  return msg.includes("access token") && (msg.includes("expired") || msg.includes("invalid") || msg.includes("refreshtoken"));
+}
+
+// Perform an authenticated GET against the Omada Open API. If the controller
+// rejects the cached token (e.g. after a controller reboot), drop the cache
+// and retry once with a freshly issued token.
+async function omadaAuthedGet(controller, fullUrl, label) {
+  for (let attempt = 0; attempt < 2; attempt++) {
+    const token = await omadaGetToken(controller);
+    const r = await fetch(fullUrl, {
+      headers:    { Authorization: `AccessToken=${token}` },
+      dispatcher: omadaDispatcher(controller.verify_tls),
+      signal:     AbortSignal.timeout(8000)
+    });
+    let data = null;
+    try { data = await r.json(); } catch { /* non-JSON body */ }
+    if (r.ok && data && data.errorCode === 0) return data.result;
+    if (attempt === 0 && isOmadaTokenRejected(r.status, data)) {
+      delete omadaTokens[controller.id];
+      addLog({ level:"info", server:"omada", message:`Controller ${controller.id}: token rejected (${data?.msg || "HTTP " + r.status}); re-authenticating` });
+      continue;
+    }
+    if (!r.ok) throw new Error(`${label} HTTP ${r.status}`);
+    throw new Error((data && data.msg) || `${label} error`);
+  }
+}
+
 // Authenticated GET to /openapi/v1/{omadacId}<path>  (standard mode)
 async function omadaApiGet(controller, path) {
   const safeBase  = await sanitizeBaseUrl(controller.base_url);
@@ -1568,17 +1605,8 @@ async function omadaApiGet(controller, path) {
   // Sanitize each path segment to prevent traversal; preserve query string as-is
   const [pathOnly, queryString] = path.split("?");
   const safePath  = pathOnly.split("/").map(seg => seg.replace(/[^A-Za-z0-9\-_.:@!$&'()*+,;=~]/g, "")).join("/");
-  const token = await omadaGetToken(controller);
   const url   = `${safeBase}/openapi/v1/${safeId}${safePath}${queryString ? "?" + queryString : ""}`;
-  const r = await fetch(url, {
-    headers:    { Authorization: `AccessToken=${token}` },
-    dispatcher: omadaDispatcher(controller.verify_tls),
-    signal:     AbortSignal.timeout(8000)
-  });
-  if (!r.ok) throw new Error(`${path} HTTP ${r.status}`);
-  const data = await r.json();
-  if (data.errorCode !== 0) throw new Error(data.msg || `${path} error`);
-  return data.result;
+  return omadaAuthedGet(controller, url, path);
 }
 
 // Authenticated GET to /openapi/v1/msp/{mspId}<path>  (MSP mode — different URL shape)
@@ -1590,17 +1618,8 @@ async function omadaMspApiGet(controller, path) {
   // Sanitize each path segment to prevent traversal; preserve query string as-is
   const [pathOnly, queryString] = path.split("?");
   const safePath = pathOnly.split("/").map(seg => seg.replace(/[^A-Za-z0-9\-_.:@!$&'()*+,;=~]/g, "")).join("/");
-  const token = await omadaGetToken(controller);
   const url   = `${safeBase}/openapi/v1/msp/${mspId}${safePath}${queryString ? "?" + queryString : ""}`;
-  const r = await fetch(url, {
-    headers:    { Authorization: `AccessToken=${token}` },
-    dispatcher: omadaDispatcher(controller.verify_tls),
-    signal:     AbortSignal.timeout(8000)
-  });
-  if (!r.ok) throw new Error(`MSP ${path} HTTP ${r.status}`);
-  const data = await r.json();
-  if (data.errorCode !== 0) throw new Error(data.msg || `MSP ${path} error`);
-  return data.result;
+  return omadaAuthedGet(controller, url, `MSP ${path}`);
 }
 
 // Detect MSP vs standard mode by probing the actual MSP path documented for v6:
