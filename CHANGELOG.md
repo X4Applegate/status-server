@@ -6,6 +6,34 @@ All notable changes to this project are documented here.
 
 ---
 
+## [3.4.7] — 2026-04-29 *(Applegate brand applied app-wide)*
+
+### Followup to 3.4.6
+v3.4.6 reskinned the admin chrome but the dashboard side, the auxiliary public pages (login / privacy / terms / 404 / incidents / group-legal), and the various server-side hardcoded fallbacks all still emitted navy-blue-on-dark-blue. Selecting the "Applegate" preset on a group still showed a lot of leftover navy because the per-group preset only overrode a handful of CSS variables, not the chrome.
+
+### Now consistent
+Every template's `:root` palette and every hardcoded `rgba()` / hex value across the eight view files now match the Applegate brand:
+- **Background**: `#0a0a0a` (was `#060c18` / `#0b0e14`)
+- **Surfaces**: `#141414` / `#1a1a1a` / `#202020`
+- **Primary accent (`--blue` / `--accent`)**: `#ff8c2a` (was `#2a7fff` or `#6366f1` indigo)
+- **Status colors**: `#39d98a` / `#ef4444` / `#f59e0b` (modern set, matches the website)
+- **Text**: warm neutral grays `#a0a0a0` / `#6f6f6f` / `#d4d4d4` / `#f5f5f5` (was cool blue-grays)
+- **Borders**: neutral `rgba(255,255,255,0.06–0.10)` (was blue-tinted)
+- **Primary buttons**: black-on-orange (was white-on-blue / white-on-indigo) — matches the website's `.btn-primary` exactly
+
+### Files touched
+- **`backend/server.js`** — `accent_color || "#2a7fff"` fallbacks (5 sites including `DEFAULT_BRANDING`, `groupBranding()` helper, INSERT/UPDATE defaults, and the manifest endpoint) → `"#ff8c2a"`.
+- **`backend/views/index.ejs`** — `:root` palette + sweep of `rgba(42,127,255,…)` / `rgba(30,100,200,…)` / `rgba(16,232,138,…)` / `rgba(255,61,90,…)` and hex values `#10e88a` / `#ff3d5a` / `#0d1829` / `#1e2d45` / `#e8eaf0`. SSE map markers' `colorMap` updated to match too.
+- **`backend/views/admin.ejs`** — All form picker default values (`gColor`, `gBgColor`, `gUpColor`, `gDownColor`, `gAccentColorLight`) and `showGroupForm` / `applyThemePreset` fallbacks. The "Default" theme preset chip now applies the Applegate baseline. The admin's own SSE map color-map updated to use the website palette.
+- **`backend/views/login.ejs`** / **`privacy.ejs`** / **`terms.ejs`** / **`group-legal.ejs`** / **`incidents.ejs`** / **`404.ejs`** — `:root` palettes converted from indigo (`#6366f1`) / navy (`#2a7fff`) to brand orange. Login button is now black-on-orange.
+
+### Group-side behavior
+- **Existing groups** with stored values keep them — only groups with `accent_color = NULL` (which is unusual since INSERTs always default-fill) would shift. No DB migration.
+- **New groups** default to the brand orange (`#ff8c2a`) on near-black (`#0a0a0a`) instead of blue.
+- **The "Default" preset chip** now applies the brand baseline so clicking it = "reset this dashboard to the Applegate look." If you want the original navy-blue look back on a specific dashboard, just paste those hex values into the per-group color pickers manually.
+
+---
+
 ## [3.4.6] — 2026-04-29 *(admin panel reskinned to Applegate brand)*
 
 ### New

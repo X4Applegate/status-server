@@ -944,10 +944,10 @@ body{font-family:var(--sans);background:var(--bg);color:var(--text);min-height:1
           </div>
 
           <div class="fg"><label class="flabel">Logo Text <span style="font-weight:400;text-transform:none;letter-spacing:0;color:var(--text-2)">(fallback if no image — 1–3 chars or emoji)</span></label><input class="finput" id="gLogo" maxlength="8" placeholder="A"></div>
-          <div class="fg"><label class="flabel">Accent Color</label><input class="finput" id="gColor" type="color" value="#2a7fff" style="height:38px;padding:4px;cursor:pointer"></div>
+          <div class="fg"><label class="flabel">Accent Color</label><input class="finput" id="gColor" type="color" value="#ff8c2a" style="height:38px;padding:4px;cursor:pointer"></div>
           <div class="fg full"><label class="flabel">Background Color <span style="font-weight:400;text-transform:none;letter-spacing:0;color:var(--text-2)">(optional — overrides theme; text color auto-picked for contrast)</span></label>
             <div style="display:flex;align-items:center;gap:10px">
-              <input class="finput" id="gBgColor" type="color" value="#060c18" style="height:38px;padding:4px;cursor:pointer;width:80px;flex-shrink:0">
+              <input class="finput" id="gBgColor" type="color" value="#0a0a0a" style="height:38px;padding:4px;cursor:pointer;width:80px;flex-shrink:0">
               <label style="display:flex;align-items:center;gap:6px;font-size:12px;color:var(--text-hi);cursor:pointer"><input type="checkbox" id="gBgColorEnabled" onchange="onBgColorToggle()">Use custom background</label>
               <span style="font-size:11px;color:var(--text-2)" id="gBgColorHint">Uncheck to use the default theme background</span>
             </div>
@@ -1003,17 +1003,17 @@ body{font-family:var(--sans);background:var(--bg);color:var(--text);min-height:1
                 <label class="theme-color-row">
                   <input type="checkbox" id="gUpColorEnabled" onchange="onOptColorToggle('gUpColor')">
                   <span class="theme-color-name">UP</span>
-                  <input class="finput theme-color-picker" id="gUpColor" type="color" value="#10e88a">
+                  <input class="finput theme-color-picker" id="gUpColor" type="color" value="#39d98a">
                 </label>
                 <label class="theme-color-row">
                   <input type="checkbox" id="gDownColorEnabled" onchange="onOptColorToggle('gDownColor')">
                   <span class="theme-color-name">DOWN</span>
-                  <input class="finput theme-color-picker" id="gDownColor" type="color" value="#ff3d5a">
+                  <input class="finput theme-color-picker" id="gDownColor" type="color" value="#ef4444">
                 </label>
                 <label class="theme-color-row">
                   <input type="checkbox" id="gDegradedColorEnabled" onchange="onOptColorToggle('gDegradedColor')">
                   <span class="theme-color-name">DEGRADED</span>
-                  <input class="finput theme-color-picker" id="gDegradedColor" type="color" value="#ff8c2a">
+                  <input class="finput theme-color-picker" id="gDegradedColor" type="color" value="#ffa55c">
                 </label>
               </div>
             </div>
@@ -1025,7 +1025,7 @@ body{font-family:var(--sans);background:var(--bg);color:var(--text);min-height:1
                 <label class="theme-color-row">
                   <input type="checkbox" id="gAccentColorLightEnabled" onchange="onOptColorToggle('gAccentColorLight')">
                   <span class="theme-color-name">Accent</span>
-                  <input class="finput theme-color-picker" id="gAccentColorLight" type="color" value="#2a7fff">
+                  <input class="finput theme-color-picker" id="gAccentColorLight" type="color" value="#ff8c2a">
                 </label>
                 <label class="theme-color-row">
                   <input type="checkbox" id="gBgColorLightEnabled" onchange="onOptColorToggle('gBgColorLight')">
@@ -3495,7 +3495,7 @@ async function showGroupForm(g){
   document.getElementById("gSlug").value  = g?.slug  || "";
   document.getElementById("gDesc").value  = g?.description || "";
   document.getElementById("gLogo").value  = g?.logo_text   || "";
-  document.getElementById("gColor").value = g?.accent_color || "#2a7fff";
+  document.getElementById("gColor").value = g?.accent_color || "#ff8c2a";
   const lsz = g?.logo_size || 42;
   document.getElementById("gLogoSize").value = lsz;
   document.getElementById("gLogoSizeVal").textContent = lsz + "px";
@@ -3505,17 +3505,17 @@ async function showGroupForm(g){
   // Background color: if the group has one set, enable the toggle and pre-fill; else show default
   const hasBg = !!g?.bg_color;
   document.getElementById("gBgColorEnabled").checked = hasBg;
-  document.getElementById("gBgColor").value = g?.bg_color || "#060c18";
+  document.getElementById("gBgColor").value = g?.bg_color || "#0a0a0a";
   document.getElementById("gBgColor").disabled = !hasBg;
   // Theme + visual style — selects + the 5 optional color overrides (status x3, light palette x2).
   // Same enable-checkbox-plus-picker pattern as the existing background color row above.
   document.getElementById("gDefaultTheme").value = g?.default_theme || "dark";
   document.getElementById("gCardStyle").value    = g?.card_style    || "default";
   document.getElementById("gCornerStyle").value  = g?.corner_style  || "rounded";
-  setOptColor("gUpColor",          g?.up_color,           "#10e88a");
-  setOptColor("gDownColor",        g?.down_color,         "#ff3d5a");
-  setOptColor("gDegradedColor",    g?.degraded_color,     "#ff8c2a");
-  setOptColor("gAccentColorLight", g?.accent_color_light, "#2a7fff");
+  setOptColor("gUpColor",          g?.up_color,           "#39d98a");
+  setOptColor("gDownColor",        g?.down_color,         "#ef4444");
+  setOptColor("gDegradedColor",    g?.degraded_color,     "#ffa55c");
+  setOptColor("gAccentColorLight", g?.accent_color_light, "#ff8c2a");
   setOptColor("gBgColorLight",     g?.bg_color_light,     "#f6f8fb");
   renderThemePresets();
   refreshLightHint();
@@ -3631,7 +3631,7 @@ function refreshLightHint(){
 // (don't override)" — picked on save by leaving the corresponding checkbox unchecked.
 const THEME_PRESETS = [
   { name:"Default",  values:{
-      accent_color:"#2a7fff", bg_color:null, default_theme:"dark",
+      accent_color:"#ff8c2a", bg_color:null, default_theme:"dark",
       accent_color_light:null, bg_color_light:null,
       up_color:null, down_color:null, degraded_color:null,
       card_style:"default", corner_style:"rounded" } },
@@ -3674,9 +3674,9 @@ function renderThemePresets(){
   host.innerHTML = "";
   for (const p of THEME_PRESETS) {
     const v = p.values;
-    const accent = v.accent_color   || "#2a7fff";
-    const up     = v.up_color       || "#10e88a";
-    const down   = v.down_color     || "#ff3d5a";
+    const accent = v.accent_color   || "#ff8c2a";
+    const up     = v.up_color       || "#39d98a";
+    const down   = v.down_color     || "#ef4444";
     const btn = document.createElement("button");
     btn.type = "button";
     btn.className = "theme-preset-chip";
@@ -3697,16 +3697,16 @@ function renderThemePresets(){
 // Drop preset values into the form fields. Null/undefined values clear the override
 // (uncheck the enable + revert the picker to its column default).
 function applyThemePreset(v){
-  document.getElementById("gColor").value = v.accent_color || "#2a7fff";
-  setOptColor("gBgColor", v.bg_color, "#060c18");
+  document.getElementById("gColor").value = v.accent_color || "#ff8c2a";
+  setOptColor("gBgColor", v.bg_color, "#0a0a0a");
   onBgColorToggle();
   document.getElementById("gDefaultTheme").value = v.default_theme || "dark";
   document.getElementById("gCardStyle").value    = v.card_style    || "default";
   document.getElementById("gCornerStyle").value  = v.corner_style  || "rounded";
-  setOptColor("gUpColor",            v.up_color,           "#10e88a");
-  setOptColor("gDownColor",          v.down_color,         "#ff3d5a");
-  setOptColor("gDegradedColor",      v.degraded_color,     "#ff8c2a");
-  setOptColor("gAccentColorLight",   v.accent_color_light, "#2a7fff");
+  setOptColor("gUpColor",            v.up_color,           "#39d98a");
+  setOptColor("gDownColor",          v.down_color,         "#ef4444");
+  setOptColor("gDegradedColor",      v.degraded_color,     "#ffa55c");
+  setOptColor("gAccentColorLight",   v.accent_color_light, "#ff8c2a");
   setOptColor("gBgColorLight",       v.bg_color_light,     "#f6f8fb");
   refreshLightHint();
 }
@@ -5161,7 +5161,7 @@ function _renderAdminMapMarkers() {
   if (!_adminMap || !_adminMap.isStyleLoaded()) return;
   _adminMarkers.forEach(m => m.remove());
   _adminMarkers = [];
-  const colorMap = { up:"#10e88a", down:"#ff3d5a", degraded:"#ff8c2a", pending:"#5e8aad" };
+  const colorMap = { up:"#39d98a", down:"#ef4444", degraded:"#f59e0b", pending:"#6f6f6f" };
   const colorPri = { up:0, degraded:1, pending:2, down:3 };
   const mapped   = liveServers.filter(s => s.lat != null && s.lng != null);
   const unmapped = liveServers.filter(s => s.lat == null || s.lng == null);

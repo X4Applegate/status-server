@@ -18,40 +18,45 @@
 <link href="https://unpkg.com/maplibre-gl@4/dist/maplibre-gl.css" rel="stylesheet">
 <style>
 *,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+/* Built-in dashboard palette — Applegate brand baseline (richardapplegate.io).
+   Per-group themes (accent_color / bg_color / status colors / etc.) override
+   these via the inline <style> blocks rendered further down. The variable
+   names keep their original semantic meanings (--blue is still the primary
+   accent across hundreds of selectors); the hex values now hold orange. */
 :root{
-  --bg:       #060c18;
-  --bg2:      #0a1220;
-  --sidebar:  #080f1c;
-  --surface:  #0d1829;
-  --surface2: #111f35;
-  --border:   rgba(30,100,200,0.15);
-  --border-hi:rgba(30,100,200,0.28);
-  --text:     #94b8d8;
-  --text-2:   #5e8aad;
-  --text-hi:  #d4e8f8;
-  --text-white:#e8f4ff;
-  --blue:     #2a7fff;
-  --blue-soft:rgba(42,127,255,0.12);
-  --blue-glow:rgba(42,127,255,0.25);
-  --orange:   #ff8c2a;
-  --orange-soft:rgba(255,140,42,0.12);
-  --orange-glow:rgba(255,140,42,0.3);
-  --green:    #10e88a;
-  --green-soft:rgba(16,232,138,0.10);
-  --red:      #ff3d5a;
-  --red-soft: rgba(255,61,90,0.10);
+  --bg:       #0a0a0a;
+  --bg2:      #141414;
+  --sidebar:  #0d0d0d;
+  --surface:  #141414;
+  --surface2: #1a1a1a;
+  --border:   rgba(255,255,255,0.06);
+  --border-hi:rgba(255,255,255,0.10);
+  --text:     #a0a0a0;
+  --text-2:   #6f6f6f;
+  --text-hi:  #d4d4d4;
+  --text-white:#f5f5f5;
+  --blue:     #ff8c2a;
+  --blue-soft:rgba(255,140,42,0.12);
+  --blue-glow:rgba(255,140,42,0.25);
+  --orange:   #ffa55c;
+  --orange-soft:rgba(255,165,92,0.12);
+  --orange-glow:rgba(255,165,92,0.30);
+  --green:    #39d98a;
+  --green-soft:rgba(57,217,138,0.10);
+  --red:      #ef4444;
+  --red-soft: rgba(239,68,68,0.10);
   --mono:     'JetBrains Mono',monospace;
   --sans:     'Inter',sans-serif;
 }
 body{font-family:var(--sans);background:var(--bg);color:var(--text);min-height:100vh;display:flex;flex-direction:column;font-size:14px;-webkit-font-smoothing:antialiased;overflow-x:hidden}
 
 /* bg glow */
-body::before{content:'';position:fixed;inset:0;pointer-events:none;background:radial-gradient(ellipse 60% 50% at 20% 50%,rgba(42,127,255,0.05) 0%,transparent 70%),radial-gradient(ellipse 40% 40% at 80% 20%,rgba(255,140,42,0.04) 0%,transparent 60%);z-index:0}
+body::before{content:'';position:fixed;inset:0;pointer-events:none;background:radial-gradient(ellipse 60% 50% at 20% 50%,rgba(255,140,42,0.05) 0%,transparent 70%),radial-gradient(ellipse 40% 40% at 80% 20%,rgba(255,140,42,0.04) 0%,transparent 60%);z-index:0}
 
 /* -- TOP BAR -- */
 .topbar{position:relative;z-index:10;display:flex;align-items:center;justify-content:space-between;padding:10px 28px;min-height:64px;flex-wrap:wrap;gap:12px;border-bottom:1px solid var(--border);background:linear-gradient(180deg,var(--sidebar) 0%,var(--bg2) 100%);backdrop-filter:blur(12px)}
 .topbar-brand{display:flex;align-items:center;gap:12px}
-.topbar-icon{width:42px;height:42px;border-radius:10px;background:var(--blue-soft);border:1px solid rgba(42,127,255,0.25);display:flex;align-items:center;justify-content:center;font-size:14px;overflow:hidden}
+.topbar-icon{width:42px;height:42px;border-radius:10px;background:var(--blue-soft);border:1px solid rgba(255,140,42,0.25);display:flex;align-items:center;justify-content:center;font-size:14px;overflow:hidden}
 .topbar-logo-img{width:38px;height:38px;border-radius:8px;object-fit:contain;display:block}
 .topbar-icon-text{font-weight:700;font-size:18px;color:var(--blue);font-family:var(--sans);letter-spacing:-.02em}
 .topbar-name{font-size:15px;font-weight:700;color:var(--text-white);letter-spacing:-.02em}
@@ -66,7 +71,7 @@ body::before{content:'';position:fixed;inset:0;pointer-events:none;background:ra
 }
 .topbar-status{display:flex;align-items:center;gap:6px}
 .status-dot{width:7px;height:7px;border-radius:50%;background:var(--green);animation:pulse 2s ease-in-out infinite}
-@keyframes pulse{0%,100%{box-shadow:0 0 0 0 rgba(16,232,138,0.4)}50%{box-shadow:0 0 0 5px transparent}}
+@keyframes pulse{0%,100%{box-shadow:0 0 0 0 rgba(57,217,138,0.4)}50%{box-shadow:0 0 0 5px transparent}}
 .topbar-clock{font-family:var(--mono);font-size:12px;color:var(--text-2)}
 .topbar-admin{padding:5px 12px;border:1px solid var(--border-hi);border-radius:6px;color:var(--text-hi);font-size:12px;font-weight:500;text-decoration:none;transition:all .15s}
 .topbar-admin:hover{background:var(--blue-soft);border-color:var(--blue);color:var(--blue)}
@@ -161,8 +166,8 @@ body::before{content:'';position:fixed;inset:0;pointer-events:none;background:ra
 .srv-create-btn:hover{background:var(--blue-soft)}
 .srv-create-btn svg{width:12px;height:12px;flex-shrink:0}
 .srv-dot{width:10px;height:10px;border-radius:50%;flex-shrink:0;transition:none}
-.srv-dot.up      {background:var(--green);box-shadow:0 0 6px rgba(16,232,138,0.5),0 0 0 0 rgba(16,232,138,0.5);animation:srvDotPulse 2.4s ease-in-out infinite}
-@keyframes srvDotPulse{0%,100%{box-shadow:0 0 6px rgba(16,232,138,0.5),0 0 0 0 rgba(16,232,138,0)}50%{box-shadow:0 0 6px rgba(16,232,138,0.5),0 0 0 4px rgba(16,232,138,0)}}
+.srv-dot.up      {background:var(--green);box-shadow:0 0 6px rgba(57,217,138,0.5),0 0 0 0 rgba(57,217,138,0.5);animation:srvDotPulse 2.4s ease-in-out infinite}
+@keyframes srvDotPulse{0%,100%{box-shadow:0 0 6px rgba(57,217,138,0.5),0 0 0 0 rgba(57,217,138,0)}50%{box-shadow:0 0 6px rgba(57,217,138,0.5),0 0 0 4px rgba(57,217,138,0)}}
 .srv-dot.down    {background:var(--red);animation:blink 1.2s ease-in-out infinite}
 .srv-dot.degraded{background:var(--orange)}
 .srv-dot.pending {background:var(--text-2)}
@@ -202,16 +207,16 @@ body::before{content:'';position:fixed;inset:0;pointer-events:none;background:ra
 .admin-banner-close{flex-shrink:0;margin-left:8px;width:22px;height:22px;border:none;background:transparent;color:currentColor;opacity:.55;font-size:18px;line-height:1;cursor:pointer;border-radius:4px;transition:opacity .15s,background .15s}
 .admin-banner-close:hover{opacity:1;background:rgba(255,255,255,.08)}
 .health-banner{display:flex;align-items:center;gap:10px;padding:10px 22px;font-size:13px;font-weight:600;border-bottom:1px solid var(--border);transition:background .3s,color .3s}
-.health-banner.all-up{background:rgba(16,232,138,.07);color:#10e88a}
-.health-banner.has-down{background:rgba(255,61,90,.07);color:var(--red)}
+.health-banner.all-up{background:rgba(57,217,138,.07);color:#39d98a}
+.health-banner.has-down{background:rgba(239,68,68,.07);color:var(--red)}
 .health-banner.has-degraded{background:rgba(255,140,42,.07);color:var(--orange)}
 .health-banner-dot{width:8px;height:8px;border-radius:50%;flex-shrink:0;animation:blink 2s ease-in-out infinite}
-.health-banner.all-up .health-banner-dot{background:#10e88a}
+.health-banner.all-up .health-banner-dot{background:#39d98a}
 .health-banner.has-down .health-banner-dot{background:var(--red)}
 .health-banner.has-degraded .health-banner-dot{background:var(--orange)}
 /* Response time pill */
 .srv-ms{font-size:10px;font-family:var(--mono);padding:2px 6px;border-radius:3px;font-weight:600;flex-shrink:0;letter-spacing:.01em}
-.srv-ms.fast{color:#10e88a;background:rgba(16,232,138,.1)}
+.srv-ms.fast{color:#39d98a;background:rgba(57,217,138,.1)}
 .srv-ms.ok{color:var(--orange);background:var(--orange-soft)}
 .srv-ms.slow{color:var(--red);background:var(--red-soft)}
 /* Map view */
@@ -253,10 +258,10 @@ body::before{content:'';position:fixed;inset:0;pointer-events:none;background:ra
 .detail-map-wrap .maplibregl-map{width:100%;height:180px}
 
 /* -- MAP POPUP DARK THEME -- */
-.maplibregl-popup-content{background:#0d1829!important;border:1px solid #1e2d45!important;border-radius:10px!important;padding:10px 14px!important;box-shadow:0 8px 28px rgba(0,0,0,.6)!important;color:#e8eaf0!important}
-.maplibregl-popup-tip{border-top-color:#0d1829!important;border-bottom-color:#0d1829!important}
+.maplibregl-popup-content{background:#141414!important;border:1px solid #2a2a2a!important;border-radius:10px!important;padding:10px 14px!important;box-shadow:0 8px 28px rgba(0,0,0,.6)!important;color:#d4d4d4!important}
+.maplibregl-popup-tip{border-top-color:#141414!important;border-bottom-color:#141414!important}
 .maplibregl-popup-close-button{color:#5e7a99!important;font-size:16px!important;line-height:1!important;top:6px!important;right:8px!important}
-.maplibregl-popup-close-button:hover{color:#e8eaf0!important;background:none!important}
+.maplibregl-popup-close-button:hover{color:#d4d4d4!important;background:none!important}
 
 /* -- SERVER DETAIL -- */
 .detail-header{display:flex;align-items:flex-start;justify-content:space-between;margin-bottom:24px;gap:16px;flex-wrap:wrap}
@@ -267,8 +272,8 @@ body::before{content:'';position:fixed;inset:0;pointer-events:none;background:ra
 .detail-tag{font-size:10px;font-weight:600;letter-spacing:.05em;padding:2px 8px;border-radius:4px;background:var(--surface2);color:var(--text-2);border:1px solid var(--border);text-transform:uppercase}
 .status-big{display:flex;align-items:center;gap:12px;padding:12px 20px;border-radius:12px;border:1px solid;flex-shrink:0;transition:transform .2s,box-shadow .2s;backdrop-filter:blur(4px)}
 .status-big:hover{transform:translateY(-1px);box-shadow:0 6px 20px rgba(0,0,0,0.15)}
-.status-big.up      {color:var(--green);border-color:rgba(16,232,138,0.2);background:var(--green-soft)}
-.status-big.down    {color:var(--red);border-color:rgba(255,61,90,0.2);background:var(--red-soft)}
+.status-big.up      {color:var(--green);border-color:rgba(57,217,138,0.2);background:var(--green-soft)}
+.status-big.down    {color:var(--red);border-color:rgba(239,68,68,0.2);background:var(--red-soft)}
 .status-big.degraded{color:var(--orange);border-color:rgba(255,140,42,0.2);background:var(--orange-soft)}
 .status-big.pending {color:var(--text-2);border-color:var(--border);background:var(--surface)}
 .status-big-dot{width:10px;height:10px;border-radius:50%;background:currentColor}
@@ -350,19 +355,19 @@ canvas#responseChart{width:100%!important}
 .runbook-body p:last-child{margin-bottom:0}
 .runbook-body ul.rb-ul,.runbook-body ol.rb-ol{margin:0 0 10px;padding-left:22px}
 .runbook-body li{margin:3px 0}
-.runbook-body a{color:var(--blue);text-decoration:none;border-bottom:1px solid rgba(42,127,255,0.35)}
+.runbook-body a{color:var(--blue);text-decoration:none;border-bottom:1px solid rgba(255,140,42,0.35)}
 .runbook-body a:hover{border-bottom-color:var(--blue)}
 .runbook-body code.rb-code{background:var(--input-bg);border:1px solid var(--border);padding:1px 6px;border-radius:4px;font-family:var(--mono);font-size:12px}
 .runbook-body pre.rb-pre{background:var(--input-bg);border:1px solid var(--border);padding:10px 12px;border-radius:6px;overflow-x:auto;font-family:var(--mono);font-size:12px;line-height:1.5;margin:0 0 10px}
 .runbook-body pre.rb-pre code{background:transparent;border:none;padding:0}
 .check-chip{display:inline-flex;align-items:center;gap:8px;padding:8px 14px;border-radius:8px;font-size:12px;border:1px solid}
-.check-chip.ok  {border-color:rgba(16,232,138,0.2);background:var(--green-soft)}
-.check-chip.fail{border-color:rgba(255,61,90,0.2);background:var(--red-soft)}
+.check-chip.ok  {border-color:rgba(57,217,138,0.2);background:var(--green-soft)}
+.check-chip.fail{border-color:rgba(239,68,68,0.2);background:var(--red-soft)}
 /* SSL cert badge — inline inside the HTTP check chip */
 .chip-cert{display:inline-flex;align-items:center;gap:4px;font-size:10px;font-weight:600;padding:2px 7px;border-radius:10px;letter-spacing:.02em;margin-left:4px;white-space:nowrap}
-.chip-cert.cert-ok     {color:var(--green);background:var(--green-soft);border:1px solid rgba(16,232,138,0.25)}
+.chip-cert.cert-ok     {color:var(--green);background:var(--green-soft);border:1px solid rgba(57,217,138,0.25)}
 .chip-cert.cert-warn   {color:var(--orange);background:var(--orange-soft);border:1px solid rgba(255,140,42,0.3)}
-.chip-cert.cert-expired{color:var(--red);background:var(--red-soft);border:1px solid rgba(255,61,90,0.3)}
+.chip-cert.cert-expired{color:var(--red);background:var(--red-soft);border:1px solid rgba(239,68,68,0.3)}
 .chip-cert svg{flex-shrink:0;opacity:.85}
 .chip-dot{width:7px;height:7px;border-radius:50%;flex-shrink:0}
 .check-chip.ok   .chip-dot{background:var(--green)}
@@ -809,7 +814,7 @@ function _renderMainMarkers() {
   if (!_mainMap || !_mainMap.isStyleLoaded()) return;
   _mainMarkers.forEach(m => m.remove());
   _mainMarkers = [];
-  const colorMap = { up:"#10e88a", down:"#ff3d5a", degraded:"#ff8c2a", pending:"#5e8aad" };
+  const colorMap = { up:"#39d98a", down:"#ef4444", degraded:"#f59e0b", pending:"#6f6f6f" };
   const colorPri = { up:0, degraded:1, pending:2, down:3 }; // higher = worse, drives cluster color
   const mapped   = servers.filter(s => s.lat != null && s.lng != null);
   const unmapped = servers.filter(s => s.lat == null || s.lng == null);
@@ -829,16 +834,16 @@ function _renderMainMarkers() {
 
     // Marker element — show a count badge when more than one server
     const el = document.createElement("div");
-    el.style.cssText = `width:${group.length>1?22:16}px;height:${group.length>1?22:16}px;border-radius:50%;background:${color};border:2px solid #0d1829;box-shadow:0 0 6px ${color}88;cursor:pointer;display:flex;align-items:center;justify-content:center`;
+    el.style.cssText = `width:${group.length>1?22:16}px;height:${group.length>1?22:16}px;border-radius:50%;background:${color};border:2px solid #141414;box-shadow:0 0 6px ${color}88;cursor:pointer;display:flex;align-items:center;justify-content:center`;
     if (group.length > 1) {
-      el.innerHTML = `<span style="font-size:10px;font-weight:700;color:#0d1829;line-height:1">${group.length}</span>`;
+      el.innerHTML = `<span style="font-size:10px;font-weight:700;color:#141414;line-height:1">${group.length}</span>`;
     }
 
     // Popup HTML — single row per server
     const rows = group.map((s, idx) => {
       const c = colorMap[s.overall] || colorMap.pending;
       const lastMs = (s.checks||[]).reduce((b,ck) => (ck.response_ms&&(b===null||ck.response_ms<b))?ck.response_ms:b, null);
-      return `<div style="padding:${idx===0?"2px 0 6px":"6px 0"};${idx>0?"border-top:1px solid #1e2d45":""}">
+      return `<div style="padding:${idx===0?"2px 0 6px":"6px 0"};${idx>0?"border-top:1px solid #2a2a2a":""}">
         <div style="font-weight:600;font-size:13px;color:#ffffff;margin-bottom:3px;line-height:1.3">${s.name}</div>
         <div style="display:flex;align-items:center;gap:10px">
           <span style="color:${c};font-weight:700;font-size:11px;letter-spacing:.04em">${(s.overall||"pending").toUpperCase()}</span>
@@ -894,10 +899,10 @@ async function _initDetailMap(lat, lng, name, status) {
     });
     _detailMap.addControl(new maplibregl.NavigationControl(), "top-right");
     _detailMap.on("load", () => {
-      const colorMap = { up:"#10e88a", down:"#ff3d5a", degraded:"#ff8c2a", pending:"#5e8aad" };
+      const colorMap = { up:"#39d98a", down:"#ef4444", degraded:"#f59e0b", pending:"#6f6f6f" };
       const color = colorMap[status] || colorMap.pending;
       const el = document.createElement("div");
-      el.style.cssText = `width:18px;height:18px;border-radius:50%;background:${color};border:2px solid #0d1829;box-shadow:0 0 8px ${color}99`;
+      el.style.cssText = `width:18px;height:18px;border-radius:50%;background:${color};border:2px solid #141414;box-shadow:0 0 8px ${color}99`;
       new maplibregl.Marker({ element: el })
         .setLngLat([lng, lat])
         .setPopup(new maplibregl.Popup({ offset: 14 }).setHTML(`<div style="font-family:sans-serif;font-weight:600;padding:4px">${name}</div>`))
@@ -1766,7 +1771,7 @@ function drawChartBase(){
   ctx.clearRect(0, 0, W, H);
 
   // Grid lines + Y labels
-  ctx.strokeStyle = "rgba(30,100,200,0.18)";
+  ctx.strokeStyle = "rgba(255,140,42,0.18)";
   ctx.lineWidth   = 1;
   [0, 0.25, 0.5, 0.75, 1].forEach(f => {
     const y = PAD.top + cH * (1 - f);
@@ -1779,8 +1784,8 @@ function drawChartBase(){
 
   // Fill gradient
   const grad = ctx.createLinearGradient(0, PAD.top, 0, PAD.top + cH);
-  grad.addColorStop(0, "rgba(42,127,255,0.4)");
-  grad.addColorStop(1, "rgba(42,127,255,0.02)");
+  grad.addColorStop(0, "rgba(255,140,42,0.4)");
+  grad.addColorStop(1, "rgba(255,140,42,0.02)");
   ctx.fillStyle = grad;
   ctx.beginPath();
   data.forEach((d, i) => { const x = xOf(i), y = yOf(d.response_ms); i === 0 ? ctx.moveTo(x, y) : ctx.lineTo(x, y); });
@@ -1798,7 +1803,7 @@ function drawChartBase(){
 
   // Dots (sparse data only)
   if (data.length <= 30) {
-    ctx.fillStyle = "rgba(42,127,255,1)";
+    ctx.fillStyle = "rgba(255,140,42,1)";
     data.forEach((d, i) => { ctx.beginPath(); ctx.arc(xOf(i), yOf(d.response_ms), 3, 0, Math.PI * 2); ctx.fill(); });
   }
 }
@@ -2072,7 +2077,7 @@ setInterval(loadAdminBanners, 60 * 1000);
       <label style="font-size:11px;color:var(--text-2);display:block;margin-bottom:4px">Your email address</label>
       <div style="display:flex;gap:8px">
         <input id="subEmail" type="email" placeholder="you@example.com"
-          style="flex:1;background:var(--input-bg,#0d1829);border:1px solid var(--border-hi);border-radius:6px;color:var(--text-hi);font-size:13px;padding:8px 12px;outline:none;box-sizing:border-box"
+          style="flex:1;background:var(--input-bg,#141414);border:1px solid var(--border-hi);border-radius:6px;color:var(--text-hi);font-size:13px;padding:8px 12px;outline:none;box-sizing:border-box"
           onkeydown="if(event.key==='Enter')checkSubStatus()">
         <button onclick="checkSubStatus()" style="background:var(--blue,#2a7fff);color:#fff;border:none;border-radius:6px;padding:8px 14px;font-size:13px;font-weight:600;cursor:pointer;white-space:nowrap">Check</button>
       </div>

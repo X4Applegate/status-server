@@ -4175,7 +4175,7 @@ app.post("/api/admin/groups", requireAdmin, async (req, res) => {
   try {
     const [result] = await db.query(
       "INSERT INTO status_groups (slug, name, description, logo_text, logo_image, logo_size, accent_color, bg_color, default_theme, custom_domain, privacy_text, terms_text, up_color, down_color, degraded_color, bg_color_light, accent_color_light, card_style, corner_style) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
-      [finalSlug, name, description || "", logo_text || "", cleanLogo, cleanLogoSize, accent_color || "#2a7fff", cleanBg, cleanTheme, cleanDomain, privacy_text || null, terms_text || null,
+      [finalSlug, name, description || "", logo_text || "", cleanLogo, cleanLogoSize, accent_color || "#ff8c2a", cleanBg, cleanTheme, cleanDomain, privacy_text || null, terms_text || null,
        cleanUp, cleanDown, cleanDeg, cleanBgLight, cleanAccentLight, cleanCard, cleanCorner]
     );
     const newId = result.insertId;
@@ -4234,7 +4234,7 @@ app.put("/api/admin/groups/:id", requireAuth, async (req, res) => {
   try {
     const [result] = await db.query(
       "UPDATE status_groups SET slug=?, name=?, description=?, logo_text=?, logo_image=?, logo_size=?, accent_color=?, bg_color=?, default_theme=?, custom_domain=?, privacy_text=?, terms_text=?, public_enabled=?, up_color=?, down_color=?, degraded_color=?, bg_color_light=?, accent_color_light=?, card_style=?, corner_style=? WHERE id=?",
-      [finalSlug, name, description || "", logo_text || "", cleanLogo, cleanLogoSize, accent_color || "#2a7fff", cleanBg, cleanTheme, cleanDomain, privacy_text || null, terms_text || null, public_enabled,
+      [finalSlug, name, description || "", logo_text || "", cleanLogo, cleanLogoSize, accent_color || "#ff8c2a", cleanBg, cleanTheme, cleanDomain, privacy_text || null, terms_text || null, public_enabled,
        cleanUp, cleanDown, cleanDeg, cleanBgLight, cleanAccentLight, cleanCard, cleanCorner, gid]
     );
     if (result.affectedRows === 0) return res.status(404).json({ error: "Group not found" });
@@ -5414,7 +5414,7 @@ app.get("/api/icon/:slug", async (req, res) => {
     }
     // Fallback: generate SVG from initials
     const initials = (g.logo_text || g.name || "?").substring(0, 2).toUpperCase();
-    const accent   = g.accent_color || "#2a7fff";
+    const accent   = g.accent_color || "#ff8c2a";
     const bg       = g.bg_color     || "#060c18";
     const svg = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512">
   <rect width="512" height="512" rx="96" fill="${bg}"/>
@@ -5438,7 +5438,7 @@ app.get("/dashboard/:slug/manifest.json", pageLimiter, async (req, res) => {
     // dashboard rather than always showing the dark defaults. Without this a
     // Light-theme group would briefly flash a dark splash on launch.
     const isLight       = g.default_theme === "light";
-    const activeAccent  = (isLight && g.accent_color_light) ? g.accent_color_light : (g.accent_color || "#2a7fff");
+    const activeAccent  = (isLight && g.accent_color_light) ? g.accent_color_light : (g.accent_color || "#ff8c2a");
     const activeBg      = isLight
       ? (g.bg_color_light || "#f6f8fb")
       : (g.bg_color || "#060c18");
@@ -5627,7 +5627,7 @@ const DEFAULT_BRANDING = {
   groupSlug:    null,
   groupName:    "Applegate Monitor",
   groupSubtitle: "",
-  accentColor:  "#2a7fff",
+  accentColor:  "#ff8c2a",
   bgColor:      null,
   logoText:     "",
   logoImage:    null,
@@ -5655,7 +5655,7 @@ function groupBranding(g, extra = {}) {
     groupSlug:        g.slug,
     groupName:        g.name,
     groupSubtitle:    g.description || "",
-    accentColor:      g.accent_color || "#2a7fff",
+    accentColor:      g.accent_color || "#ff8c2a",
     bgColor:          g.bg_color || null,
     logoText:         g.logo_text || "",
     logoImage:        g.logo_image || null,
