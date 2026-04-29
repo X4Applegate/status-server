@@ -6,6 +6,22 @@ All notable changes to this project are documented here.
 
 ---
 
+## [3.4.6] — 2026-04-29 *(admin panel reskinned to Applegate brand)*
+
+### New
+- **Admin panel chrome** (the management UI behind `/admin`) is now permanently themed in the Applegate brand orange-on-near-black to match richardapplegate.io. Affects every admin screen — group list, server form, user form, webhook config, theme editor, log viewer, audit log, response-time chart, and map popups.
+- **Per-group dashboard themes are unchanged.** This change is purely the admin chrome — the dashboard side still respects each group's own theme settings (Default / Applegate / Midnight / etc.). The "Default" dashboard preset is still the original navy-blue look.
+
+### How it was done
+Reworked **`backend/views/admin.ejs`** `:root` palette only — the existing `--blue` / `--orange` / `--green` / `--red` / `--warn` token names are kept (so the rest of the CSS doesn't have to change), but the values now hold the Applegate palette: `#ff8c2a` accent, `#0a0a0a` background, `#39d98a` / `#ef4444` / `#f59e0b` for status. Hardcoded blue rgba values (`rgba(42,127,255,…)`, `rgba(30,100,200,…)`) and three navy hexes (`#0d1829`, `#1e2d45`, `#e8eaf0`) found in the response-time chart canvas, the maplibre popup styling, and the log-entry highlighting were also swept through.
+
+Also fixed contrast on the primary button: white-on-orange (`#fff` on `#ff8c2a`) had poor contrast — switched to `#0a0a0a` to match the website's `.btn-primary` rule and bumped the weight to 600 so the button reads cleanly.
+
+### Migration
+None — pure CSS/template change in `admin.ejs`. Re-rendered on next request.
+
+---
+
 ## [3.4.5] — 2026-04-29 *(Applegate brand preset)*
 
 ### New

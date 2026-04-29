@@ -6,17 +6,23 @@
 <style>
 *,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
 
+/* Admin panel palette — locked to the Applegate brand (orange #ff8c2a on
+   near-black #0a0a0a) so the management UI matches richardapplegate.io.
+   `--blue` keeps its name but holds the orange accent — every selector
+   that referenced "blue" still works, just renders in brand orange now.
+   The status colors (--green/--red/--warn) use the same modern palette
+   as the website's status preview card. */
 :root{
-  --bg:#060c18;--bg2:#0a1220;--surface:#0d1829;--surface2:#111f35;--surface3:#182440;
-  --border:rgba(30,100,200,0.15);--border-hi:rgba(30,100,200,0.28);
-  --text:#7a9cc0;--text-2:#3d6080;--text-hi:#c8dff0;--text-white:#e8f4ff;
-  --shadow:rgba(0,0,20,0.5);--input-bg:#060c18;
-  --glow-a:rgba(42,127,255,0.07);--glow-o:rgba(255,140,42,0.04);
-  --blue:#2a7fff;--blue-soft:rgba(42,127,255,0.12);--blue-glow:rgba(42,127,255,0.25);
-  --orange:#ff8c2a;--orange-soft:rgba(255,140,42,0.12);--orange-glow:rgba(255,140,42,0.3);
-  --green:#10e88a;--green-soft:rgba(16,232,138,0.10);
-  --red:#ff3d5a;--red-soft:rgba(255,61,90,0.10);
-  --warn:#ffb830;--warn-soft:rgba(255,184,48,0.10);
+  --bg:#0a0a0a;--bg2:#141414;--surface:#141414;--surface2:#1a1a1a;--surface3:#202020;
+  --border:rgba(255,255,255,0.06);--border-hi:rgba(255,255,255,0.10);
+  --text:#a0a0a0;--text-2:#6f6f6f;--text-hi:#d4d4d4;--text-white:#f5f5f5;
+  --shadow:rgba(0,0,0,0.5);--input-bg:#0a0a0a;
+  --glow-a:rgba(255,140,42,0.08);--glow-o:rgba(255,140,42,0.04);
+  --blue:#ff8c2a;--blue-soft:rgba(255,140,42,0.12);--blue-glow:rgba(255,140,42,0.20);
+  --orange:#ffa55c;--orange-soft:rgba(255,165,92,0.12);--orange-glow:rgba(255,165,92,0.28);
+  --green:#39d98a;--green-soft:rgba(57,217,138,0.10);
+  --red:#ef4444;--red-soft:rgba(239,68,68,0.10);
+  --warn:#f59e0b;--warn-soft:rgba(245,158,11,0.10);
   --sans:'Inter',sans-serif;--mono:'JetBrains Mono',monospace;--r:10px;--r-sm:7px;
 }
 
@@ -41,7 +47,7 @@ body{font-family:var(--sans);background:var(--bg);color:var(--text);min-height:1
   flex-shrink:0;position:sticky;top:0;z-index:100;
 }
 .brand{display:flex;align-items:center;gap:10px}
-.brand-icon{width:28px;height:28px;border-radius:7px;background:var(--blue-soft);border:1px solid rgba(42,127,255,0.25);display:flex;align-items:center;justify-content:center;font-size:13px}
+.brand-icon{width:28px;height:28px;border-radius:7px;background:var(--blue-soft);border:1px solid rgba(255,140,42,0.25);display:flex;align-items:center;justify-content:center;font-size:13px}
 .brand-name{font-size:15px;font-weight:700;color:var(--text-white);letter-spacing:-.02em}
 .brand-name span{color:var(--blue)}
 .topbar-right{display:flex;align-items:center;gap:8px}
@@ -81,7 +87,8 @@ body{font-family:var(--sans);background:var(--bg);color:var(--text);min-height:1
 .btn svg{width:13px;height:13px;flex-shrink:0;transition:none!important}
 .btn.spinning svg{animation:spin .8s linear infinite}
 @keyframes spin{to{transform:rotate(360deg)}}
-.btn-primary{background:var(--blue)!important;border-color:rgba(42,127,255,.5)!important;color:#fff!important}
+/* Orange button needs dark text — white-on-#ff8c2a fails contrast badly. */
+.btn-primary{background:var(--blue)!important;border-color:rgba(255,140,42,.5)!important;color:#0a0a0a!important;font-weight:600!important}
 .btn-primary:hover{background:#1a6fef!important}
 .btn-danger{color:var(--red)!important;background:var(--red-soft)!important;border-color:rgba(255,61,90,.3)!important}
 .btn-danger:hover{background:rgba(255,61,90,.2)!important}
@@ -214,10 +221,10 @@ body{font-family:var(--sans);background:var(--bg);color:var(--text);min-height:1
 .geo-pick-row:hover{background:var(--surface2);color:var(--text-white)}
 .map-toggle-btn{padding:5px 12px;border:1px solid var(--border-hi);border-radius:6px;color:var(--text-hi);font-size:12px;font-weight:500;background:none;cursor:pointer;transition:all .15s;white-space:nowrap}
 .map-toggle-btn:hover,.map-toggle-btn.active{background:var(--blue-soft);border-color:var(--blue);color:var(--blue)}
-.maplibregl-popup-content{background:#0d1829!important;border:1px solid #1e2d45!important;border-radius:10px!important;padding:10px 14px!important;box-shadow:0 8px 28px rgba(0,0,0,.6)!important;color:#e8eaf0!important}
-.maplibregl-popup-tip{border-top-color:#0d1829!important;border-bottom-color:#0d1829!important}
+.maplibregl-popup-content{background:#141414!important;border:1px solid #2a2a2a!important;border-radius:10px!important;padding:10px 14px!important;box-shadow:0 8px 28px rgba(0,0,0,.6)!important;color:#d4d4d4!important}
+.maplibregl-popup-tip{border-top-color:#141414!important;border-bottom-color:#141414!important}
 .maplibregl-popup-close-button{color:#5e7a99!important;font-size:16px!important;top:6px!important;right:8px!important}
-.maplibregl-popup-close-button:hover{color:#e8eaf0!important;background:none!important}
+.maplibregl-popup-close-button:hover{color:#d4d4d4!important;background:none!important}
 
 /* ══ DRAWER BASE ══ */
 .drawer-overlay{position:fixed;inset:0;background:rgba(0,5,20,.5);backdrop-filter:blur(4px);z-index:200;opacity:0;pointer-events:none;transition:opacity .25s!important}
@@ -285,9 +292,9 @@ body{font-family:var(--sans);background:var(--bg);color:var(--text);min-height:1
 .log-entry.ok .log-icon{color:var(--green)}.log-entry.fail .log-icon{color:var(--red)}.log-entry.sys .log-icon{color:var(--blue)}.log-entry.change .log-icon{color:var(--orange)}
 .log-server{color:var(--text);font-size:10px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .log-msg{color:var(--text-2);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-.log-entry.fail .log-msg{color:rgba(255,61,90,.85)}.log-entry.change .log-msg{color:var(--orange);font-weight:500}.log-entry.sys .log-msg{color:rgba(42,127,255,.9)}
+.log-entry.fail .log-msg{color:rgba(255,61,90,.85)}.log-entry.change .log-msg{color:var(--orange);font-weight:500}.log-entry.sys .log-msg{color:rgba(255,140,42,.9)}
 .log-entry.change{background:rgba(255,140,42,.05);border-left:2px solid rgba(255,140,42,.4);padding-left:16px}
-.log-entry.sys{background:rgba(42,127,255,.05)}
+.log-entry.sys{background:rgba(255,140,42,.05)}
 
 /* ADMIN DRAWER */
 #adminDrawer{width:min(1080px,100vw)}
@@ -324,16 +331,16 @@ body{font-family:var(--sans);background:var(--bg);color:var(--text);min-height:1
 @keyframes wFade{from{opacity:0}to{opacity:1}}
 .user-item{display:flex;align-items:center;gap:10px;padding:11px 18px;border-bottom:1px solid var(--border);cursor:pointer}
 .user-item:hover{background:var(--surface)}
-.user-avatar{width:30px;height:30px;border-radius:50%;background:var(--blue-soft);border:1px solid rgba(42,127,255,.22);display:flex;align-items:center;justify-content:center;font-size:12px;font-weight:700;color:var(--blue);flex-shrink:0}
+.user-avatar{width:30px;height:30px;border-radius:50%;background:var(--blue-soft);border:1px solid rgba(255,140,42,.22);display:flex;align-items:center;justify-content:center;font-size:12px;font-weight:700;color:var(--blue);flex-shrink:0}
 .user-info{flex:1;min-width:0}
 .user-name{font-size:12px;font-weight:600;color:var(--text-white)}
 .user-meta{font-size:10px;color:var(--text-2);margin-top:1px}
 .user-dash-pills{display:flex;flex-wrap:wrap;gap:4px;margin-top:5px}
 .user-dash-pill{display:inline-flex;align-items:center;padding:2px 8px;border-radius:10px;font-size:9px;font-weight:600;letter-spacing:.04em;background:transparent;border:1px solid var(--blue);color:var(--blue);text-transform:uppercase;white-space:nowrap}
-.user-dash-pill.user-dash-all{background:var(--blue-soft);border-color:rgba(42,127,255,.35);color:var(--blue)}
+.user-dash-pill.user-dash-all{background:var(--blue-soft);border-color:rgba(255,140,42,.35);color:var(--blue)}
 .user-dash-pill.user-dash-none{background:var(--surface2);border-color:var(--border);color:var(--text-2);text-transform:none}
 .role-badge{font-size:9px;font-weight:700;letter-spacing:.05em;padding:2px 7px;border-radius:8px;text-transform:uppercase}
-.role-badge.admin {color:var(--blue);background:var(--blue-soft);border:1px solid rgba(42,127,255,.25)}
+.role-badge.admin {color:var(--blue);background:var(--blue-soft);border:1px solid rgba(255,140,42,.25)}
 .role-badge.viewer{color:var(--text-2);background:var(--surface2);border:1px solid var(--border)}
 
 /* FORM */
@@ -344,7 +351,7 @@ body{font-family:var(--sans);background:var(--bg);color:var(--text);min-height:1
 .fg.full{grid-column:1/-1}
 .flabel{font-size:10px;font-weight:600;letter-spacing:.05em;text-transform:uppercase;color:var(--text-2)}
 .finput,.fselect{width:100%;padding:8px 11px;background:var(--input-bg);border:1px solid var(--border-hi);border-radius:var(--r-sm);color:var(--text-white);font-family:var(--sans);font-size:12px;outline:none}
-.finput:focus,.fselect:focus{border-color:var(--blue);box-shadow:0 0 0 3px rgba(42,127,255,.12)}
+.finput:focus,.fselect:focus{border-color:var(--blue);box-shadow:0 0 0 3px rgba(255,140,42,.12)}
 .finput::placeholder{color:var(--text-2)}
 .fselect option{background:var(--surface2)}
 .checks-wrap{grid-column:1/-1}
@@ -406,7 +413,7 @@ body{font-family:var(--sans);background:var(--bg);color:var(--text);min-height:1
 
 /* Light-mode hint banner — only visible when the user picks Light theme but
    hasn't enabled at least one of the light-palette overrides. */
-.theme-hint{margin-top:10px;padding:9px 12px;background:var(--blue-soft);border:1px solid rgba(42,127,255,0.22);border-radius:var(--r-sm);font-size:11px;line-height:1.55;color:var(--text-hi)}
+.theme-hint{margin-top:10px;padding:9px 12px;background:var(--blue-soft);border:1px solid rgba(255,140,42,0.22);border-radius:var(--r-sm);font-size:11px;line-height:1.55;color:var(--text-hi)}
 
 /* CONFIRM */
 .confirm-overlay{position:fixed;inset:0;background:rgba(0,5,20,.6);backdrop-filter:blur(6px);z-index:400;display:flex;align-items:center;justify-content:center;opacity:0;pointer-events:none;transition:opacity .2s!important}
@@ -424,7 +431,7 @@ body{font-family:var(--sans);background:var(--bg);color:var(--text);min-height:1
 .modal-group{display:flex;flex-direction:column;gap:4px;margin-bottom:12px}
 .modal-label{font-size:10px;font-weight:600;letter-spacing:.05em;text-transform:uppercase;color:var(--text-2)}
 .modal-input{width:100%;padding:8px 11px;background:var(--input-bg);border:1px solid var(--border-hi);border-radius:var(--r-sm);color:var(--text-white);font-family:var(--sans);font-size:12px;outline:none}
-.modal-input:focus{border-color:var(--blue);box-shadow:0 0 0 3px rgba(42,127,255,.12)}
+.modal-input:focus{border-color:var(--blue);box-shadow:0 0 0 3px rgba(255,140,42,.12)}
 .modal-footer{display:flex;align-items:center;justify-content:flex-end;gap:8px;margin-top:16px;padding-top:14px;border-top:1px solid var(--border)}
 .modal-err{flex:1;font-size:11px;color:var(--red)}
 
@@ -1918,20 +1925,20 @@ function drawChart(data){
   const minV = 0;
   ctx.clearRect(0, 0, W, H);
 
-  ctx.strokeStyle = "rgba(30,100,200,0.1)";
+  ctx.strokeStyle = "rgba(255,140,42,0.1)";
   ctx.lineWidth   = 1;
   [0, 0.25, 0.5, 0.75, 1].forEach(f => {
     const y = PAD.top + cH * (1 - f);
     ctx.beginPath(); ctx.moveTo(PAD.left, y); ctx.lineTo(W - PAD.right, y); ctx.stroke();
-    ctx.fillStyle = "rgba(61,96,128,0.8)";
+    ctx.fillStyle = "rgba(160,160,160,0.8)";
     ctx.font      = "10px JetBrains Mono, monospace";
     ctx.textAlign = "right";
     ctx.fillText(Math.round(maxV * f) + "ms", PAD.left - 4, y + 3);
   });
 
   const grad = ctx.createLinearGradient(0, PAD.top, 0, PAD.top + cH);
-  grad.addColorStop(0, "rgba(42,127,255,0.3)");
-  grad.addColorStop(1, "rgba(42,127,255,0.0)");
+  grad.addColorStop(0, "rgba(255,140,42,0.3)");
+  grad.addColorStop(1, "rgba(255,140,42,0.0)");
   ctx.fillStyle = grad;
   ctx.beginPath();
   data.forEach((d, i) => {
@@ -1943,7 +1950,7 @@ function drawChart(data){
   ctx.lineTo(PAD.left, PAD.top + cH);
   ctx.closePath(); ctx.fill();
 
-  ctx.strokeStyle = "rgba(42,127,255,0.9)";
+  ctx.strokeStyle = "rgba(255,140,42,0.9)";
   ctx.lineWidth   = 2;
   ctx.lineJoin    = "round";
   ctx.beginPath();
@@ -1954,7 +1961,7 @@ function drawChart(data){
   });
   ctx.stroke();
 
-  ctx.fillStyle = "rgba(42,127,255,1)";
+  ctx.fillStyle = "rgba(255,140,42,1)";
   if (data.length <= 30) {
     data.forEach((d, i) => {
       const x = PAD.left + (i / (data.length - 1 || 1)) * cW;
