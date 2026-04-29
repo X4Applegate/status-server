@@ -6,6 +6,15 @@ All notable changes to this project are documented here.
 
 ---
 
+## [3.4.5] — 2026-04-29 *(Applegate brand preset)*
+
+### New
+- **"Applegate" theme preset** — one-click chip in admin's Theme & Visual Style section that applies the exact palette from richardapplegate.io: `#ff8c2a` orange accent, `#0a0a0a` near-black background, and the site's own `#39d98a` / `#ef4444` / `#f59e0b` for UP / DOWN / DEGRADED. Card style is `flat` to mirror the website's clean borders-without-shadows feel; corner style stays `rounded`. Sits second in the chip row after the existing "Default" preset.
+
+No schema or backend changes — purely a new entry in the client-side `THEME_PRESETS` array.
+
+---
+
 ## [3.4.4] — 2026-04-29 *(PWA splash + theme-color match the active palette)*
 
 ### Bug fix
