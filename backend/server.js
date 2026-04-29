@@ -1043,6 +1043,26 @@ async function initDB() {
     await db.query("ALTER TABLE status_groups ADD COLUMN public_enabled TINYINT(1) NOT NULL DEFAULT 0");
   } catch(e) { /* column already exists */ }
 
+  // Per-group status colors (override the default green/red/orange used for UP / DOWN / Degraded
+  // states across badges, dots, heartbeat strips, big status pills, and SSE map markers).
+  // NULL = use the built-in default. Validated as hex by the same cleanHexColor() the other colors use.
+  try { await db.query("ALTER TABLE status_groups ADD COLUMN up_color VARCHAR(16) DEFAULT NULL"); } catch(e) { /* exists */ }
+  try { await db.query("ALTER TABLE status_groups ADD COLUMN down_color VARCHAR(16) DEFAULT NULL"); } catch(e) { /* exists */ }
+  try { await db.query("ALTER TABLE status_groups ADD COLUMN degraded_color VARCHAR(16) DEFAULT NULL"); } catch(e) { /* exists */ }
+
+  // Per-group light-mode palette. The existing accent_color / bg_color stay as the dark-mode pair;
+  // these are the matching pair when the group's default_theme is "light".
+  try { await db.query("ALTER TABLE status_groups ADD COLUMN bg_color_light VARCHAR(16) DEFAULT NULL"); } catch(e) { /* exists */ }
+  try { await db.query("ALTER TABLE status_groups ADD COLUMN accent_color_light VARCHAR(16) DEFAULT NULL"); } catch(e) { /* exists */ }
+
+  // Card style preset (visual treatment of server cards, uptime cards, sidebar rows):
+  //   default = current look, flat = no shadows/gradients, glass = blurred translucent,
+  //   glow = soft accent halo, minimal = stripped-down outlined.
+  try { await db.query("ALTER TABLE status_groups ADD COLUMN card_style VARCHAR(16) NOT NULL DEFAULT 'default'"); } catch(e) { /* exists */ }
+
+  // Corner radius preset: sharp = 0, rounded = current values, pill = max.
+  try { await db.query("ALTER TABLE status_groups ADD COLUMN corner_style VARCHAR(16) NOT NULL DEFAULT 'rounded'"); } catch(e) { /* exists */ }
+
   // Beta: email subscriptions — allow public visitors to opt in to down/recovery alerts
   await db.query(`
     CREATE TABLE IF NOT EXISTS status_email_subscriptions (
@@ -4107,6 +4127,17 @@ function cleanHexColor(s) {
   return trimmed;
 }
 
+// Whitelist validators for the card / corner style presets. Anything else
+// falls back to the documented default so a typo can't wedge a dashboard.
+function cleanCardStyle(s) {
+  const allowed = ["default", "flat", "glass", "glow", "minimal"];
+  return allowed.includes(s) ? s : "default";
+}
+function cleanCornerStyle(s) {
+  const allowed = ["sharp", "rounded", "pill"];
+  return allowed.includes(s) ? s : "rounded";
+}
+
 // Validate a custom domain string. Lower-cased, trimmed, basic hostname shape. Empty → null.
 function cleanCustomDomain(s) {
   if (!s) return null;
@@ -4119,24 +4150,33 @@ function cleanCustomDomain(s) {
 }
 
 app.post("/api/admin/groups", requireAdmin, async (req, res) => {
-  const { name, slug, description, logo_text, logo_image, logo_size, accent_color, bg_color, default_theme, custom_domain, server_ids, privacy_text, terms_text } = req.body;
+  const { name, slug, description, logo_text, logo_image, logo_size, accent_color, bg_color, default_theme, custom_domain, server_ids, privacy_text, terms_text,
+          up_color, down_color, degraded_color, bg_color_light, accent_color_light, card_style, corner_style } = req.body;
   if (!name) return res.status(400).json({ error: "Name is required" });
   const finalSlug = slugify(slug || name);
   if (!finalSlug) return res.status(400).json({ error: "Slug is required" });
-  let cleanLogo, cleanBg, cleanDomain;
+  let cleanLogo, cleanBg, cleanDomain, cleanUp, cleanDown, cleanDeg, cleanBgLight, cleanAccentLight;
   try { cleanLogo = validateLogoImage(logo_image); }
   catch(e) { return res.status(400).json({ error: e.message }); }
   try { cleanBg = cleanHexColor(bg_color); }
   catch(e) { return res.status(400).json({ error: "Background color: " + e.message }); }
+  try { cleanUp  = cleanHexColor(up_color); }       catch(e) { return res.status(400).json({ error: "Up color: " + e.message }); }
+  try { cleanDown = cleanHexColor(down_color); }    catch(e) { return res.status(400).json({ error: "Down color: " + e.message }); }
+  try { cleanDeg  = cleanHexColor(degraded_color); }catch(e) { return res.status(400).json({ error: "Degraded color: " + e.message }); }
+  try { cleanBgLight     = cleanHexColor(bg_color_light); }     catch(e) { return res.status(400).json({ error: "Light background: " + e.message }); }
+  try { cleanAccentLight = cleanHexColor(accent_color_light); } catch(e) { return res.status(400).json({ error: "Light accent: " + e.message }); }
   try { cleanDomain = cleanCustomDomain(custom_domain); }
   catch(e) { return res.status(400).json({ error: "Custom domain: " + e.message }); }
   const cleanTheme = (default_theme === "light") ? "light" : "dark";
+  const cleanCard  = cleanCardStyle(card_style);
+  const cleanCorner = cleanCornerStyle(corner_style);
   // Logo size: clamp to a safe display range; fall back to the 42px default.
   const cleanLogoSize = Math.max(20, Math.min(120, parseInt(logo_size) || 42));
   try {
     const [result] = await db.query(
-      "INSERT INTO status_groups (slug, name, description, logo_text, logo_image, logo_size, accent_color, bg_color, default_theme, custom_domain, privacy_text, terms_text) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)",
-      [finalSlug, name, description || "", logo_text || "", cleanLogo, cleanLogoSize, accent_color || "#2a7fff", cleanBg, cleanTheme, cleanDomain, privacy_text || null, terms_text || null]
+      "INSERT INTO status_groups (slug, name, description, logo_text, logo_image, logo_size, accent_color, bg_color, default_theme, custom_domain, privacy_text, terms_text, up_color, down_color, degraded_color, bg_color_light, accent_color_light, card_style, corner_style) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+      [finalSlug, name, description || "", logo_text || "", cleanLogo, cleanLogoSize, accent_color || "#2a7fff", cleanBg, cleanTheme, cleanDomain, privacy_text || null, terms_text || null,
+       cleanUp, cleanDown, cleanDeg, cleanBgLight, cleanAccentLight, cleanCard, cleanCorner]
     );
     const newId = result.insertId;
     if (Array.isArray(server_ids) && server_ids.length) {
@@ -4162,7 +4202,8 @@ app.put("/api/admin/groups/:id", requireAuth, async (req, res) => {
     if (!Array.isArray(allowed) || !allowed.includes(gid))
       return res.status(403).json({ error: "Forbidden – you can only edit your own dashboards" });
   }
-  const { name, slug, description, logo_text, logo_image, logo_size, accent_color, bg_color, default_theme, custom_domain, privacy_text, terms_text } = req.body;
+  const { name, slug, description, logo_text, logo_image, logo_size, accent_color, bg_color, default_theme, custom_domain, privacy_text, terms_text,
+          up_color, down_color, degraded_color, bg_color_light, accent_color_light, card_style, corner_style } = req.body;
   const public_enabled = req.body.public_enabled ? 1 : 0;
   // Only admins may change server assignments
   const server_ids = req.session.role === "admin" ? req.body.server_ids : undefined;
@@ -4176,17 +4217,25 @@ app.put("/api/admin/groups/:id", requireAuth, async (req, res) => {
     try { cleanLogo = validateLogoImage(logo_image); }
     catch(e) { return res.status(400).json({ error: e.message }); }
   }
-  let cleanBg, cleanDomain;
+  let cleanBg, cleanDomain, cleanUp, cleanDown, cleanDeg, cleanBgLight, cleanAccentLight;
   try { cleanBg = cleanHexColor(bg_color); }
   catch(e) { return res.status(400).json({ error: "Background color: " + e.message }); }
+  try { cleanUp   = cleanHexColor(up_color); }       catch(e) { return res.status(400).json({ error: "Up color: " + e.message }); }
+  try { cleanDown = cleanHexColor(down_color); }     catch(e) { return res.status(400).json({ error: "Down color: " + e.message }); }
+  try { cleanDeg  = cleanHexColor(degraded_color); } catch(e) { return res.status(400).json({ error: "Degraded color: " + e.message }); }
+  try { cleanBgLight     = cleanHexColor(bg_color_light); }     catch(e) { return res.status(400).json({ error: "Light background: " + e.message }); }
+  try { cleanAccentLight = cleanHexColor(accent_color_light); } catch(e) { return res.status(400).json({ error: "Light accent: " + e.message }); }
   try { cleanDomain = cleanCustomDomain(custom_domain); }
   catch(e) { return res.status(400).json({ error: "Custom domain: " + e.message }); }
   const cleanTheme = (default_theme === "light") ? "light" : "dark";
+  const cleanCard  = cleanCardStyle(card_style);
+  const cleanCorner = cleanCornerStyle(corner_style);
   const cleanLogoSize = Math.max(20, Math.min(120, parseInt(logo_size) || 42));
   try {
     const [result] = await db.query(
-      "UPDATE status_groups SET slug=?, name=?, description=?, logo_text=?, logo_image=?, logo_size=?, accent_color=?, bg_color=?, default_theme=?, custom_domain=?, privacy_text=?, terms_text=?, public_enabled=? WHERE id=?",
-      [finalSlug, name, description || "", logo_text || "", cleanLogo, cleanLogoSize, accent_color || "#2a7fff", cleanBg, cleanTheme, cleanDomain, privacy_text || null, terms_text || null, public_enabled, gid]
+      "UPDATE status_groups SET slug=?, name=?, description=?, logo_text=?, logo_image=?, logo_size=?, accent_color=?, bg_color=?, default_theme=?, custom_domain=?, privacy_text=?, terms_text=?, public_enabled=?, up_color=?, down_color=?, degraded_color=?, bg_color_light=?, accent_color_light=?, card_style=?, corner_style=? WHERE id=?",
+      [finalSlug, name, description || "", logo_text || "", cleanLogo, cleanLogoSize, accent_color || "#2a7fff", cleanBg, cleanTheme, cleanDomain, privacy_text || null, terms_text || null, public_enabled,
+       cleanUp, cleanDown, cleanDeg, cleanBgLight, cleanAccentLight, cleanCard, cleanCorner, gid]
     );
     if (result.affectedRows === 0) return res.status(404).json({ error: "Group not found" });
     if (Array.isArray(server_ids)) {
@@ -5578,7 +5627,41 @@ const DEFAULT_BRANDING = {
   pageTitle:    "System Status",
   privacyUrl:   "/privacy",
   termsUrl:     "/terms",
+  // New theme features (v3.4.2). NULL color fields fall back to built-in defaults
+  // in the template; presets default to the no-op variants.
+  upColor:        null,
+  downColor:      null,
+  degradedColor:  null,
+  bgColorLight:   null,
+  accentColorLight: null,
+  cardStyle:    "default",
+  cornerStyle:  "rounded",
 };
+
+// Builds the per-group branding props object passed into res.render("index", ...) /
+// res.render("incidents", ...). Centralised so adding or renaming a field only
+// requires one edit instead of four.
+function groupBranding(g, extra = {}) {
+  return {
+    groupSlug:        g.slug,
+    groupName:        g.name,
+    groupSubtitle:    g.description || "",
+    accentColor:      g.accent_color || "#2a7fff",
+    bgColor:          g.bg_color || null,
+    logoText:         g.logo_text || "",
+    logoImage:        g.logo_image || null,
+    logoSize:         g.logo_size || 42,
+    defaultTheme:     g.default_theme || "dark",
+    upColor:          g.up_color       || null,
+    downColor:        g.down_color     || null,
+    degradedColor:    g.degraded_color || null,
+    bgColorLight:     g.bg_color_light     || null,
+    accentColorLight: g.accent_color_light || null,
+    cardStyle:        g.card_style   || "default",
+    cornerStyle:      g.corner_style || "rounded",
+    ...extra,
+  };
+}
 
 // Custom-domain middleware: if the request's Host header matches any group's custom_domain,
 // render that dashboard as if /dashboard/<slug> was requested. Runs BEFORE the auth gates
@@ -5608,37 +5691,21 @@ app.use(async (req, res, next) => {
           : res.render("terms");
       }
       if (req.path === "/incidents") {
-        return res.render("incidents", {
-          groupSlug:    g.slug,
-          groupName:    g.name,
-          accentColor:  g.accent_color || "#2a7fff",
-          bgColor:      g.bg_color || null,
-          logoText:     g.logo_text || "",
-          logoImage:    g.logo_image || null,
-          logoSize:     g.logo_size || 42,
-          pageTitle:    `${g.name} — Incident History`,
-          privacyUrl:   g.privacy_text ? "/privacy" : null,
-          termsUrl:     g.terms_text   ? "/terms"   : null,
-        });
+        return res.render("incidents", groupBranding(g, {
+          pageTitle:  `${g.name} — Incident History`,
+          privacyUrl: g.privacy_text ? "/privacy" : null,
+          termsUrl:   g.terms_text   ? "/terms"   : null,
+        }));
       }
-      return res.render("index", {
+      return res.render("index", groupBranding(g, {
         // Relative /admin — keeps the viewer on their own custom domain (e.g.
         // status.myanthemcoffee.com/admin) so they can log in and manage without
         // being bounced to the gateway host.
-        adminHref:    "/admin",
-        groupSlug:    g.slug,
-        groupName:    g.name,
-        groupSubtitle: g.description || "",
-        accentColor:  g.accent_color || "#2a7fff",
-        bgColor:      g.bg_color || null,
-        logoText:     g.logo_text || "",
-        logoImage:    g.logo_image || null,
-        logoSize:     g.logo_size || 42,
-        defaultTheme: g.default_theme || "dark",
-        pageTitle:    `${g.name} — Status`,
-        privacyUrl:   g.privacy_text ? "/privacy" : null,
-        termsUrl:     g.terms_text   ? "/terms"   : null,
-      });
+        adminHref:  "/admin",
+        pageTitle:  `${g.name} — Status`,
+        privacyUrl: g.privacy_text ? "/privacy" : null,
+        termsUrl:   g.terms_text   ? "/terms"   : null,
+      }));
     }
   } catch(e) { /* silent — fall through to normal routing */ }
   next();
@@ -5658,22 +5725,13 @@ app.get("/status/:slug", pageLimiter, async (req, res) => {
     const [rows] = await db.query("SELECT * FROM status_groups WHERE slug=?", [req.params.slug]);
     if (!rows.length || !rows[0].public_enabled) return res.status(404).render("404", { slug: req.params.slug });
     const g = rows[0];
-    res.render("index", {
-      adminHref:     "/admin",
-      groupSlug:     g.slug,
-      groupName:     g.name,
-      groupSubtitle: g.description || "",
-      accentColor:   g.accent_color || "#2a7fff",
-      bgColor:       g.bg_color || null,
-      logoText:      g.logo_text || "",
-      logoImage:     g.logo_image || null,
-      logoSize:      g.logo_size || 42,
-      defaultTheme:  g.default_theme || "dark",
-      pageTitle:     `${g.name} — Status`,
-      privacyUrl:    g.privacy_text ? `/dashboard/${g.slug}/privacy` : "/privacy",
-      termsUrl:      g.terms_text   ? `/dashboard/${g.slug}/terms`   : "/terms",
-      isPublicPage:  true,
-    });
+    res.render("index", groupBranding(g, {
+      adminHref:    "/admin",
+      pageTitle:    `${g.name} — Status`,
+      privacyUrl:   g.privacy_text ? `/dashboard/${g.slug}/privacy` : "/privacy",
+      termsUrl:     g.terms_text   ? `/dashboard/${g.slug}/terms`   : "/terms",
+      isPublicPage: true,
+    }));
   } catch(e) {
     res.status(500).send("Server error");
   }
@@ -5685,22 +5743,13 @@ app.get("/dashboard/:slug", pageLimiter, async (req, res) => {
     const [rows] = await db.query("SELECT * FROM status_groups WHERE slug=?", [req.params.slug]);
     if (!rows.length) return res.status(404).render("404", { slug: req.params.slug });
     const g = rows[0];
-    res.render("index", {
+    res.render("index", groupBranding(g, {
       // Same-domain dashboard: relative /admin works (shared cookie scope with /admin)
-      adminHref:    "/admin",
-      groupSlug:    g.slug,
-      groupName:    g.name,
-      groupSubtitle: g.description || "",
-      accentColor:  g.accent_color || "#2a7fff",
-      bgColor:      g.bg_color || null,
-      logoText:     g.logo_text || "",
-      logoImage:    g.logo_image || null,
-      logoSize:     g.logo_size || 42,
-      defaultTheme: g.default_theme || "dark",
-      pageTitle:    `${g.name} — Status`,
-      privacyUrl:   g.privacy_text ? `/dashboard/${g.slug}/privacy` : "/privacy",
-      termsUrl:     g.terms_text   ? `/dashboard/${g.slug}/terms`   : "/terms",
-    });
+      adminHref:  "/admin",
+      pageTitle:  `${g.name} — Status`,
+      privacyUrl: g.privacy_text ? `/dashboard/${g.slug}/privacy` : "/privacy",
+      termsUrl:   g.terms_text   ? `/dashboard/${g.slug}/terms`   : "/terms",
+    }));
   } catch(e) {
     res.status(500).send("Server error");
   }
@@ -5725,18 +5774,11 @@ app.get("/dashboard/:slug/incidents", pageLimiter, async (req, res) => {
     const [rows] = await db.query("SELECT * FROM status_groups WHERE slug=?", [req.params.slug]);
     if (!rows.length) return res.status(404).render("404", { slug: req.params.slug });
     const g = rows[0];
-    res.render("incidents", {
-      groupSlug:    g.slug,
-      groupName:    g.name,
-      accentColor:  g.accent_color || "#2a7fff",
-      bgColor:      g.bg_color || null,
-      logoText:     g.logo_text || "",
-      logoImage:    g.logo_image || null,
-      logoSize:     g.logo_size || 42,
-      pageTitle:    `${g.name} — Incident History`,
-      privacyUrl:   g.privacy_text ? `/dashboard/${g.slug}/privacy` : "/privacy",
-      termsUrl:     g.terms_text   ? `/dashboard/${g.slug}/terms`   : "/terms",
-    });
+    res.render("incidents", groupBranding(g, {
+      pageTitle:  `${g.name} — Incident History`,
+      privacyUrl: g.privacy_text ? `/dashboard/${g.slug}/privacy` : "/privacy",
+      termsUrl:   g.terms_text   ? `/dashboard/${g.slug}/terms`   : "/terms",
+    }));
   } catch(e) { res.status(500).send("Server error"); }
 });
 

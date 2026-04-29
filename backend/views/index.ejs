@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<html lang="en" data-theme="dark">
+<html lang="en" data-theme="<%= (typeof defaultTheme !== 'undefined' && defaultTheme === 'light') ? 'light' : 'dark' %>">
 <head>
 <%- include('partials/head', { title: pageTitle }) %>
 <% if (groupSlug) { %>
@@ -431,6 +431,100 @@ canvas#responseChart{width:100%!important}
 /* -- BRAND SUBTITLE (per-dashboard branding) -- */
 .topbar-subtitle{font-size:11px;color:var(--text-2);margin-top:1px;font-weight:400}
 
+/* -- CORNER STYLE PRESETS (per-group) -----------------------------------
+   Override the rounded corners on the most-visible chrome. "rounded" is
+   the no-op default — declared so the CSS reads as an explicit triple,
+   not as "the default plus two overrides". Excludes intentionally circular
+   elements (status dots, animated pulses) which use border-radius:50%. */
+body.corner-style-sharp .topbar-icon,
+body.corner-style-sharp .topbar-logo-img,
+body.corner-style-sharp .topbar-hamburger,
+body.corner-style-sharp .topbar-admin,
+body.corner-style-sharp .topbar-login,
+body.corner-style-sharp .topbar-logout,
+body.corner-style-sharp .topbar-dash-btn,
+body.corner-style-sharp .topbar-dash-popup,
+body.corner-style-sharp .dash-nav,
+body.corner-style-sharp .srv-row,
+body.corner-style-sharp .srv-group-head,
+body.corner-style-sharp .srv-subgroup-head,
+body.corner-style-sharp .srv-subgroup-count,
+body.corner-style-sharp .srv-create-btn,
+body.corner-style-sharp .srv-badge,
+body.corner-style-sharp .srv-group-count,
+body.corner-style-sharp .srv-ms,
+body.corner-style-sharp .map-toggle-btn,
+body.corner-style-sharp .back-btn,
+body.corner-style-sharp .welcome-box,
+body.corner-style-sharp .welcome-btn,
+body.corner-style-sharp .status-big,
+body.corner-style-sharp .uptime-card,
+body.corner-style-sharp .detail-tag,
+body.corner-style-sharp .detail-map-wrap,
+body.corner-style-sharp .edit-server-btn,
+body.corner-style-sharp .admin-banner-link,
+body.corner-style-sharp .admin-banner-close { border-radius:0 !important; }
+
+body.corner-style-pill .topbar-icon,
+body.corner-style-pill .topbar-logo-img,
+body.corner-style-pill .topbar-hamburger,
+body.corner-style-pill .welcome-box,
+body.corner-style-pill .uptime-card,
+body.corner-style-pill .status-big,
+body.corner-style-pill .srv-row,
+body.corner-style-pill .srv-group-head,
+body.corner-style-pill .srv-subgroup-head,
+body.corner-style-pill .srv-create-btn,
+body.corner-style-pill .topbar-dash-popup,
+body.corner-style-pill .detail-map-wrap { border-radius:22px !important; }
+body.corner-style-pill .topbar-admin,
+body.corner-style-pill .topbar-login,
+body.corner-style-pill .topbar-logout,
+body.corner-style-pill .topbar-dash-btn,
+body.corner-style-pill .dash-nav,
+body.corner-style-pill .srv-badge,
+body.corner-style-pill .srv-group-count,
+body.corner-style-pill .srv-subgroup-count,
+body.corner-style-pill .srv-ms,
+body.corner-style-pill .map-toggle-btn,
+body.corner-style-pill .back-btn,
+body.corner-style-pill .welcome-btn,
+body.corner-style-pill .detail-tag,
+body.corner-style-pill .edit-server-btn,
+body.corner-style-pill .admin-banner-link { border-radius:999px !important; }
+
+/* -- CARD STYLE PRESETS (per-group) -------------------------------------
+   Each preset retargets the four "card-shaped" surfaces — sidebar server rows,
+   the uptime cards, sub-group heads, and the welcome box. "default" is no-op. */
+body.card-style-flat .srv-row,
+body.card-style-flat .uptime-card,
+body.card-style-flat .srv-subgroup-head,
+body.card-style-flat .welcome-box { box-shadow:none; background:var(--bg2); border-color:var(--border) }
+body.card-style-flat .srv-row::before,
+body.card-style-flat .uptime-card::before { display:none }
+
+body.card-style-glass .srv-row,
+body.card-style-glass .uptime-card,
+body.card-style-glass .srv-subgroup-head,
+body.card-style-glass .welcome-box {
+  background:rgba(255,255,255,0.04);
+  border:1px solid rgba(255,255,255,0.10);
+  backdrop-filter:blur(14px) saturate(140%);
+  -webkit-backdrop-filter:blur(14px) saturate(140%);
+}
+
+body.card-style-glow .srv-row,
+body.card-style-glow .uptime-card,
+body.card-style-glow .srv-subgroup-head { box-shadow:0 0 0 1px var(--blue-soft),0 0 22px var(--blue-glow) }
+body.card-style-glow .srv-row.active     { box-shadow:0 0 0 1px var(--blue),0 0 32px var(--blue-glow) }
+
+body.card-style-minimal .srv-row,
+body.card-style-minimal .uptime-card,
+body.card-style-minimal .srv-subgroup-head,
+body.card-style-minimal .welcome-box { background:transparent; box-shadow:none; border:1px solid var(--border) }
+body.card-style-minimal .srv-row::before,
+body.card-style-minimal .uptime-card::before { display:none }
+
 </style>
 <%
 // Color helpers (used to derive readable text + shaded surfaces from a custom bg)
@@ -466,24 +560,46 @@ function _shade(hex, amount) {
   const toHex = (v) => v.toString(16).padStart(2, "0");
   return `#${toHex(adj(c.r))}${toHex(adj(c.g))}${toHex(adj(c.b))}`;
 }
+// Per-group active palette: light vs dark. The light-mode columns are the
+// values used when default_theme === 'light'; both fall back to the dark pair
+// (which is itself optional — accentColor always has a fallback default).
+const _isLightTheme = (typeof defaultTheme !== 'undefined' && defaultTheme === 'light');
+const _activeAccent = _isLightTheme && (typeof accentColorLight !== 'undefined' && accentColorLight) ? accentColorLight : accentColor;
+const _activeBg     = _isLightTheme && (typeof bgColorLight     !== 'undefined' && bgColorLight)     ? bgColorLight     : bgColor;
+const _upColor       = (typeof upColor       !== 'undefined' && upColor)       ? upColor       : null;
+const _downColor     = (typeof downColor     !== 'undefined' && downColor)     ? downColor     : null;
+const _degradedColor = (typeof degradedColor !== 'undefined' && degradedColor) ? degradedColor : null;
 %>
 <style>:root{
-  --blue: <%= accentColor %>;
-  --blue-soft: <%= _hexToRgba(accentColor, 0.12) %>;
-  --blue-glow: <%= _hexToRgba(accentColor, 0.25) %>;
+  --blue: <%= _activeAccent %>;
+  --blue-soft: <%= _hexToRgba(_activeAccent, 0.12) %>;
+  --blue-glow: <%= _hexToRgba(_activeAccent, 0.25) %>;
+<% if (_upColor) { %>
+  --green:      <%= _upColor %>;
+  --green-soft: <%= _hexToRgba(_upColor, 0.10) %>;
+<% } %>
+<% if (_downColor) { %>
+  --red:      <%= _downColor %>;
+  --red-soft: <%= _hexToRgba(_downColor, 0.10) %>;
+<% } %>
+<% if (_degradedColor) { %>
+  --orange:      <%= _degradedColor %>;
+  --orange-soft: <%= _hexToRgba(_degradedColor, 0.12) %>;
+  --orange-glow: <%= _hexToRgba(_degradedColor, 0.30) %>;
+<% } %>
 }</style>
 
-<% if (bgColor) {
+<% if (_activeBg) {
   // Custom background mode: derive shades + pick a readable text palette by luminance
-  const lum         = _luminance(bgColor);
+  const lum         = _luminance(_activeBg);
   const isDarkBg    = lum < 0.5;
   // Lighter backgrounds get progressively darker shades for surface contrast; darker backgrounds get lighter ones
   const shadeStep   = isDarkBg ? 0.12 : -0.06;
-  const bg          = bgColor;
-  const bg2         = _shade(bgColor, shadeStep * 1.0);
-  const sidebar     = _shade(bgColor, shadeStep * 1.5);
-  const surface     = _shade(bgColor, shadeStep * 2.0);
-  const surface2    = _shade(bgColor, shadeStep * 2.8);
+  const bg          = _activeBg;
+  const bg2         = _shade(_activeBg, shadeStep * 1.0);
+  const sidebar     = _shade(_activeBg, shadeStep * 1.5);
+  const surface     = _shade(_activeBg, shadeStep * 2.0);
+  const surface2    = _shade(_activeBg, shadeStep * 2.8);
   // Text + border palettes — picked by luminance, NOT by the user's default_theme
   const text        = isDarkBg ? "#c8d6e8" : "#3a4658";
   const text2       = isDarkBg ? "rgba(255,255,255,0.55)" : "rgba(20,30,45,0.55)";
@@ -509,7 +625,7 @@ function _shade(hex, amount) {
 </style>
 <% } %>
 </head>
-<body>
+<body class="card-style-<%= (typeof cardStyle !== 'undefined' && cardStyle) || 'default' %> corner-style-<%= (typeof cornerStyle !== 'undefined' && cornerStyle) || 'rounded' %>">
 
 <%- include('partials/topbar-public', {
   adminHref:     adminHref,

@@ -6,6 +6,27 @@ All notable changes to this project are documented here.
 
 ---
 
+## [3.4.2] — 2026-04-29 *(per-group theme features)*
+
+### New
+Five additive theme controls per group, all configurable from the Group edit form in admin (Theme & Visual Style section). All are optional — every existing dashboard renders identically until an admin opts in.
+
+- **Status colors** — override the green / red / orange used everywhere a status is shown (sidebar dots, badges, heartbeat strips, big status pills, SSE map markers). Three columns: `up_color`, `down_color`, `degraded_color`. NULL = built-in default. Soft / glow rgba variants are derived from the hex via the existing `_hexToRgba` helper, so the override cascades to backgrounds, animations, and outlines without manual rgba juggling.
+- **Light-mode palette** — `bg_color_light` and `accent_color_light` columns. Used when `default_theme === 'light'`; the existing `bg_color` / `accent_color` stay as the dark-mode pair. Server-side renders a single active palette per request based on `default_theme` (no JS theme toggle yet — the field finally Does Something instead of being a stored-but-unused string).
+- **Theme presets** — five one-click chips in admin (Default / Midnight / Forest / Sunset / Mono) that populate every theme field below. Convenience-only; no DB column for the preset name.
+- **Card style** — visual treatment of server cards, uptime cards, sidebar rows. Five values: `default` (current), `flat` (no shadows / gradients), `glass` (backdrop-blurred translucent), `glow` (accent halo), `minimal` (transparent + border only). Implemented via `body.card-style-X` + override rules; `default` is a no-op.
+- **Corner style** — three values: `rounded` (current — no-op), `sharp` (zero-radius), `pill` (large-radius cards + 999px badges/buttons). Implemented via `body.corner-style-X` + override rules. Excludes intentionally-circular elements (status dots).
+
+### Internals
+- New `groupBranding(g, extra)` helper in `server.js` — centralises the five `res.render('index'/'incidents', ...)` call sites that all duplicated the same shape. Adding a sixth theme column now means one edit instead of four.
+- New whitelist validators `cleanCardStyle()` / `cleanCornerStyle()` so an invalid value from the API can't wedge a dashboard — falls back to the documented default.
+- The previously-stored-but-unused `default_theme` column is now actually read at render time. Existing rows continue to render exactly as before because they're all `'dark'`.
+
+### Migration
+Pure additive — seven new columns on `status_groups`, all `DEFAULT NULL` or with sensible defaults (`'default'` / `'rounded'`). Schema migration runs in-place on boot via the existing `ALTER TABLE` + try/catch pattern. Zero data loss, zero downtime.
+
+---
+
 ## [3.4.1] — 2026-04-29 *(Omada token re-auth on controller reboot)*
 
 ### Bug fix
