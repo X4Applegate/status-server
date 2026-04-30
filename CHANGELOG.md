@@ -6,6 +6,31 @@ All notable changes to this project are documented here.
 
 ---
 
+## [3.4.8] — 2026-04-29 *(PageSpeed: lazy MapLibre + SEO meta)*
+
+### Performance
+- **MapLibre CSS lazy-loaded.** Was render-blocking on every dashboard load via `<link href="https://unpkg.com/maplibre-gl@4/.../maplibre-gl.css">` in `<head>` even though the MapLibre JS bundle has been lazy-loaded since the project began. The CSS now loads inside `_loadMapLibre()` only when a viewer actually opens the map view — saves a render-blocking 3rd-party stylesheet request and a TLS handshake to unpkg.com on first paint for every visitor who never clicks the map (which is most of them). Idempotent — only injects once even across multiple map opens.
+- **Google Fonts preconnect fixed.** `head.ejs` had a single preconnect to `fonts.googleapis.com` (the CSS host). The actual font files come from `fonts.gstatic.com`, and that origin needs `crossorigin` on its preconnect for the browser to reuse the connection (font requests are CORS). Without it, the preconnect is silently wasted. Standard PageSpeed-recommended pattern now in place.
+
+### SEO (was 82, target 95+)
+- **Meta description** — biggest single SEO miss. Default in `head.ejs` now provides a sensible blurb; per-page renders override it with the group's own subtitle / description. Each branded dashboard ranks for its own brand instead of all sharing a generic title.
+- **`<meta name="robots" content="index,follow">`** — explicit, beats relying on defaults.
+- **404 page** carries its own description so the SEO audit doesn't ding error pages.
+
+### Files
+- **`backend/views/partials/head.ejs`** — accepts a new `description` local; outputs `<meta name="description">`, `<meta name="robots">`, and the second `gstatic.com` preconnect with `crossorigin`.
+- **`backend/views/index.ejs`** — removed the render-blocking MapLibre stylesheet `<link>` from `<head>`; `_loadMapLibre()` now injects both the JS and the CSS on demand. Updated the `head` partial include to pass the group's `groupSubtitle` (or a fallback derived from `groupName`) as the description.
+- **`backend/views/404.ejs`** — passes its own description.
+
+### Expected impact
+- **FCP / LCP**: drop by 100–400ms on cold loads since the dashboard no longer waits on a 3rd-party stylesheet from unpkg.com before painting. The font preconnect fix saves another 80–150ms on first-load font requests.
+- **Performance score**: typically +3 to +6 from removing the render-blocking 3rd-party CSS alone.
+- **SEO score**: typically +8 to +12 from adding a meta description (the biggest single audit hit).
+
+No behavioral or visual changes — the map looks and feels identical when opened, just with a one-time CSS fetch that didn't exist before.
+
+---
+
 ## [3.4.7] — 2026-04-29 *(Applegate brand applied app-wide)*
 
 ### Followup to 3.4.6

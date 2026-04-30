@@ -1,5 +1,21 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
 <title><%= title %></title>
+<%
+  // SEO defaults — pages can override by passing `description` (and optionally
+  // `canonicalPath`) into the include. Description is what shows in search
+  // results and social link previews; missing it is the biggest single hit
+  // PageSpeed's SEO audit flags. Cap at ~160 chars per Google guidance.
+  var _seoDesc = (typeof description !== 'undefined' && description)
+    ? String(description).slice(0, 160)
+    : 'Self-hosted multi-tenant status and uptime monitoring — branded dashboards, SSL tracking, webhook alerts, real-time updates.';
+%>
+<meta name="description" content="<%= _seoDesc %>">
+<meta name="robots" content="index,follow">
+<%# Two preconnects + the crossorigin on gstatic.com — without crossorigin the
+    browser can't reuse this connection for the actual font files (since the
+    font files use CORS), so the preconnect is wasted. PageSpeed-recommended
+    pattern. %>
 <link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">

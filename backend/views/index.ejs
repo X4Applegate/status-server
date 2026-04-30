@@ -1,7 +1,14 @@
 <!DOCTYPE html>
 <html lang="en" data-theme="<%= (typeof defaultTheme !== 'undefined' && defaultTheme === 'light') ? 'light' : 'dark' %>">
 <head>
-<%- include('partials/head', { title: pageTitle }) %>
+<%- include('partials/head', {
+  title:       pageTitle,
+  // Use the group's own subtitle/description if set so each dashboard ranks
+  // for its own brand; fall back to the title-derived blurb otherwise.
+  description: (typeof groupSubtitle !== 'undefined' && groupSubtitle)
+                 ? groupSubtitle
+                 : (groupName + ' — live status and uptime monitoring')
+}) %>
 <% if (groupSlug) {
   // theme-color drives the OS chrome tint (Android nav bar, iOS Safari toolbar).
   // Match the active palette so a Light-theme group doesn't get a dark accent.
@@ -15,7 +22,9 @@
 <link rel="apple-touch-icon" href="/api/icon/<%= groupSlug %>">
 <meta name="theme-color" content="<%= _pwaAccent || '#2a7fff' %>">
 <% } %>
-<link href="https://unpkg.com/maplibre-gl@4/dist/maplibre-gl.css" rel="stylesheet">
+<%# MapLibre CSS is lazy-loaded by _loadMapLibre() in the body script, the same
+    way the MapLibre JS is — no point paying a render-blocking 3rd-party CSS
+    request on every page load when most viewers never open the map. %>
 <style>
 *,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
 /* Built-in dashboard palette — Applegate brand baseline (richardapplegate.io).
@@ -768,9 +777,19 @@ function _getMapStyle() {
   return "https://basemaps.cartocdn.com/gl/dark-matter-gl-style/style.json";
 }
 
-// Load MapLibre GL JS dynamically (CSS already in <head>)
+// Load MapLibre GL JS + CSS lazily — only when the user actually opens a map
+// view. Saves a render-blocking stylesheet request and a multi-hundred-KB
+// JS bundle on every dashboard load for visitors who never click the map.
 function _loadMapLibre(cb) {
   if (typeof maplibregl !== "undefined") { cb(); return; }
+  // CSS first (idempotent — only inject once even if multiple maps open)
+  if (!document.getElementById("maplibre-css")) {
+    const css = document.createElement("link");
+    css.id = "maplibre-css";
+    css.rel = "stylesheet";
+    css.href = "https://unpkg.com/maplibre-gl@4/dist/maplibre-gl.css";
+    document.head.appendChild(css);
+  }
   const s = document.createElement("script");
   s.src = "https://unpkg.com/maplibre-gl@4/dist/maplibre-gl.js";
   s.onload = cb;
