@@ -1994,6 +1994,8 @@ async function switchTab(tab){
   document.getElementById("aGroupFormView").style.display   = "none";
   document.getElementById("aOmadaFormView").style.display   = "none";
   document.getElementById("aOmadaSitesView").style.display  = "none";
+  const _uff = document.getElementById("aUnifiFormView"); if (_uff) _uff.style.display = "none";
+  const _ufs = document.getElementById("aUnifiSitesView"); if (_ufs) _ufs.style.display = "none";
   document.getElementById("aSquareFormView").style.display  = "none";
   const maintFormView = document.getElementById("aMaintFormView");
   if (maintFormView) maintFormView.style.display = "none";
@@ -3587,31 +3589,57 @@ let unifiSitesCache = {};
 let currentUnifiCtrl = null;
 
 async function loadUnifiList() {
+  const el = document.getElementById("adminPanelBody");
   const cached = cacheGet("admin-unifi");
-  if (!cached) {
+  if (cached) { adminUnifi = cached; renderUnifiList(adminUnifi); }
+  else el.innerHTML = '<div style="padding:24px;text-align:center;color:var(--text-2)">Loading controllers...</div>';
+  try {
     const r = await fetch("/api/admin/unifi-controllers");
-    if (r.ok) { adminUnifi = await r.json(); cacheSet("admin-unifi", adminUnifi); }
-  } else { adminUnifi = cached; }
-  const list = document.getElementById("aList");
-  if (!list) return;
-  if (!adminUnifi.length) { list.innerHTML = '<div class="admin-empty">No UniFi controllers yet.</div>'; return; }
-  list.innerHTML = adminUnifi.map(c => {
-    const errBadge = c.last_error ? `<div class="admin-checks-label" style="color:var(--red)">&#9888; ${c.last_error}</div>` : "";
-    const grps = c.group_ids && c.group_ids.length ? `<div class="admin-checks-label">groups: ${c.group_ids.join(", ")}</div>` : '<div class="admin-checks-label">global</div>';
-    return `<div class="admin-server-row"><div class="admin-server-info"><div class="admin-server-name">${c.name}</div><div class="admin-checks-label">${c.base_url}</div>${grps}${errBadge}</div><div class="admin-server-actions"><button class="btn btn-sm" onclick="showUnifiSites(${c.id})">Sites</button><button class="btn btn-sm" onclick="showUnifiForm(${c.id})">Edit</button><button class="btn btn-sm btn-danger" onclick="confirmDelUnifi(${c.id}, '${c.name.replace(/'/g,"\\'")}')">Delete</button></div></div>`;
-  }).join("");
+    if (r.status === 401) { window.location.href = "/"; return; }
+    if (!r.ok) { if (!cached) el.innerHTML = '<div class="empty-state">Error ' + r.status + '</div>'; return; }
+    adminUnifi = await r.json();
+    cacheSet("admin-unifi", adminUnifi);
+    renderUnifiList(adminUnifi);
+  } catch(e) {
+    if (!cached) el.innerHTML = '<div class="empty-state">Failed to load: ' + e.message + '</div>';
+  }
 }
 
-async function showUnifiForm(id) {
+function renderUnifiList(list) {
+  const el = document.getElementById("adminPanelBody");
+  document.getElementById("aCount").textContent = list.length + ' controller' + (list.length===1?'':'s');
+  if (!list.length) {
+    el.innerHTML = '<div class="empty-state">No UniFi controllers yet.<br>Click <strong>Add Controller</strong> to register one.</div>';
+    return;
+  }
+  el.innerHTML = list.map(function(c, idx) {
+    var errBadge = c.last_error ? '<div class="admin-checks-label" style="color:var(--red)">&#9888; ' + c.last_error + '</div>' : '';
+    var groupNames = (c.group_ids||[]).map(function(gid){ var g = adminGroups.find(function(x){return x.id===gid;}); return g ? g.name : null; }).filter(Boolean);
+    var groupBadge = groupNames.length ? '<div class="admin-checks-label">' + groupNames.join(', ') + '</div>' : '<div class="admin-checks-label" style="color:var(--text-2)">Global (all groups)</div>';
+    return '<div class="admin-server-item" onclick="showUnifiSites(' + c.id + ')">'
+      + '<div class="admin-dot ' + (c.last_error ? 'down' : 'up') + '"></div>'
+      + '<div class="admin-info">'
+      + '<div class="admin-name">' + c.name + '</div>'
+      + '<div class="admin-host">' + c.base_url + '</div>'
+      + groupBadge + errBadge
+      + '</div>'
+      + '<div class="admin-row-actions" onclick="event.stopPropagation()">'
+      + '<button class="btn btn-sm" onclick="showUnifiSites(' + c.id + ')">Sites</button>'
+      + '<button class="btn btn-sm" onclick="showUnifiForm(adminUnifi[' + idx + '])">Edit</button>'
+      + '<button class="btn btn-sm btn-danger" onclick="confirmDelUnifi(' + c.id + ',\'' + c.name.replace(/\\/g,'\\\\').replace(/'/g,"\\'") + '\')">Remove</button>'
+      + '</div></div>';
+  }).join('');
+}
+
+async function showUnifiForm(c) {
   hideAllSections(); document.getElementById("aUnifiFormView").style.display = "";
-  document.getElementById("ufFormHeading").textContent = id ? "Edit UniFi Controller" : "Add UniFi Controller";
-  document.getElementById("ufId").value = id || "";
+  document.getElementById("ufFormHeading").textContent = c ? "Edit UniFi Controller" : "Add UniFi Controller";
+  document.getElementById("ufId").value = c ? c.id : "";
   document.getElementById("ufErr").textContent = "";
   const allGroups = await loadGroups();
   let selGroups = [];
-  if (id) {
-    const c = adminUnifi.find(x => x.id === id);
-    if (c) {
+  if (c) {
+    {
       document.getElementById("ufName").value = c.name;
       document.getElementById("ufUrl").value = c.base_url;
       document.getElementById("ufUsername").value = c.username || "";
