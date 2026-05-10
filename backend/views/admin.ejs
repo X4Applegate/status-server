@@ -2081,6 +2081,8 @@ function renderAdminServerList(list){
       c.type==="dns"?`DNS ${(c.record_type||"A").toUpperCase()}`:
       c.type==="omada_gateway"?"Omada WAN":
       c.type==="unifi_gateway"?"UniFi WAN":
+      c.type==="unifi_wan"?"UniFi WAN Health":
+      c.type==="unifi_client_count"?"UniFi Clients":
       c.type==="unifi_device"?(c.device_name||"UniFi Device"):
       c.type==="omada_lte"?"Omada LTE":
       c.type==="omada_device"?(c.device_name||"Omada Device"):
@@ -2313,11 +2315,14 @@ function renderCrows(){
           ["A","AAAA","CNAME","MX","TXT","NS"].map(rtOpt).join("") +
         `</select>` +
         `<input class="finput" placeholder="Expected value (optional)" value="${ck.expected || ""}" oninput="upCk(${i},'expected',this.value)">`;
-    } else if (ck.type === "unifi_gateway") {
-      extra = `<select class="fselect check-ctrl" data-i="${i}" data-k="controller_id" onchange="populateUnifiSitePicker(${i})"><option value="">-- controller --</option>${adminUnifi.map(c=>`<option value="${c.id}" ${ck.controller_id==c.id?"selected":""}>${c.name}</option>`).join("")}</select>`;
-      extra += `<div id="ufSitePick${i}"></div>`;
+    } else if (ck.type === "unifi_gateway" || ck.type === "unifi_wan" || ck.type === "unifi_client_count") {
+      var ctrlOpts2 = adminUnifi.map(function(c){return '<option value="'+c.id+'" '+(ck.controller_id==c.id?'selected':'')+'>'+c.name+'</option>';}).join("");
+      var noCtrl2 = adminUnifi.length ? "" : '<span class="crow-hint" style="color:var(--red)">No UniFi controllers. Add one in Network Controller.</span>';
+      var minFld = ck.type==="unifi_client_count" ? '<input class="finput" type="number" min="0" placeholder="Min clients (0=any)" value="'+(ck.min_clients||0)+'" oninput="upCk('+i+',&quot;min_clients&quot;,parseInt(this.value)||0)" style="max-width:170px">' : "";
+      var siteSel2 = ck.controller_id ? '<select class="fselect" id="ufSiteSel'+i+'"><option value="">'+(ck.site?"Loading…":"— Pick site —")+'</option></select>' : "";
+      detail = noCtrl2 || ('<select class="fselect" onchange="upCk('+i+',&quot;controller_id&quot;,parseInt(this.value));upCk('+i+',&quot;site&quot;,&quot;&quot;);upCk('+i+',&quot;site_name&quot;,&quot;&quot;);populateUnifiSitePicker('+i+')"><option value="">— Controller —</option>'+ctrlOpts2+'</select>'+siteSel2+minFld);
     } else if (ck.type === "unifi_device") {
-      extra = `<div class="admin-checks-label">${ck.device_name||ck.device_mac||"Device"} &middot; site: ${ck.site_name||ck.site||""}</div>`;
+      detail = '<span class="crow-hint">'+(ck.device_name||ck.device_mac||"Device")+" · site: "+(ck.site_name||ck.site||"")+"</span>";
         } else if (ck.type === "omada_device") {
       detail = `<span class="crow-hint">${ck.device_name || ck.device_mac || "Unknown device"} · <span style="font-family:var(--mono)">${ck.device_mac || ""}</span></span>`;
     } else if (ck.type === "omada_gateway" || ck.type === "omada_lte") {
@@ -2361,6 +2366,8 @@ function renderCrows(){
       + "<option value=\"omada_device\" "  + sel("omada_device")  + ">Omada AP / Switch</option>"
       + "<option value=\"unifi_gateway\" " + sel("unifi_gateway") + ">UniFi Gateway</option>"
       + "<option value=\"unifi_device\"  " + sel("unifi_device")  + ">UniFi AP / Switch</option>"
+      + "<option value=\"unifi_wan\"      " + sel("unifi_wan")      + ">UniFi WAN Health</option>"
+      + "<option value=\"unifi_client_count\" " + sel("unifi_client_count") + ">UniFi Client Count</option>"
       + "<option value=\"square_pos\" "    + sel("square_pos")    + ">Square POS</option>"
       + (isAdmin() ? "<option value=\"script\" " + sel("script") + ">Script (exit code)</option>" : "")
       + "</select>"
@@ -2371,6 +2378,7 @@ function renderCrows(){
   // After render, populate any omada site pickers that already have a controller selected
   currentChecks.forEach((ck, i) => {
     if ((ck.type === "omada_gateway" || ck.type === "omada_lte") && ck.controller_id) populateOmadaSitePicker(i);
+    if ((ck.type === "unifi_gateway" || ck.type === "unifi_wan" || ck.type === "unifi_client_count") && ck.controller_id) populateUnifiSitePicker(i);
   });
 }
 
@@ -3620,6 +3628,7 @@ function renderUnifiList(list) {
     var groupNames = (c.group_ids||[]).map(function(gid){ var g = adminGroups.find(function(x){return x.id===gid;}); return g ? g.name : null; }).filter(Boolean);
     var groupBadge = groupNames.length ? '<div class="admin-checks-label">' + groupNames.join(', ') + '</div>' : '<div class="admin-checks-label" style="color:var(--text-2)">Global (all groups)</div>';
     return '<div class="admin-server-item" onclick="showUnifiSites(' + c.id + ')">'
+    + '<div class="admin-dot" id="uhDot' + c.id + '" style="opacity:0.35" title="Checking..."></div>'
       + '<div class="admin-dot ' + (c.last_error ? 'down' : 'up') + '"></div>'
       + '<div class="admin-info">'
       + '<div class="admin-name">' + c.name + '</div>'
@@ -3632,6 +3641,7 @@ function renderUnifiList(list) {
       + '<button class="btn btn-sm btn-danger" onclick="confirmDelUnifi(' + c.id + ',\'' + c.name.replace(/\\/g,'\\\\').replace(/'/g,"\\'") + '\')">Remove</button>'
       + '</div></div>';
   }).join('');
+  setTimeout(function(){ refreshUnifiHealth(list); }, 0);
 }
 
 async function showUnifiForm(c) {
@@ -3714,7 +3724,7 @@ async function showUnifiSites(controllerId) {
     const sites = await r.json();
     unifiSitesCache[controllerId] = sites;
     document.getElementById("ufSitesList").innerHTML = sites.map(s =>
-      `<div class="admin-server-row"><div class="admin-server-info"><div class="admin-server-name">${s.name}</div><div class="admin-checks-label">id: ${s.id}</div></div><div class="admin-server-actions"><button class="btn btn-sm" onclick="addUnifiGatewayServer(${controllerId},'${s.id}','${s.name.replace(/'/g,"\\'")}')">Add Gateway</button><button class="btn btn-sm" onclick="showUnifiDevices(${controllerId},'${s.id}','${s.name.replace(/'/g,"\\'")}')">Devices</button></div></div>`
+      `<div class="admin-server-row"><div class="admin-server-info"><div class="admin-server-name">${s.name}</div><div class="admin-checks-label">id: ${s.id}</div></div><div class="admin-server-actions"><button class="btn btn-sm" onclick="addUnifiGatewayServer(${controllerId},'${s.id}','${s.name.replace(/'/g,"\\'")}')">Add Gateway</button><button class="btn btn-sm" onclick="addUnifiWanServer(${controllerId},'${s.id}','${s.name.replace(/'/g,"\\'")}')">WAN</button><button class="btn btn-sm" onclick="addUnifiClientCountServer(${controllerId},'${s.id}','${s.name.replace(/'/g,"\\'")}')">Clients</button><button class="btn btn-sm" onclick="showUnifiDevices(${controllerId},'${s.id}','${s.name.replace(/'/g,"\\'")}')">Devices</button></div></div>`
     ).join("") || '<div class="admin-empty">No sites found.</div>';
   } catch(e) {
     document.getElementById("ufSitesList").innerHTML = `<div style="color:var(--red)">${e.message}</div>`;
@@ -3725,10 +3735,18 @@ async function showUnifiDevices(controllerId, siteId, siteName) {
   const r = await fetch(`/api/admin/unifi-controllers/${controllerId}/sites/${encodeURIComponent(siteId)}/devices`);
   if (!r.ok) { alert("Error loading devices"); return; }
   const devices = await r.json();
+  function fmtUp(s){if(!s)return"";var d2=Math.floor(s/86400),h=Math.floor((s%86400)/3600),m=Math.floor((s%3600)/60);return(d2?d2+"d ":"")+(h?h+"h ":"")+(m?m+"m":"").trim();}
+  var rows = devices.map(function(d) {
+    var meta=[d.model||d.type,d.ip,d.version?"fw:"+d.version:null,fmtUp(d.uptime),d.clients!=null?d.clients+" clients":null,d.state===1?"online":"offline"].filter(Boolean).join(" \u00b7 ");
+    var ss=siteName.replace(/'/g,"\\'"); var sn=d.name.replace(/'/g,"\\'");
+    return '<div class="admin-server-row"><div class="admin-server-info"><div class="admin-server-name">'+d.name+'</div>'
+           + '<div class="admin-checks-label">'+meta+'</div></div>'
+           + '<div class="admin-server-actions"><button class="btn btn-sm" onclick="addUnifiDeviceServer('+controllerId+',\''+siteId+'\',\''+ss+'\',\''+d.mac+'\',\''+sn+'\')">Add Check</button></div></div>';
+  }).join("") || '<div class="admin-empty">No devices.</div>';
   document.getElementById("ufSitesList").innerHTML =
-    `<button class="btn btn-sm" onclick="showUnifiSites(${controllerId})" style="margin-bottom:10px">&#8592; Back</button>
-    <div class="form-heading" style="margin-bottom:10px">${siteName} Devices</div>
-    ${devices.map(d => `<div class="admin-server-row"><div class="admin-server-info"><div class="admin-server-name">${d.name}</div><div class="admin-checks-label">${d.model||d.type||""} &middot; ${d.mac} &middot; ${d.state===1?"online":"offline"}</div></div><div class="admin-server-actions"><button class="btn btn-sm" onclick="addUnifiDeviceServer(${controllerId},'${siteId}','${siteName.replace(/'/g,"\\'")}','${d.mac}','${d.name.replace(/'/g,"\\'")}')">Add Check</button></div></div>`).join("") || '<div class="admin-empty">No devices.</div>'}`;
+    '<button class="btn btn-sm" onclick="showUnifiSites('+controllerId+')" style="margin-bottom:10px">&#8592; Back</button>'
+    + '<div class="form-heading" style="margin-bottom:10px">'+siteName+' Devices</div>'
+    + rows;
 }
 
 function addUnifiGatewayServer(controllerId, siteId, siteName) {

@@ -2019,6 +2019,12 @@ async function unifiListDevices(controller, site) {
   return Array.isArray(data) ? data : [];
 }
 
+async function unifiListHealth(controller, site) {
+  const safeSite = (site || "default").replace(/[^A-Za-z0-9\-_]/g, "");
+  const data = await unifiApiGet(controller, "/api/s/" + safeSite + "/stat/health");
+  return Array.isArray(data) ? data : [];
+}
+
 const UNIFI_GW_TYPES = new Set(["ugw","udm","udmpro","udm-pro","uxg","udm-se","udm-pro-max","uxg-pro"]);
 
 async function unifiGatewayCheck(controllerId, site, siteName) {
@@ -2075,6 +2081,49 @@ async function unifiDeviceCheck(controllerId, site, siteName, deviceMac, deviceN
     return { type:"unifi_device", ok, detail, response_ms: apiResponseMs };
   } catch(e) {
     return { type:"unifi_device", ok:false, detail: e.message };
+  }
+}
+
+async function unifiWanCheck(controllerId, site, siteName) {
+  try {
+    const t0 = Date.now();
+    const [rows] = await db.query("SELECT * FROM status_unifi_controllers WHERE id=?", [controllerId]);
+    if (!rows.length) return { type:"unifi_wan", ok:false, detail:"controller not found" };
+    const ctrl = rows[0];
+    ctrl.group_ids = await unifiLoadGroupIds(ctrl.id);
+    const health = await unifiListHealth(ctrl, site);
+    const apiResponseMs = Date.now() - t0;
+    const wan = health.find(h => h.subsystem === "wan");
+    if (!wan) return { type:"unifi_wan", ok:false, detail:"WAN subsystem not found in health data" };
+    const ok = wan.status === "ok";
+    let detail = ok ? "WAN up" : "WAN " + (wan.status || "unknown");
+    if (wan.latency != null) detail += " \u00b7 " + wan.latency + "ms latency";
+    if (wan.speedtest_ping != null) detail += " \u00b7 " + wan.speedtest_ping + "ms ping";
+    return { type:"unifi_wan", ok, detail, response_ms: apiResponseMs };
+  } catch(e) {
+    return { type:"unifi_wan", ok:false, detail: e.message };
+  }
+}
+
+async function unifiClientCountCheck(controllerId, site, siteName, minClients) {
+  try {
+    const t0 = Date.now();
+    const [rows] = await db.query("SELECT * FROM status_unifi_controllers WHERE id=?", [controllerId]);
+    if (!rows.length) return { type:"unifi_client_count", ok:false, detail:"controller not found" };
+    const ctrl = rows[0];
+    ctrl.group_ids = await unifiLoadGroupIds(ctrl.id);
+    const health = await unifiListHealth(ctrl, site);
+    const apiResponseMs = Date.now() - t0;
+    const lan  = health.find(h => h.subsystem === "lan");
+    const wlan = health.find(h => h.subsystem === "wlan");
+    const numSta = (lan ? (lan.num_sta || 0) : 0) + (wlan ? (wlan.num_sta || 0) : 0);
+    const threshold = minClients != null ? parseInt(minClients) : 0;
+    const ok = numSta >= threshold;
+    const detail = numSta + " client" + (numSta === 1 ? "" : "s") + " connected"
+                 + (threshold > 0 ? " (min: " + threshold + ")" : "");
+    return { type:"unifi_client_count", ok, detail, response_ms: apiResponseMs };
+  } catch(e) {
+    return { type:"unifi_client_count", ok:false, detail: e.message };
   }
 }
 
@@ -2192,6 +2241,8 @@ async function runChecks(def) {
       if (c.type==="omada_device")  return await omadaDeviceCheck(c.controller_id, c.site_id, c.customer_id, c.site_name, c.customer_name, c.device_mac, c.device_name);
       if (c.type==="unifi_gateway") return await unifiGatewayCheck(c.controller_id, c.site, c.site_name);
       if (c.type==="unifi_device")  return await unifiDeviceCheck(c.controller_id, c.site, c.site_name, c.device_mac, c.device_name);
+      if (c.type==="unifi_wan")          return await unifiWanCheck(c.controller_id, c.site, c.site_name);
+      if (c.type==="unifi_client_count") return await unifiClientCountCheck(c.controller_id, c.site, c.site_name, c.min_clients);
       if (c.type==="square_pos")   return await squarePosCheck(c.account_id||0, c.location_id, c.device_id||"", c.timeout, c.access_token||"");
       if (c.type==="script")       return await scriptCheck(c.command, c.timeout);
       return { type:c.type, ok:false, detail:"unknown check type" };
@@ -2225,6 +2276,8 @@ async function recordHistory(def, checks, overall) {
                   : ch.type === "omada_device"  ? `omada_device:${ch.device_name||ch.device_mac||"?"}`
                   : ch.type === "unifi_gateway" ? "unifi_gateway"
                   : ch.type === "unifi_device"  ? "unifi_device:" + (ch.device_name||ch.device_mac||"?")
+                  : ch.type === "unifi_wan"          ? "unifi_wan:" + (ch.site_name||ch.site||"?")
+                  : ch.type === "unifi_client_count" ? "unifi_clients:" + (ch.site_name||ch.site||"?")
                   : ch.type === "square_pos"    ? `square_pos:${ch.location_id||"?"}`
                   : ch.type === "script"        ? `script`
                   : ch.type;
@@ -4718,9 +4771,29 @@ app.get("/api/admin/unifi-controllers/:id/sites/:site/devices", requireAuth, asy
       type:    d.type || null,
       state:   d.state,
       uptime:  d.uptime || null,
+      ip:      d.ip || null,
+      version: d.version || null,
       clients: d.num_sta != null ? d.num_sta : null
     })));
   } catch(e) { res.status(502).json({ error: e.message }); }
+});
+
+// ── UniFi Controller Health ─────────────────────────────────────────────────
+app.get('/api/admin/unifi-controllers/:id/health', requireAuth, async (req, res) => {
+  const id = parseInt(req.params.id);
+  try {
+    const [rows] = await db.query('SELECT * FROM status_unifi_controllers WHERE id=?', [id]);
+    if (!rows.length) return res.status(404).json({ ok: false, error: 'not found' });
+    const groupMap = await unifiLoadGroupIds([id]);
+    if (!(await userCanManageUnifiCtrl(req, groupMap[id] || [])))
+      return res.status(403).json({ ok: false, error: 'forbidden' });
+    const ctrl = rows[0];
+    ctrl.group_ids = groupMap[id] || [];
+    const sites = await unifiListSites(ctrl);
+    res.json({ ok: true, site_count: sites.length });
+  } catch(e) {
+    res.json({ ok: false, error: e.message });
+  }
 });
 
 // ── Square Accounts ───────────────────────────────────────────────────────────
