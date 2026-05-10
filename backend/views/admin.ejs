@@ -591,7 +591,7 @@ body{font-family:var(--sans);background:var(--bg);color:var(--text);min-height:1
   </div>
   <div id="aListView" class="admin-section">
     <div class="drawer-toolbar">
-      <div class="admin-tabs"><button class="admin-tab active" id="tabServers" onclick="switchTab('servers')">Servers</button><button class="admin-tab" id="tabGroups" onclick="switchTab('groups')">Groups</button><button class="admin-tab" id="tabOmada" onclick="switchTab('omada')">Omada</button><button class="admin-tab" id="tabSquare" onclick="switchTab('square')">Square</button><button class="admin-tab" id="tabMaint" onclick="switchTab('maint')">Maintenance</button><button class="admin-tab" id="tabIncidents" onclick="switchTab('incidents')">Incidents</button><button class="admin-tab" id="tabBanners" onclick="switchTab('banners')">Banners</button><button class="admin-tab" id="tabApiKeys" onclick="switchTab('apikeys')">API Keys</button><button class="admin-tab" id="tabUsers" onclick="switchTab('users')">Users</button><button class="admin-tab" id="tabWebhooks" onclick="switchTab('webhooks')">Webhooks</button><button class="admin-tab" id="tabSettings" onclick="switchTab('settings')">Settings</button><button class="admin-tab" id="tabAudit" onclick="switchTab('audit')">Audit</button></div>
+      <div class="admin-tabs"><button class="admin-tab active" id="tabServers" onclick="switchTab('servers')">Servers</button><button class="admin-tab" id="tabGroups" onclick="switchTab('groups')">Groups</button><button class="admin-tab" id="tabOmada" onclick="switchTab('omada')">Omada</button><button class="admin-tab" id="tabUnifi" onclick="switchTab('unifi')">UniFi</button><button class="admin-tab" id="tabSquare" onclick="switchTab('square')">Square</button><button class="admin-tab" id="tabMaint" onclick="switchTab('maint')">Maintenance</button><button class="admin-tab" id="tabIncidents" onclick="switchTab('incidents')">Incidents</button><button class="admin-tab" id="tabBanners" onclick="switchTab('banners')">Banners</button><button class="admin-tab" id="tabApiKeys" onclick="switchTab('apikeys')">API Keys</button><button class="admin-tab" id="tabUsers" onclick="switchTab('users')">Users</button><button class="admin-tab" id="tabWebhooks" onclick="switchTab('webhooks')">Webhooks</button><button class="admin-tab" id="tabSettings" onclick="switchTab('settings')">Settings</button><button class="admin-tab" id="tabAudit" onclick="switchTab('audit')">Audit</button></div>
       <span style="font-size:11px;color:var(--text-2)" id="aCount"></span>
       <div class="drawer-spacer"></div>
       <button class="btn" id="importBtn" onclick="triggerImport()" style="font-size:11px;padding:5px 11px;display:none" title="Import servers from JSON">⬆ Import</button>
@@ -735,6 +735,45 @@ body{font-family:var(--sans);background:var(--bg);color:var(--text);min-height:1
         <div id="oSitesList" style="display:flex;flex-direction:column;gap:6px"></div>
         <div class="form-footer">
           <button class="btn" onclick="switchTab('omada')">← Back to controllers</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div id="aUnifiFormView" class="admin-section" style="display:none">
+    <div class="drawer-body">
+      <div class="form-wrap">
+        <div class="form-heading" id="ufFormHeading">Add UniFi Controller</div>
+        <input type="hidden" id="ufId">
+        <div class="form-grid">
+          <div class="fg full"><label class="flabel">Name *</label><input class="finput" id="ufName" placeholder="e.g. Home UniFi"></div>
+          <div class="fg full"><label class="flabel">Base URL *</label><input class="finput" id="ufUrl" placeholder="https://192.168.1.1 or https://unifi.example.com"></div>
+          <div class="fg"><label class="flabel">Username</label><input class="finput" id="ufUsername" autocomplete="off" placeholder="local-only (no API key)"></div>
+          <div class="fg"><label class="flabel">Password <span id="ufPwHint" style="font-weight:400;text-transform:none;letter-spacing:0">*</span></label><input class="finput" id="ufPassword" type="password" autocomplete="new-password"></div>
+          <div class="fg full"><label class="flabel">API Key <span style="font-weight:400;text-transform:none;letter-spacing:0;color:var(--text-2)">(preferred for UniFi 8+ — leave blank to use username/password)</span></label><input class="finput" id="ufApiKey" type="password" autocomplete="new-password" placeholder="Optional — Settings > Control Plane > API Keys"></div>
+          <div class="fg full">
+            <label class="flabel">Groups with Access</label>
+            <div id="ufGroupPicker" style="background:var(--input-bg);border:1px solid var(--border-hi);border-radius:var(--r-sm);max-height:180px;overflow-y:auto;padding:8px"></div>
+            <div style="font-size:11px;color:var(--text-2);margin-top:4px">Admin: leave all unchecked to make it global</div>
+          </div>
+          <div class="fg full"><label class="flabel"><input type="checkbox" id="ufVerifyTls" checked style="vertical-align:middle;margin-right:6px">Verify TLS certificate <span style="font-weight:400;text-transform:none;letter-spacing:0;color:var(--text-2)">(uncheck for self-signed)</span></label></div>
+        </div>
+        <div class="form-footer">
+          <span class="form-err" id="ufErr"></span>
+          <button class="btn" onclick="showList()">Cancel</button>
+          <button class="btn btn-primary" onclick="submitUnifiForm()">Save Controller</button>
+        </div>
+      </div>
+    </div>
+  </div>
+  <div id="aUnifiSitesView" class="admin-section" style="display:none">
+    <div class="drawer-body">
+      <div class="form-wrap">
+        <div class="form-heading"><span id="ufSitesHeading">UniFi Sites</span></div>
+        <div style="font-size:12px;color:var(--text-2);margin-bottom:14px" id="ufSitesSubhead"></div>
+        <div id="ufSitesList" style="display:flex;flex-direction:column;gap:6px"></div>
+        <div class="form-footer">
+          <button class="btn" onclick="switchTab('unifi')">&#8592; Back to controllers</button>
         </div>
       </div>
     </div>
@@ -1895,6 +1934,7 @@ async function switchTab(tab){
   document.getElementById("tabServers").classList.toggle("active",  tab === "servers");
   document.getElementById("tabGroups").classList.toggle("active",   tab === "groups");
   document.getElementById("tabOmada").classList.toggle("active",    tab === "omada");
+  document.getElementById("tabUnifi").classList.toggle("active",    tab === "unifi");
   document.getElementById("tabSquare").classList.toggle("active",   tab === "square");
   document.getElementById("tabMaint").classList.toggle("active",    tab === "maint");
   document.getElementById("tabIncidents").classList.toggle("active",tab === "incidents");
@@ -1904,7 +1944,7 @@ async function switchTab(tab){
   document.getElementById("tabWebhooks").classList.toggle("active", tab === "webhooks");
   document.getElementById("tabSettings").classList.toggle("active", tab === "settings");
   document.getElementById("tabAudit").classList.toggle("active",    tab === "audit");
-  const labels = { servers:"Add Server", groups:"Add Group", omada:"Add Controller", square:"Add Account", maint:"Schedule Window", incidents:"", banners:"Add Banner", apikeys:"Generate Key", users:"Add User", webhooks:"Add Webhook", settings:"", audit:"" };
+  const labels = { servers:"Add Server", groups:"Add Group", omada:"Add Controller", unifi:"Add Controller", square:"Add Account", maint:"Schedule Window", incidents:"", banners:"Add Banner", apikeys:"Generate Key", users:"Add User", webhooks:"Add Webhook", settings:"", audit:"" };
   document.getElementById("addBtnLabel").textContent = labels[tab] || "";
   // Incidents are created automatically from failed checks or via the Post Update button
   // on each row — there's no "add incident" flow, so hide the Add button for that tab.
@@ -1914,6 +1954,7 @@ async function switchTab(tab){
     tab === "servers"  ? () => showServerForm(null) :
     tab === "groups"   ? () => showGroupForm(null)  :
     tab === "omada"    ? () => showOmadaForm(null)  :
+    tab === "unifi"    ? () => showUnifiForm(null)  :
     tab === "square"   ? () => showSquareForm(null) :
     tab === "maint"    ? () => showMaintForm(null)  :
     tab === "banners"  ? () => showBannerForm(null) :
@@ -1953,6 +1994,7 @@ async function switchTab(tab){
   if      (tab === "servers")   await loadServerList();
   else if (tab === "groups")    await loadGroupList();
   else if (tab === "omada")     await loadOmadaList();
+  else if (tab === "unifi")     await loadUnifiList();
   else if (tab === "square")    await loadSquareList();
   else if (tab === "maint")     await loadMaintList();
   else if (tab === "incidents") await loadIncidentList();
@@ -2018,6 +2060,8 @@ function renderAdminServerList(list){
       c.type==="udp"?`UDP :${c.port}`:
       c.type==="dns"?`DNS ${(c.record_type||"A").toUpperCase()}`:
       c.type==="omada_gateway"?"Omada WAN":
+      c.type==="unifi_gateway"?"UniFi WAN":
+      c.type==="unifi_device"?(c.device_name||"UniFi Device"):
       c.type==="omada_lte"?"Omada LTE":
       c.type==="omada_device"?(c.device_name||"Omada Device"):
       "HTTP"
@@ -2145,7 +2189,7 @@ async function showServerForm(s){
       serverPickedGroups.add(adminGroups[0].id);
     }
   }
-  // Load groups + omada controllers in parallel before rendering check rows
+  // Load groups + omada controllers + unifi controllers in parallel before rendering check rows
   await Promise.all([ensureGroupsLoaded(), ensureOmadaLoaded(), ensureSquareLoaded()]);
   renderCrows();
   renderServerGroupsPicker();
@@ -2246,7 +2290,12 @@ function renderCrows(){
           ["A","AAAA","CNAME","MX","TXT","NS"].map(rtOpt).join("") +
         `</select>` +
         `<input class="finput" placeholder="Expected value (optional)" value="${ck.expected || ""}" oninput="upCk(${i},'expected',this.value)">`;
-    } else if (ck.type === "omada_device") {
+    } else if (ck.type === "unifi_gateway") {
+      extra = `<select class="fselect check-ctrl" data-i="${i}" data-k="controller_id" onchange="populateUnifiSitePicker(${i})"><option value="">-- controller --</option>${adminUnifi.map(c=>`<option value="${c.id}" ${ck.controller_id==c.id?"selected":""}>${c.name}</option>`).join("")}</select>`;
+      extra += `<div id="ufSitePick${i}"></div>`;
+    } else if (ck.type === "unifi_device") {
+      extra = `<div class="admin-checks-label">${ck.device_name||ck.device_mac||"Device"} &middot; site: ${ck.site_name||ck.site||""}</div>`;
+        } else if (ck.type === "omada_device") {
       detail = `<span class="crow-hint">${ck.device_name || ck.device_mac || "Unknown device"} · <span style="font-family:var(--mono)">${ck.device_mac || ""}</span></span>`;
     } else if (ck.type === "omada_gateway" || ck.type === "omada_lte") {
       // Controller dropdown + site dropdown.
@@ -2287,6 +2336,8 @@ function renderCrows(){
       + "<option value=\"omada_gateway\" " + sel("omada_gateway") + ">Omada Gateway</option>"
       + "<option value=\"omada_lte\" "     + sel("omada_lte")     + ">Omada LTE / Cellular</option>"
       + "<option value=\"omada_device\" "  + sel("omada_device")  + ">Omada AP / Switch</option>"
+      + "<option value=\"unifi_gateway\" " + sel("unifi_gateway") + ">UniFi Gateway</option>"
+      + "<option value=\"unifi_device\"  " + sel("unifi_device")  + ">UniFi AP / Switch</option>"
       + "<option value=\"square_pos\" "    + sel("square_pos")    + ">Square POS</option>"
       + (isAdmin() ? "<option value=\"script\" " + sel("script") + ">Script (exit code)</option>" : "")
       + "</select>"
@@ -3509,6 +3560,128 @@ async function doDeleteGroup(){
   pendDelGroup = null;
   closeConfirm();
   loadGroupList();
+}
+
+
+// -- UniFi Controllers -------------------------------------------------------
+let adminUnifi = [];
+let unifiSitesCache = {};
+let currentUnifiCtrl = null;
+
+async function loadUnifiList() {
+  const cached = cacheGet("admin-unifi");
+  if (!cached) {
+    const r = await fetch("/api/admin/unifi-controllers");
+    if (r.ok) { adminUnifi = await r.json(); cacheSet("admin-unifi", adminUnifi); }
+  } else { adminUnifi = cached; }
+  const list = document.getElementById("aList");
+  if (!list) return;
+  if (!adminUnifi.length) { list.innerHTML = '<div class="admin-empty">No UniFi controllers yet.</div>'; return; }
+  list.innerHTML = adminUnifi.map(c => {
+    const errBadge = c.last_error ? `<div class="admin-checks-label" style="color:var(--red)">&#9888; ${c.last_error}</div>` : "";
+    const grps = c.group_ids && c.group_ids.length ? `<div class="admin-checks-label">groups: ${c.group_ids.join(", ")}</div>` : '<div class="admin-checks-label">global</div>';
+    return `<div class="admin-server-row"><div class="admin-server-info"><div class="admin-server-name">${c.name}</div><div class="admin-checks-label">${c.base_url}</div>${grps}${errBadge}</div><div class="admin-server-actions"><button class="btn btn-sm" onclick="showUnifiSites(${c.id})">Sites</button><button class="btn btn-sm" onclick="showUnifiForm(${c.id})">Edit</button><button class="btn btn-sm btn-danger" onclick="confirmDelUnifi(${c.id}, '${c.name.replace(/'/g,"\\'")}')">Delete</button></div></div>`;
+  }).join("");
+}
+
+async function showUnifiForm(id) {
+  hideAllSections(); document.getElementById("aUnifiFormView").style.display = "";
+  document.getElementById("ufFormHeading").textContent = id ? "Edit UniFi Controller" : "Add UniFi Controller";
+  document.getElementById("ufId").value = id || "";
+  document.getElementById("ufErr").textContent = "";
+  const allGroups = await loadGroups();
+  let selGroups = [];
+  if (id) {
+    const c = adminUnifi.find(x => x.id === id);
+    if (c) {
+      document.getElementById("ufName").value = c.name;
+      document.getElementById("ufUrl").value = c.base_url;
+      document.getElementById("ufUsername").value = c.username || "";
+      document.getElementById("ufPassword").value = "";
+      document.getElementById("ufApiKey").value = "";
+      document.getElementById("ufVerifyTls").checked = c.verify_tls !== 0;
+      document.getElementById("ufPwHint").textContent = c.password ? "(leave blank to keep)" : "*";
+      selGroups = c.group_ids || [];
+    }
+  } else {
+    ["ufName","ufUrl","ufUsername","ufPassword","ufApiKey"].forEach(fid => document.getElementById(fid).value = "");
+    document.getElementById("ufVerifyTls").checked = true;
+    document.getElementById("ufPwHint").textContent = "*";
+  }
+  const picker = document.getElementById("ufGroupPicker");
+  picker.innerHTML = allGroups.map(g => `<label style="display:flex;align-items:center;gap:6px;padding:4px 0;cursor:pointer"><input type="checkbox" value="${g.id}" ${selGroups.includes(g.id) ? "checked" : ""}> ${g.name}</label>`).join("");
+}
+
+async function submitUnifiForm() {
+  const id = parseInt(document.getElementById("ufId").value) || null;
+  const name = document.getElementById("ufName").value.trim();
+  const base_url = document.getElementById("ufUrl").value.trim();
+  const username = document.getElementById("ufUsername").value.trim();
+  const password = document.getElementById("ufPassword").value;
+  const api_key  = document.getElementById("ufApiKey").value;
+  const verify_tls = document.getElementById("ufVerifyTls").checked;
+  const group_ids = [...document.querySelectorAll("#ufGroupPicker input:checked")].map(el => parseInt(el.value));
+  if (!name || !base_url) { document.getElementById("ufErr").textContent = "Name and Base URL are required"; return; }
+  const r = await fetch(id ? `/api/admin/unifi-controllers/${id}` : "/api/admin/unifi-controllers", {
+    method: id ? "PUT" : "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ name, base_url, username: username||null, password: password||null, api_key: api_key||null, verify_tls, group_ids })
+  });
+  const data = await r.json();
+  if (!r.ok) { document.getElementById("ufErr").textContent = data.error || "Error"; return; }
+  cacheDel("admin-unifi"); switchTab("unifi");
+}
+
+function confirmDelUnifi(id, name) {
+  if (!confirm("Delete UniFi controller: " + name + "?")) return;
+  fetch(`/api/admin/unifi-controllers/${id}`, { method: "DELETE" })
+    .then(r => { if (r.ok) cacheDel("admin-unifi"); return loadUnifiList(); });
+}
+
+async function showUnifiSites(controllerId) {
+  currentUnifiCtrl = adminUnifi.find(c => c.id === controllerId);
+  hideAllSections(); document.getElementById("aUnifiSitesView").style.display = "";
+  document.getElementById("ufSitesHeading").textContent = (currentUnifiCtrl ? currentUnifiCtrl.name + " - " : "") + "Sites";
+  document.getElementById("ufSitesList").innerHTML = "<div>Loading...</div>";
+  try {
+    const r = await fetch(`/api/admin/unifi-controllers/${controllerId}/sites`);
+    if (!r.ok) throw new Error(await r.text());
+    const sites = await r.json();
+    unifiSitesCache[controllerId] = sites;
+    document.getElementById("ufSitesList").innerHTML = sites.map(s =>
+      `<div class="admin-server-row"><div class="admin-server-info"><div class="admin-server-name">${s.name}</div><div class="admin-checks-label">id: ${s.id}</div></div><div class="admin-server-actions"><button class="btn btn-sm" onclick="addUnifiGatewayServer(${controllerId},'${s.id}','${s.name.replace(/'/g,"\\'")}')">Add Gateway</button><button class="btn btn-sm" onclick="showUnifiDevices(${controllerId},'${s.id}','${s.name.replace(/'/g,"\\'")}')">Devices</button></div></div>`
+    ).join("") || '<div class="admin-empty">No sites found.</div>';
+  } catch(e) {
+    document.getElementById("ufSitesList").innerHTML = `<div style="color:var(--red)">${e.message}</div>`;
+  }
+}
+
+async function showUnifiDevices(controllerId, siteId, siteName) {
+  const r = await fetch(`/api/admin/unifi-controllers/${controllerId}/sites/${encodeURIComponent(siteId)}/devices`);
+  if (!r.ok) { alert("Error loading devices"); return; }
+  const devices = await r.json();
+  document.getElementById("ufSitesList").innerHTML =
+    `<button class="btn btn-sm" onclick="showUnifiSites(${controllerId})" style="margin-bottom:10px">&#8592; Back</button>
+    <div class="form-heading" style="margin-bottom:10px">${siteName} Devices</div>
+    ${devices.map(d => `<div class="admin-server-row"><div class="admin-server-info"><div class="admin-server-name">${d.name}</div><div class="admin-checks-label">${d.model||d.type||""} &middot; ${d.mac} &middot; ${d.state===1?"online":"offline"}</div></div><div class="admin-server-actions"><button class="btn btn-sm" onclick="addUnifiDeviceServer(${controllerId},'${siteId}','${siteName.replace(/'/g,"\\'")}','${d.mac}','${d.name.replace(/'/g,"\\'")}')">Add Check</button></div></div>`).join("") || '<div class="admin-empty">No devices.</div>'}`;
+}
+
+function addUnifiGatewayServer(controllerId, siteId, siteName) {
+  switchTab("servers");
+  setTimeout(() => {
+    document.getElementById("fHost").value = "unifi-managed";
+    currentChecks = [{ type: "unifi_gateway", controller_id: controllerId, site: siteId, site_name: siteName }];
+    renderCheckRows();
+  }, 100);
+}
+
+function addUnifiDeviceServer(controllerId, siteId, siteName, deviceMac, deviceName) {
+  switchTab("servers");
+  setTimeout(() => {
+    document.getElementById("fHost").value = "unifi-managed";
+    currentChecks = [{ type: "unifi_device", controller_id: controllerId, site: siteId, site_name: siteName, device_mac: deviceMac, device_name: deviceName }];
+    renderCheckRows();
+  }, 100);
 }
 
 // ── Omada Controllers ─────────────────────────────────────────────────────────

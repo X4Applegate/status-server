@@ -966,6 +966,31 @@ async function initDB() {
     await db.query("ALTER TABLE status_omada_controllers ADD COLUMN mode VARCHAR(16) NOT NULL DEFAULT 'standard'");
   } catch(e) { /* column already exists, ignore */ }
 
+
+  await db.query(`
+    CREATE TABLE IF NOT EXISTS status_unifi_controllers (
+      id         INT AUTO_INCREMENT PRIMARY KEY,
+      name       VARCHAR(150) NOT NULL,
+      base_url   VARCHAR(255) NOT NULL,
+      username   VARCHAR(255) DEFAULT NULL,
+      password   VARCHAR(255) DEFAULT NULL,
+      api_key    VARCHAR(512) DEFAULT NULL,
+      verify_tls TINYINT(1)   NOT NULL DEFAULT 1,
+      group_id   INT          DEFAULT NULL,
+      last_error TEXT         DEFAULT NULL,
+      created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    )
+  `);
+  await db.query(`
+    CREATE TABLE IF NOT EXISTS status_unifi_controller_groups (
+      controller_id INT NOT NULL,
+      group_id      INT NOT NULL,
+      PRIMARY KEY (controller_id, group_id),
+      INDEX idx_ctrl  (controller_id),
+      INDEX idx_group (group_id)
+    )
+  `);
+
   await db.query(`
     CREATE TABLE IF NOT EXISTS status_square_accounts (
       id             INT AUTO_INCREMENT PRIMARY KEY,
@@ -1934,6 +1959,125 @@ async function omadaLteCheck(controllerId, siteId, customerId, siteName, custome
   }
 }
 
+
+// -- UniFi Network Application -------------------------------------------------
+const unifiSessions = {}; // { controllerId: { cookies, expiresAt } }
+
+function unifiDispatcher(verifyTls) {
+  return verifyTls ? undefined : new UndiciAgent({ connect: { rejectUnauthorized: false } });
+}
+
+async function unifiGetHeaders(controller) {
+  if (controller.api_key) {
+    return { "X-API-Key": controller.api_key, "Content-Type": "application/json" };
+  }
+  const cached = unifiSessions[controller.id];
+  if (cached && cached.expiresAt > Date.now() + 60_000) {
+    return { "Cookie": cached.cookies, "Content-Type": "application/json" };
+  }
+  const safeBase = await sanitizeBaseUrl(controller.base_url);
+  const r = await fetch(safeBase + "/api/auth/login", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ username: controller.username, password: controller.password }),
+    dispatcher: unifiDispatcher(controller.verify_tls),
+    signal: AbortSignal.timeout(8000)
+  });
+  if (!r.ok) throw new Error("UniFi login HTTP " + r.status);
+  const setCookies = r.headers.getSetCookie ? r.headers.getSetCookie() : [];
+  const cookies = setCookies.map(c => c.split(";")[0]).join("; ");
+  if (!cookies) throw new Error("UniFi login returned no session cookie");
+  unifiSessions[controller.id] = { cookies, expiresAt: Date.now() + 3_600_000 };
+  return { "Cookie": cookies, "Content-Type": "application/json" };
+}
+
+async function unifiApiGet(controller, path) {
+  const safeBase = await sanitizeBaseUrl(controller.base_url);
+  const headers = await unifiGetHeaders(controller);
+  const r = await fetch(safeBase + path, {
+    headers,
+    dispatcher: unifiDispatcher(controller.verify_tls),
+    signal: AbortSignal.timeout(8000)
+  });
+  if (r.status === 401) {
+    delete unifiSessions[controller.id];
+    throw new Error("UniFi auth expired - re-login on next poll");
+  }
+  if (!r.ok) throw new Error("UniFi " + path + " HTTP " + r.status);
+  const json = await r.json();
+  return json.data !== undefined ? json.data : json;
+}
+
+async function unifiListSites(controller) {
+  const data = await unifiApiGet(controller, "/api/self/sites");
+  return Array.isArray(data) ? data : [];
+}
+
+async function unifiListDevices(controller, site) {
+  const safeSite = (site || "default").replace(/[^A-Za-z0-9\-_]/g, "");
+  const data = await unifiApiGet(controller, "/api/s/" + safeSite + "/stat/device");
+  return Array.isArray(data) ? data : [];
+}
+
+const UNIFI_GW_TYPES = new Set(["ugw","udm","udmpro","udm-pro","uxg","udm-se","udm-pro-max","uxg-pro"]);
+
+async function unifiGatewayCheck(controllerId, site, siteName) {
+  try {
+    const [rows] = await db.query("SELECT * FROM status_unifi_controllers WHERE id=?", [controllerId]);
+    if (!rows.length) return { type:"unifi_gateway", ok:false, detail:"controller not found" };
+    const ctrl = rows[0];
+    const apiStart = Date.now();
+    const devices = await unifiListDevices(ctrl, site);
+    const apiResponseMs = Date.now() - apiStart;
+    const gateway = devices.find(d => UNIFI_GW_TYPES.has((d.type||"").toLowerCase()));
+    if (!gateway) {
+      return { type:"unifi_gateway", ok:false, detail: devices.length ? "no gateway among " + devices.length + " devices" : "no devices in site" };
+    }
+    const ok = gateway.state === 1;
+    const model = gateway.model || null;
+    const modelStr = model ? model + " " : "";
+    const uptimeSec = gateway.uptime || null;
+    const uptimeStr = uptimeSec ? " \u00b7 up " + formatUptime(uptimeSec) : "";
+    const wanIp = (gateway.wan1 && gateway.wan1.ip) || (gateway.wan2 && gateway.wan2.ip) || null;
+    const wanStr = wanIp ? " \u00b7 WAN " + wanIp : "";
+    const detail = ok
+      ? modelStr + "connected" + uptimeStr + wanStr
+      : (gateway.name || model || "Gateway") + " offline (state " + gateway.state + ")";
+    return { type:"unifi_gateway", ok, detail, response_ms: apiResponseMs };
+  } catch(e) {
+    return { type:"unifi_gateway", ok:false, detail: e.message };
+  }
+}
+
+async function unifiDeviceCheck(controllerId, site, siteName, deviceMac, deviceName) {
+  try {
+    const [rows] = await db.query("SELECT * FROM status_unifi_controllers WHERE id=?", [controllerId]);
+    if (!rows.length) return { type:"unifi_device", ok:false, detail:"controller not found" };
+    const ctrl = rows[0];
+    const apiStart = Date.now();
+    const devices = await unifiListDevices(ctrl, site);
+    const apiResponseMs = Date.now() - apiStart;
+    const norm = mac => (mac||"").toLowerCase().replace(/[:\-]/g,"");
+    const device = devices.find(d => norm(d.mac) === norm(deviceMac));
+    if (!device) {
+      return { type:"unifi_device", ok:false, detail:(deviceName || deviceMac) + " not found in site" };
+    }
+    const ok = device.state === 1;
+    const model = device.model || null;
+    const modelStr = model ? model + " " : "";
+    const uptimeSec = device.uptime || null;
+    const uptimeStr = uptimeSec ? " \u00b7 up " + formatUptime(uptimeSec) : "";
+    const clients = device.num_sta != null ? device.num_sta : null;
+    const clientStr = clients != null ? " \u00b7 " + clients + " client" + (clients === 1 ? "" : "s") : "";
+    const detail = ok
+      ? modelStr + "connected" + uptimeStr + clientStr
+      : (deviceName || model || "Device") + " offline (state " + device.state + ")";
+    return { type:"unifi_device", ok, detail, response_ms: apiResponseMs };
+  } catch(e) {
+    return { type:"unifi_device", ok:false, detail: e.message };
+  }
+}
+
 async function squarePosCheck(accountId, locationId, deviceId, timeout=8000, inlineToken="") {
   const t0 = Date.now();
   try {
@@ -2046,6 +2190,8 @@ async function runChecks(def) {
       if (c.type==="omada_gateway") return await omadaGatewayCheck(c.controller_id, c.site_id, c.customer_id, c.site_name, c.customer_name, def.host);
       if (c.type==="omada_lte")     return await omadaLteCheck(c.controller_id, c.site_id, c.customer_id, c.site_name, c.customer_name, c.probe_ip || null);
       if (c.type==="omada_device")  return await omadaDeviceCheck(c.controller_id, c.site_id, c.customer_id, c.site_name, c.customer_name, c.device_mac, c.device_name);
+      if (c.type==="unifi_gateway") return await unifiGatewayCheck(c.controller_id, c.site, c.site_name);
+      if (c.type==="unifi_device")  return await unifiDeviceCheck(c.controller_id, c.site, c.site_name, c.device_mac, c.device_name);
       if (c.type==="square_pos")   return await squarePosCheck(c.account_id||0, c.location_id, c.device_id||"", c.timeout, c.access_token||"");
       if (c.type==="script")       return await scriptCheck(c.command, c.timeout);
       return { type:c.type, ok:false, detail:"unknown check type" };
@@ -2077,6 +2223,8 @@ async function recordHistory(def, checks, overall) {
                   : ch.type === "omada_gateway" ? "omada_gateway"
                   : ch.type === "omada_lte"     ? "omada_lte"
                   : ch.type === "omada_device"  ? `omada_device:${ch.device_name||ch.device_mac||"?"}`
+                  : ch.type === "unifi_gateway" ? "unifi_gateway"
+                  : ch.type === "unifi_device"  ? "unifi_device:" + (ch.device_name||ch.device_mac||"?")
                   : ch.type === "square_pos"    ? `square_pos:${ch.location_id||"?"}`
                   : ch.type === "script"        ? `script`
                   : ch.type;
@@ -4422,6 +4570,157 @@ app.get("/api/admin/omada-controllers/:id/sites/:siteId/devices", requireAuth, a
   } catch(e) {
     res.status(502).json({ error: e.message });
   }
+});
+
+
+// -- UniFi Controllers ---------------------------------------------------------
+async function unifiLoadGroupIds(controllerIds) {
+  if (!controllerIds.length) return {};
+  const [rows] = await db.query(
+    "SELECT controller_id, group_id FROM status_unifi_controller_groups WHERE controller_id IN (?)",
+    [controllerIds]
+  );
+  const byId = {};
+  for (const r of rows) (byId[r.controller_id] ||= []).push(r.group_id);
+  return byId;
+}
+
+async function userCanManageUnifiCtrl(req, ctrlGroupIds) {
+  if (req.session.role === "admin") return true;
+  const allowed = await getUserAllowedGroupIds(req.session.userId, req.session.role);
+  return Array.isArray(allowed) && ctrlGroupIds.some(gid => allowed.includes(gid));
+}
+
+app.get("/api/admin/unifi-controllers", requireAuth, async (req, res) => {
+  try {
+    const [rows] = await db.query("SELECT id, name, base_url, username, verify_tls, group_id, last_error, created_at FROM status_unifi_controllers ORDER BY created_at");
+    if (!rows.length) return res.json([]);
+    const groupMap = await unifiLoadGroupIds(rows.map(r => r.id));
+    const withGroups = rows.map(r => ({ ...r, group_ids: groupMap[r.id] || [] }));
+    if (req.session.role === "admin") return res.json(withGroups);
+    const allowed = await getUserAllowedGroupIds(req.session.userId, req.session.role);
+    const filtered = withGroups.filter(r => !r.group_ids.length || r.group_ids.some(gid => allowed.includes(gid)));
+    res.json(filtered);
+  } catch(e) { res.status(500).json({ error: e.message }); }
+});
+
+app.post("/api/admin/unifi-controllers", requireAuth, async (req, res) => {
+  const { name, base_url, username, password, api_key, verify_tls, group_ids } = req.body;
+  if (!name || !base_url) return res.status(400).json({ error: "name and base_url are required" });
+  if (!api_key && (!username || !password)) return res.status(400).json({ error: "Either api_key or username+password required" });
+  let cleanGroupIds = Array.isArray(group_ids) ? group_ids.map(Number).filter(Boolean) : [];
+  if (req.session.role !== "admin") {
+    if (!cleanGroupIds.length) return res.status(400).json({ error: "Must assign at least one group" });
+    const allowed = await getUserAllowedGroupIds(req.session.userId, req.session.role);
+    if (!Array.isArray(allowed) || !cleanGroupIds.every(gid => allowed.includes(gid)))
+      return res.status(403).json({ error: "You don't have access to one or more of those groups" });
+  }
+  const url = String(base_url).replace(/\/$/, "");
+  const vtls = verify_tls !== false;
+  try {
+    const testCtrl = { id: 0, base_url: url, username: username || null, password: password || null, api_key: api_key || null, verify_tls: vtls };
+    await unifiListSites(testCtrl);
+    const [result] = await db.query(
+      "INSERT INTO status_unifi_controllers (name, base_url, username, password, api_key, verify_tls) VALUES (?,?,?,?,?,?)",
+      [name, url, username || null, password || null, api_key || null, vtls ? 1 : 0]
+    );
+    const newId = result.insertId;
+    if (cleanGroupIds.length) {
+      await db.query(
+        "INSERT IGNORE INTO status_unifi_controller_groups (controller_id, group_id) VALUES ?",
+        [cleanGroupIds.map(gid => [newId, gid])]
+      );
+    }
+    addLog({ level:"info", server:"unifi", message:"Controller added: " + name + " by " + req.session.username });
+    res.json({ ok:true, id:newId });
+  } catch(e) {
+    addLog({ level:"warn", server:"unifi", message:"Could not contact controller \"" + name + "\": " + e.message });
+    res.status(400).json({ error: "Cannot reach controller: " + e.message });
+  }
+});
+
+app.put("/api/admin/unifi-controllers/:id", requireAuth, async (req, res) => {
+  const id = parseInt(req.params.id);
+  const { name, base_url, username, password, api_key, verify_tls, group_ids } = req.body;
+  if (!name || !base_url) return res.status(400).json({ error: "name and base_url are required" });
+  try {
+    const [rows] = await db.query("SELECT * FROM status_unifi_controllers WHERE id=?", [id]);
+    if (!rows.length) return res.status(404).json({ error: "Controller not found" });
+    const existing = rows[0];
+    const groupMap = await unifiLoadGroupIds([id]);
+    if (!(await userCanManageUnifiCtrl(req, groupMap[id] || [])))
+      return res.status(403).json({ error: "You don't have access to this controller" });
+    let cleanGroupIds = Array.isArray(group_ids) ? group_ids.map(Number).filter(Boolean) : (groupMap[id] || []);
+    const url = String(base_url).replace(/\/$/, "");
+    const vtls = verify_tls !== false;
+    const finalPw  = (password && password.length)  ? password  : existing.password;
+    const finalKey = (api_key  && api_key.length)   ? api_key   : existing.api_key;
+    await db.query(
+      "UPDATE status_unifi_controllers SET name=?, base_url=?, username=?, password=?, api_key=?, verify_tls=?, last_error=NULL WHERE id=?",
+      [name, url, username || null, finalPw, finalKey, vtls ? 1 : 0, id]
+    );
+    await db.query("DELETE FROM status_unifi_controller_groups WHERE controller_id=?", [id]);
+    if (cleanGroupIds.length) {
+      await db.query(
+        "INSERT IGNORE INTO status_unifi_controller_groups (controller_id, group_id) VALUES ?",
+        [cleanGroupIds.map(gid => [id, gid])]
+      );
+    }
+    delete unifiSessions[id];
+    addLog({ level:"info", server:"unifi", message:"Controller updated: " + name + " by " + req.session.username });
+    res.json({ ok:true });
+  } catch(e) { res.status(500).json({ error: e.message }); }
+});
+
+app.delete("/api/admin/unifi-controllers/:id", requireAuth, async (req, res) => {
+  const id = parseInt(req.params.id);
+  try {
+    const [rows] = await db.query("SELECT name FROM status_unifi_controllers WHERE id=?", [id]);
+    if (!rows.length) return res.status(404).json({ error: "Controller not found" });
+    const groupMap = await unifiLoadGroupIds([id]);
+    if (!(await userCanManageUnifiCtrl(req, groupMap[id] || [])))
+      return res.status(403).json({ error: "You don't have access to this controller" });
+    await db.query("DELETE FROM status_unifi_controller_groups WHERE controller_id=?", [id]);
+    await db.query("DELETE FROM status_unifi_controllers WHERE id=?", [id]);
+    delete unifiSessions[id];
+    addLog({ level:"warn", server:"unifi", message:"Controller removed: " + rows[0].name + " by " + req.session.username });
+    res.json({ ok:true });
+  } catch(e) { res.status(500).json({ error: e.message }); }
+});
+
+app.get("/api/admin/unifi-controllers/:id/sites", requireAuth, async (req, res) => {
+  const id = parseInt(req.params.id);
+  try {
+    const [rows] = await db.query("SELECT * FROM status_unifi_controllers WHERE id=?", [id]);
+    if (!rows.length) return res.status(404).json({ error: "Controller not found" });
+    const groupMap = await unifiLoadGroupIds([id]);
+    if (!(await userCanManageUnifiCtrl(req, groupMap[id] || [])))
+      return res.status(403).json({ error: "You don't have access to this controller" });
+    const sites = await unifiListSites(rows[0]);
+    res.json(sites.map(s => ({ id: s.name, name: s.desc || s.name })));
+  } catch(e) { res.status(502).json({ error: e.message }); }
+});
+
+app.get("/api/admin/unifi-controllers/:id/sites/:site/devices", requireAuth, async (req, res) => {
+  const id = parseInt(req.params.id);
+  try {
+    const [rows] = await db.query("SELECT * FROM status_unifi_controllers WHERE id=?", [id]);
+    if (!rows.length) return res.status(404).json({ error: "Controller not found" });
+    const groupMap = await unifiLoadGroupIds([id]);
+    if (!(await userCanManageUnifiCtrl(req, groupMap[id] || [])))
+      return res.status(403).json({ error: "You don't have access to this controller" });
+    const devices = await unifiListDevices(rows[0], req.params.site);
+    const nonGw = devices.filter(d => !UNIFI_GW_TYPES.has((d.type||"").toLowerCase()));
+    res.json(nonGw.map(d => ({
+      mac:     d.mac,
+      name:    d.name || d.mac,
+      model:   d.model || null,
+      type:    d.type || null,
+      state:   d.state,
+      uptime:  d.uptime || null,
+      clients: d.num_sta != null ? d.num_sta : null
+    })));
+  } catch(e) { res.status(502).json({ error: e.message }); }
 });
 
 // ── Square Accounts ───────────────────────────────────────────────────────────
