@@ -2266,11 +2266,14 @@ function showList(){
   document.getElementById("aGroupFormView").style.display   = "none";
   document.getElementById("aOmadaFormView").style.display   = "none";
   document.getElementById("aOmadaSitesView").style.display  = "none";
+  const _uff2 = document.getElementById("aUnifiFormView"); if (_uff2) _uff2.style.display = "none";
+  const _ufs2 = document.getElementById("aUnifiSitesView"); if (_ufs2) _ufs2.style.display = "none";
   serverFormReturn = null;  // any list navigation drops the return target
   if      (currentTab === "users")    loadUserList();
   else if (currentTab === "webhooks") loadWebhookList();
   else if (currentTab === "groups")   loadGroupList();
   else if (currentTab === "omada")    loadOmadaList();
+  else if (currentTab === "unifi")    loadUnifiList();
   else                                loadServerList();
 }
 
