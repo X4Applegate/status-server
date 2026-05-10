@@ -3632,7 +3632,15 @@ function renderUnifiList(list) {
 }
 
 async function showUnifiForm(c) {
-  hideAllSections(); document.getElementById("aUnifiFormView").style.display = "";
+  document.getElementById("aListView").style.display        = "none";
+  document.getElementById("aFormView").style.display        = "none";
+  document.getElementById("aUserFormView").style.display    = "none";
+  document.getElementById("aWebhookFormView").style.display = "none";
+  document.getElementById("aGroupFormView").style.display   = "none";
+  document.getElementById("aOmadaSitesView").style.display  = "none";
+  document.getElementById("aUnifiFormView").style.display   = "none";
+  document.getElementById("aUnifiSitesView").style.display  = "none";
+  document.getElementById("aUnifiFormView").style.display   = "flex";
   document.getElementById("ufFormHeading").textContent = c ? "Edit UniFi Controller" : "Add UniFi Controller";
   document.getElementById("ufId").value = c ? c.id : "";
   document.getElementById("ufErr").textContent = "";
@@ -3686,7 +3694,15 @@ function confirmDelUnifi(id, name) {
 
 async function showUnifiSites(controllerId) {
   currentUnifiCtrl = adminUnifi.find(c => c.id === controllerId);
-  hideAllSections(); document.getElementById("aUnifiSitesView").style.display = "";
+  document.getElementById("aListView").style.display        = "none";
+  document.getElementById("aFormView").style.display        = "none";
+  document.getElementById("aUserFormView").style.display    = "none";
+  document.getElementById("aWebhookFormView").style.display = "none";
+  document.getElementById("aGroupFormView").style.display   = "none";
+  document.getElementById("aOmadaSitesView").style.display  = "none";
+  document.getElementById("aUnifiFormView").style.display   = "none";
+  document.getElementById("aUnifiSitesView").style.display  = "none";
+  document.getElementById("aUnifiSitesView").style.display  = "";
   document.getElementById("ufSitesHeading").textContent = (currentUnifiCtrl ? currentUnifiCtrl.name + " - " : "") + "Sites";
   document.getElementById("ufSitesList").innerHTML = "<div>Loading...</div>";
   try {
