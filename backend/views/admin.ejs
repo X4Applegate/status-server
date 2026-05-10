@@ -298,7 +298,7 @@ body{font-family:var(--sans);background:var(--bg);color:var(--text);min-height:1
 .admin-tabs{display:flex;gap:3px;overflow-x:auto;-webkit-overflow-scrolling:touch;scrollbar-width:none;flex:0 1 auto;min-width:0}.admin-tabs::-webkit-scrollbar{display:none}
 .admin-tab{padding:4px 13px;font-size:11px;font-weight:500;border-radius:5px;border:1px solid transparent;background:none;color:var(--text-2);cursor:pointer;font-family:var(--sans);white-space:nowrap;flex-shrink:0}
 .admin-tab:hover{color:var(--text-hi);background:var(--surface)}
-.admin-tab.active{color:var(--text-white);background:var(--surface2);border-color:var(--border-hi)}
+.admin-tab.active{color:var(--text-white);background:var(--surface2);border-color:var(--border-hi)}.admin-tab-group{position:relative;flex-shrink:0}.admin-tab-group .admin-tab{display:flex;align-items:center;gap:4px}.admin-tab-submenu{position:absolute;top:calc(100% + 4px);left:0;background:var(--surface);border:1px solid var(--border-hi);border-radius:6px;padding:4px;display:none;flex-direction:column;gap:2px;z-index:200;min-width:140px;box-shadow:0 4px 12px rgba(0,0,0,.25)}.admin-tab-submenu.open{display:flex}.admin-tab-submenu button{padding:5px 10px;font-size:11px;font-weight:500;border:none;border-radius:4px;background:none;color:var(--text-2);cursor:pointer;text-align:left;font-family:var(--sans);white-space:nowrap}.admin-tab-submenu button:hover{background:var(--surface2);color:var(--text-hi)}.admin-tab-submenu button.active{background:var(--surface2);color:var(--text-white)}
 @media(max-width:600px){.admin-tabs{flex-basis:100%;order:-1}}
 .admin-server-item{display:flex;align-items:center;gap:10px;padding:11px 18px;border-bottom:1px solid var(--border);cursor:pointer}
 .admin-server-item:hover{background:var(--surface)}
@@ -591,7 +591,7 @@ body{font-family:var(--sans);background:var(--bg);color:var(--text);min-height:1
   </div>
   <div id="aListView" class="admin-section">
     <div class="drawer-toolbar">
-      <div class="admin-tabs"><button class="admin-tab active" id="tabServers" onclick="switchTab('servers')">Servers</button><button class="admin-tab" id="tabGroups" onclick="switchTab('groups')">Groups</button><button class="admin-tab" id="tabOmada" onclick="switchTab('omada')">Omada</button><button class="admin-tab" id="tabUnifi" onclick="switchTab('unifi')">UniFi</button><button class="admin-tab" id="tabSquare" onclick="switchTab('square')">Square</button><button class="admin-tab" id="tabMaint" onclick="switchTab('maint')">Maintenance</button><button class="admin-tab" id="tabIncidents" onclick="switchTab('incidents')">Incidents</button><button class="admin-tab" id="tabBanners" onclick="switchTab('banners')">Banners</button><button class="admin-tab" id="tabApiKeys" onclick="switchTab('apikeys')">API Keys</button><button class="admin-tab" id="tabUsers" onclick="switchTab('users')">Users</button><button class="admin-tab" id="tabWebhooks" onclick="switchTab('webhooks')">Webhooks</button><button class="admin-tab" id="tabSettings" onclick="switchTab('settings')">Settings</button><button class="admin-tab" id="tabAudit" onclick="switchTab('audit')">Audit</button></div>
+      <div class="admin-tabs"><button class="admin-tab active" id="tabServers" onclick="switchTab('servers')">Servers</button><button class="admin-tab" id="tabGroups" onclick="switchTab('groups')">Groups</button><div class="admin-tab-group" id="tabNetCtrl"><button class="admin-tab" id="tabNetCtrlBtn" onclick="toggleNetCtrl(event)">Network Controller &#9662;</button><div class="admin-tab-submenu" id="tabNetCtrlMenu"><button id="tabOmadaSub" onclick="switchTab('omada');closeNetCtrl()">Omada</button><button id="tabUnifiSub" onclick="switchTab('unifi');closeNetCtrl()">UniFi</button></div></div><button id="tabOmada" style="display:none"></button><button id="tabUnifi" style="display:none"></button><button class="admin-tab" id="tabSquare" onclick="switchTab('square')">Square</button><button class="admin-tab" id="tabMaint" onclick="switchTab('maint')">Maintenance</button><button class="admin-tab" id="tabIncidents" onclick="switchTab('incidents')">Incidents</button><button class="admin-tab" id="tabBanners" onclick="switchTab('banners')">Banners</button><button class="admin-tab" id="tabApiKeys" onclick="switchTab('apikeys')">API Keys</button><button class="admin-tab" id="tabUsers" onclick="switchTab('users')">Users</button><button class="admin-tab" id="tabWebhooks" onclick="switchTab('webhooks')">Webhooks</button><button class="admin-tab" id="tabSettings" onclick="switchTab('settings')">Settings</button><button class="admin-tab" id="tabAudit" onclick="switchTab('audit')">Audit</button></div>
       <span style="font-size:11px;color:var(--text-2)" id="aCount"></span>
       <div class="drawer-spacer"></div>
       <button class="btn" id="importBtn" onclick="triggerImport()" style="font-size:11px;padding:5px 11px;display:none" title="Import servers from JSON">⬆ Import</button>
@@ -1926,6 +1926,15 @@ function closeAdmin(){
   closeDrawer("adminDrawer");
 }
 
+function toggleNetCtrl(e) {
+  e.stopPropagation();
+  document.getElementById("tabNetCtrlMenu").classList.toggle("open");
+}
+function closeNetCtrl() {
+  document.getElementById("tabNetCtrlMenu").classList.remove("open");
+}
+document.addEventListener("click", () => closeNetCtrl());
+
 async function switchTab(tab){
   // Viewers can access Servers, Omada, Square, Maintenance, Webhooks, and Groups. Admin-only tabs bounce back.
   if (!isAdmin() && !["servers","omada","square","maint","incidents","webhooks","groups"].includes(tab)) tab = "servers";
@@ -1935,6 +1944,9 @@ async function switchTab(tab){
   document.getElementById("tabGroups").classList.toggle("active",   tab === "groups");
   document.getElementById("tabOmada").classList.toggle("active",    tab === "omada");
   document.getElementById("tabUnifi").classList.toggle("active",    tab === "unifi");
+  const _netCtrlBtn = document.getElementById("tabNetCtrlBtn"); if (_netCtrlBtn) _netCtrlBtn.classList.toggle("active", tab === "omada" || tab === "unifi");
+  const _omadaSub = document.getElementById("tabOmadaSub"); if (_omadaSub) _omadaSub.classList.toggle("active", tab === "omada");
+  const _unifiSub = document.getElementById("tabUnifiSub"); if (_unifiSub) _unifiSub.classList.toggle("active", tab === "unifi");
   document.getElementById("tabSquare").classList.toggle("active",   tab === "square");
   document.getElementById("tabMaint").classList.toggle("active",    tab === "maint");
   document.getElementById("tabIncidents").classList.toggle("active",tab === "incidents");
