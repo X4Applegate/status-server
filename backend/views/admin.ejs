@@ -53,10 +53,10 @@ body{font-family:var(--sans);background:var(--bg);color:var(--text);min-height:1
   .topbar-right{position:absolute;top:calc(100% + 6px);right:10px;min-width:220px;max-width:92vw;background:var(--surface2);border:1px solid var(--border-hi);border-radius:12px;padding:10px;gap:6px;z-index:550;box-shadow:0 8px 32px rgba(0,0,0,.5);flex-wrap:wrap;justify-content:flex-end;visibility:hidden;opacity:0;pointer-events:none;transition:opacity .15s}
   .topbar-right.menu-open{visibility:visible;opacity:1;pointer-events:auto}
 }
-.topbar-dashboards{display:flex;align-items:center;gap:6px;flex:1;flex-wrap:nowrap;margin:0 16px;min-width:0;overflow-x:auto;overflow-y:hidden;scrollbar-width:none}
+.topbar-dashboards{display:none;align-items:center;gap:6px;flex:1;flex-wrap:nowrap;margin:0 16px;min-width:0;overflow-x:auto;overflow-y:hidden;scrollbar-width:none}
 .topbar-dashboards::-webkit-scrollbar{display:none}
 /* Dropdown nav — shown below 900px instead of pills */
-.topbar-dash-menu{display:none;position:relative;margin:0 12px;flex-shrink:0}
+.topbar-dash-menu{display:block;position:relative;margin:0 12px;flex-shrink:0}
 .topbar-dash-btn{display:inline-flex;align-items:center;gap:6px;padding:5px 12px;border-radius:var(--r-sm);border:1px solid var(--border-hi);background:var(--surface);color:var(--text-hi);cursor:pointer;font-family:var(--sans);font-size:11px;font-weight:500;white-space:nowrap;transition:background .15s,border-color .15s,color .15s}
 .topbar-dash-btn:hover,.topbar-dash-btn.open{background:var(--blue-soft);border-color:var(--blue);color:var(--blue)}
 .topbar-dash-btn svg{transition:transform .2s}
@@ -64,10 +64,7 @@ body{font-family:var(--sans);background:var(--bg);color:var(--text);min-height:1
 .topbar-dash-popup{position:absolute;top:calc(100% + 8px);left:0;min-width:220px;background:var(--surface2);border:1px solid var(--border-hi);border-radius:10px;padding:5px;z-index:600;display:none;flex-direction:column;gap:2px;box-shadow:0 8px 32px rgba(0,0,0,.5)}
 .topbar-dash-popup.open{display:flex}
 .topbar-dash-popup .dash-nav{width:100%;border-radius:7px;box-sizing:border-box;justify-content:flex-start}
-@media(max-width:1100px){
-  .topbar-dashboards{display:none}
-  .topbar-dash-menu{display:block}
-}
+
 .dash-nav{display:inline-flex;align-items:center;gap:6px;padding:5px 11px;border-radius:var(--r-sm);border:1px solid var(--border-hi);background:var(--surface);color:var(--text-hi);cursor:pointer;font-family:var(--sans);font-size:11px;font-weight:500;text-decoration:none;white-space:nowrap;transition:background .15s,border-color .15s,color .15s}
 .dash-nav:hover{background:var(--blue-soft);border-color:var(--blue);color:var(--blue)}
 .dash-nav-dot{width:7px;height:7px;border-radius:50%;flex-shrink:0}
@@ -1026,6 +1023,7 @@ body{font-family:var(--sans);background:var(--bg);color:var(--text);min-height:1
     <div class="brand">
       <div class="brand-icon"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="color:var(--blue)"><polygon points="12 2 22 8.5 22 15.5 12 22 2 15.5 2 8.5"/></svg></div>
       <div class="brand-name">Applegate<span>Monitor</span></div>
+      <span id="appVersion" style="font-family:var(--mono);font-size:10px;color:var(--text-2);background:var(--surface);border:1px solid var(--border);border-radius:4px;padding:1px 6px;margin-left:4px"></span>
       <span style="font-family:var(--mono);font-size:11px;color:var(--text-2);margin-left:12px" id="clock">00:00:00</span>
     </div>
     <!-- Dashboard quick-nav: pills on wide screens, dropdown on narrow -->
@@ -1226,6 +1224,8 @@ function isViewer(){ return sessionRole === "viewer"; }
       // Version update check (admin only — non-blocking)
       if (isAdmin()) {
         fetch("/api/version").then(r => r.json()).then(v => {
+          const vBadge = document.getElementById("appVersion");
+          if (vBadge && v.current) vBadge.textContent = "v" + v.current;
           if (v.update_available) {
             const banner = document.getElementById("updateBanner");
             const text   = document.getElementById("updateBannerText");
@@ -2605,7 +2605,7 @@ async function submitForm(){
       serverFormReturn = null;
       showOmadaSites(ctrl);
     } else {
-      closeAdmin();
+      showList();
     }
   } catch(e){ document.getElementById("fErr").textContent = "Error: "+e.message; }
 }
