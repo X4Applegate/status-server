@@ -1108,7 +1108,7 @@ async function initDB() {
   } catch(e) { /* column already exists */ }
   // Upgrade-safe: extend format enum as new integrations are added
   try {
-    await db.query("ALTER TABLE status_webhooks MODIFY COLUMN format ENUM('auto','generic','discord','slack','email','teams','telegram','pushover') NOT NULL DEFAULT 'auto'");
+    await db.query("ALTER TABLE status_webhooks MODIFY COLUMN format ENUM('auto','generic','discord','slack','email','teams','telegram','pushover','ntfy') NOT NULL DEFAULT 'auto'");
   } catch(e) { /* already updated */ }
 
   // Beta: DB-backed server pins — persists across devices when logged in
@@ -2226,6 +2226,41 @@ function scriptCheck(command, timeout=5000) {
   });
 }
 
+// TLS certificate expiry check — connects via TLS and reports days until cert expiry.
+// Fails when the cert is expired or expires within `warnDays` (default 14).
+// Returns { type:"tls_cert", ok, response_ms, detail, cert: { daysLeft, expiry, subject, issuer } }
+function tlsCertCheck(host, port = 443, warnDays = 14, timeout = 8000) {
+  port = parseInt(port) || 443;
+  warnDays = parseInt(warnDays) || 14;
+  return new Promise(resolve => {
+    const t0 = Date.now();
+    let done = false;
+    const finish = (result) => { if (done) return; done = true; clearTimeout(timer); try { socket.destroy(); } catch(_) {} resolve(result); };
+    const socket = require("tls").connect({ host, port, servername: host, rejectUnauthorized: false }, () => {
+      const response_ms = Date.now() - t0;
+      try {
+        const cert = socket.getPeerCertificate();
+        if (!cert || !cert.valid_to) return finish({ type:"tls_cert", ok:false, response_ms, detail:"no certificate" });
+        const expiry   = new Date(cert.valid_to);
+        const daysLeft = Math.floor((expiry - Date.now()) / 86400000);
+        const subject  = (cert.subject && (cert.subject.CN || cert.subject.O)) || host;
+        const issuer   = (cert.issuer  && (cert.issuer.O  || cert.issuer.CN))  || "unknown";
+        const ok       = daysLeft > warnDays;
+        const detail   = daysLeft < 0
+          ? `CERT EXPIRED ${-daysLeft}d ago · ${subject}`
+          : daysLeft <= warnDays
+            ? `CERT expires in ${daysLeft}d · ${subject}`
+            : `CERT valid ${daysLeft}d · ${subject}`;
+        finish({ type:"tls_cert", ok, response_ms, detail, cert: { daysLeft, expiry: expiry.toISOString(), subject, issuer } });
+      } catch(e) {
+        finish({ type:"tls_cert", ok:false, response_ms, detail:`cert parse error: ${e.message}` });
+      }
+    });
+    socket.on("error", e => finish({ type:"tls_cert", ok:false, response_ms: Date.now()-t0, detail: e.message }));
+    const timer = setTimeout(() => finish({ type:"tls_cert", ok:false, response_ms: Date.now()-t0, detail:"timeout" }), timeout);
+  });
+}
+
 async function runChecks(def) {
   return Promise.all((def.checks||[{type:"ping"}]).map(async c => {
     // Wrap every check in a try/catch so one malformed check (bad URL, etc.)
@@ -2245,6 +2280,7 @@ async function runChecks(def) {
       if (c.type==="unifi_client_count") return await unifiClientCountCheck(c.controller_id, c.site, c.site_name, c.min_clients);
       if (c.type==="square_pos")   return await squarePosCheck(c.account_id||0, c.location_id, c.device_id||"", c.timeout, c.access_token||"");
       if (c.type==="script")       return await scriptCheck(c.command, c.timeout);
+      if (c.type==="tls_cert")     return await tlsCertCheck(c.host || def.host, c.port, c.warn_days, c.timeout);
       return { type:c.type, ok:false, detail:"unknown check type" };
     } catch(e) {
       return { type:c.type, ok:false, detail:`check error: ${e.message}` };
@@ -2280,6 +2316,7 @@ async function recordHistory(def, checks, overall) {
                   : ch.type === "unifi_client_count" ? "unifi_clients:" + (ch.site_name||ch.site||"?")
                   : ch.type === "square_pos"    ? `square_pos:${ch.location_id||"?"}`
                   : ch.type === "script"        ? `script`
+                  : ch.type === "tls_cert"      ? `tls_cert:${ch.cert && ch.cert.subject ? ch.cert.subject.replace(/[^a-z0-9.\-]/gi,"_").slice(0,30) : "cert"}`
                   : ch.type;
       await db.query(
         "INSERT INTO status_history (server_id, check_type, ok, response_ms, detail, checked_at) VALUES (?,?,?,?,?,?)",
@@ -2572,6 +2609,35 @@ function buildWebhookPayload(format, evt) {
     return payload;
   }
 
+  if (format === "ntfy") {
+    // ntfy.sh (https://ntfy.sh/docs/) — HTTP POST to the topic URL.
+    // Headers carry title, priority, tags, and click URL.
+    // No JSON body needed — just a plain-text message in the body.
+    const priority = evt.isRecovery ? "low" : (evt.status === "down" && !evt.isTest) ? "urgent" : "default";
+    const tags = evt.isTest ? ["test_tube"] : evt.isRecovery ? ["white_check_mark"] : (evt.status === "down" ? ["rotating_light"] : ["warning"]);
+    const checkDetails = Array.isArray(evt.checks) && evt.checks.length
+      ? evt.checks.filter(c => !c.ok || evt.isRecovery || evt.isTest).map(c => {
+          const label = c.type === "ping" ? "PING" : c.type === "tcp" ? `TCP :${c.port}` : c.type === "udp" ? `UDP :${c.port}` : c.type.toUpperCase();
+          return `${c.ok ? "✅" : "❌"} ${label}: ${c.detail}`;
+        }).join("\n")
+      : null;
+    const lines = [
+      `Host: ${evt.host}`,
+      `Status: ${statusLabel}`,
+      `Time: ${displayTime}`
+    ];
+    if (checkDetails || evt.cause) lines.push(`\nDetails:\n${checkDetails || evt.cause}`);
+    // _ntfy signals the dispatcher to use header-based delivery
+    return {
+      _ntfy: true,
+      message: lines.join("\n"),
+      title: `${emoji} ${evt.server} ${verb}`,
+      priority,
+      tags,
+      click: evt.dashboardUrl || undefined
+    };
+  }
+
   // generic
   return {
     event: evt.isTest ? "webhook.test" : evt.isRecovery ? "server.recovered" : "server.down",
@@ -2592,6 +2658,7 @@ function detectFormat(url) {
   if (/webhook\.office\.com|outlook\.office\.com\/webhook/i.test(url)) return "teams";
   if (/api\.telegram\.org\/bot/i.test(url)) return "telegram";
   if (/api\.pushover\.net/i.test(url)) return "pushover";
+  if (/ntfy\.sh\/|ntfy\./i.test(url)) return "ntfy";
   return "generic";
 }
 
@@ -2599,6 +2666,28 @@ async function postWebhook(url, body) {
   // Validate and reconstruct from parsed components — breaks taint chain (SSRF hardening)
   let safeUrl;
   try { safeUrl = sanitizeRequestUrl(url); } catch(e) { throw new Error("Invalid webhook URL"); }
+  // ntfy uses header-based delivery instead of a JSON body
+  if (body && body._ntfy) {
+    const headers = {
+      "Content-Type":  "text/plain; charset=utf-8",
+      "Title":         body.title || "Applegate Monitor",
+      "Priority":      body.priority || "default",
+      "Tags":          (body.tags || []).join(","),
+      "User-Agent":    "applegate-monitor-webhook/1.0"
+    };
+    if (body.click) headers["Click"] = body.click;
+    const r = await fetch(safeUrl, {
+      method:  "POST",
+      headers,
+      body:    body.message || "",
+      signal:  AbortSignal.timeout(8000)
+    });
+    if (!r.ok) {
+      const text = await r.text().catch(() => "");
+      throw new Error(`HTTP ${r.status}${text ? ": " + text.slice(0, 200) : ""}`);
+    }
+    return { status: r.status };
+  }
   const r = await fetch(safeUrl, {
     method:  "POST",
     headers: {

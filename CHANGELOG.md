@@ -6,6 +6,59 @@ All notable changes to this project are documented here.
 
 ---
 
+## [3.6.0] — 2026-05-25
+
+### Added
+- **ntfy.sh webhook format** — send push alerts to any ntfy topic (self-hosted or ntfy.sh cloud). Auto-detected from URLs matching `ntfy.sh/` or `ntfy.`. Uses header-based delivery (`Title`, `Priority`, `Tags`, `Click`) for rich notifications. Priority maps automatically: `urgent` for down, `default` for degraded/test, `low` for recovery. Admin UI shows placeholder URL and the format is available in the webhook format dropdown.
+- **TLS/SSL Certificate Expiry check type** — new `tls_cert` check that connects directly via TLS and reports days until certificate expiry. Fails (red) when expired or expiring within the configurable warn threshold (default 14 days); shows `CERT valid Nd · subject` on pass. Port and warn-days threshold are configurable in the admin check editor.
+- **Response-time sparklines on sidebar cards** — each server card in the sidebar now shows a mini 24h response-time sparkline (blue gradient line chart) lazy-loaded from the existing `/api/public/response/:id` endpoint. Cards with no response time history hide the sparkline automatically. Sparklines are cached for 5 minutes and redrawn on every sidebar refresh.
+
+### Fixed
+- Auto-detect for ntfy webhook URLs now correctly identifies `ntfy.sh/` and `ntfy.` patterns.
+
+---
+
+## [3.5.3] — 2026-05-15
+
+### Added
+- **Version badge in topbar** — the running app version is now shown in the admin topbar so you can quickly tell which build is deployed without hitting `/health`.
+
+### Improved
+- **UniFi WAN health checks** — dedicated check type that monitors WAN uplink status, carrier, and link speed on UniFi gateways; reports `degraded` rather than a binary up/down when the WAN is connected but unhealthy.
+- **UniFi client count checks** — new check type that reports the current connected client count for a site as a detail field; alerts when the site has zero clients (useful for detecting AP/controller split-brain).
+- **Richer UniFi device detail** — device check results now include model name, firmware version, uptime, and adoption state in the detail string.
+- **Controller health badges** — UniFi controller cards in the admin panel now show a live connectivity badge (green = API reachable, red = unreachable) so you can spot misconfigured controllers at a glance.
+
+---
+
+## [3.5.0] — 2026-05-10 — UniFi Network Controller Support
+
+### Added
+- **UniFi Network Application integration** — monitor UniFi controllers alongside existing Omada support.
+  - DB tables: `status_unifi_controllers` + `status_unifi_controller_groups`.
+  - Auth: API key (v8+) **or** username/password session-cookie flow.
+  - Check types: `unifi_gateway` (gateway/USG health) and `unifi_device` (individual device up/down).
+  - Full CRUD API at `/api/admin/unifi-controllers` with sites and devices sub-endpoints.
+  - Admin UI: dedicated **UniFi** tab with controller form, site/device browser, and one-click add-to-server workflow.
+- **Network Controller submenu** — Omada and UniFi tabs are grouped under a collapsible **Network Controller** dropdown in the admin tab bar to keep the UI tidy as more integrations land.
+
+### Fixed
+- UniFi cancel button now correctly calls `showList()` and hides the form/sites panel.
+- UniFi form/sites views replace the undefined `hideAllSections()` call with explicit hide calls.
+- UniFi list rendering uses `adminPanelBody` instead of the missing `aList` element.
+- Network Controller dropdown no longer clipped by `overflow-x: auto` on the tab bar.
+
+### Dependencies
+- `ip-address` → 10.2.0
+- `express-rate-limit` → 8.5.1
+- `mysql2` → 3.22.3
+- `nodemailer` → 8.0.7
+- `undici` → 8.2.0
+- Node base image: `node:25-alpine3.21` (was 24)
+- CI: `docker/setup-buildx-action` → v4, `docker/build-push-action` → v7, `docker/setup-qemu-action` → v4, `actions/checkout` → v6, `docker/login-action` → v4
+
+---
+
 ## [3.4.0] — HA / automatic failover feature removed
 
 The high-availability auto-failover work tracked in [issue #13](https://github.com/X4Applegate/status-server/issues/13) has been **fully removed** from the project. The code worked end-to-end — an end-to-end CF-driven failover drill did successfully promote the standby — but the operational complexity (bidirectional MariaDB replication, the promote webhook service, split-brain guard, Cloudflare Load Balancer + Notification policy, the post-failover resync procedure) is genuinely out of proportion to the uptime gains for a self-hosted status monitor.

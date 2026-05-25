@@ -210,6 +210,8 @@ body::before{content:'';position:fixed;inset:0;pointer-events:none;background:ra
 .srv-ms.fast{color:#10e88a;background:rgba(16,232,138,.1)}
 .srv-ms.ok{color:var(--orange);background:var(--orange-soft)}
 .srv-ms.slow{color:var(--red);background:var(--red-soft)}
+.srv-sparkline{display:block;width:100%;height:20px;margin-top:3px;opacity:.7}
+.srv-sparkline-wrap{width:100%;overflow:hidden}
 /* Map view */
 .map-view{display:none;flex-direction:column;flex:1;height:calc(100vh - 64px);min-height:0}
 .map-view.active{display:flex}
@@ -1127,6 +1129,7 @@ function renderSidebar(){
             ${certHtml}${msHtml}
           </div>
           ${s.description ? `<div class="srv-desc" style="margin-top:2px;overflow:hidden;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;word-break:break-word">${s.description}</div>` : ""}
+          <div class="srv-sparkline-wrap"><canvas class="srv-sparkline" id="spark-${s.id}" width="200" height="20" title="24h response time"></canvas></div>
         </div>
       </div>
       <div class="srv-hb-bar">${dots}</div>
@@ -1347,6 +1350,7 @@ function renderSidebar(){
   el.innerHTML = sections.join("");
   updateHealthBanner();
   updateMapBtnVisibility();
+  requestAnimationFrame(() => refreshSparklines());
 }
 
 // -- Select server
@@ -1593,6 +1597,16 @@ function renderDetail(s, uptime, heartbeat, incidents){
   if (s.lat && s.lng) requestAnimationFrame(() => _initDetailMap(s.lat, s.lng, s.name, s.overall));
 }
 
+
+// -- Sidebar sparklines (mini 24h response-time lines on each server card) ----
+const _sparkCache = {};
+const _sparkQueue = new Set();
+let _sparkTimer = null;
+function queueSparkline(id){ _sparkQueue.add(id); if(!_sparkTimer) _sparkTimer=setTimeout(flushSparklines,80); }
+async function flushSparklines(){ _sparkTimer=null; const ids=[..._sparkQueue]; _sparkQueue.clear(); await Promise.all(ids.map(id=>loadSparkline(id))); }
+async function loadSparkline(id){ const now=Date.now(); const c=_sparkCache[id]; if(c&&now-c.ts<5*60*1000){drawSparkline(id,c.data);return;} try{ const data=await fetch(`/api/public/response/${id}`).then(r=>r.json()).catch(()=>[]); _sparkCache[id]={ts:now,data}; drawSparkline(id,data); }catch(e){} }
+function drawSparkline(id,data){ const canvas=document.getElementById(`spark-${id}`); if(!canvas)return; const pts=(data||[]).map(d=>d.avg_ms).filter(v=>v!=null); if(!pts.length){canvas.style.display='none';return;} canvas.style.display='block'; const dpr=window.devicePixelRatio||1; const W=canvas.parentElement.clientWidth||180; const H=20; canvas.width=W*dpr; canvas.height=H*dpr; canvas.style.width=W+'px'; canvas.style.height=H+'px'; const ctx=canvas.getContext('2d'); ctx.scale(dpr,dpr); ctx.clearRect(0,0,W,H); const maxV=Math.max(...pts); const minV=Math.min(...pts); const range=maxV-minV||1; const PAD=1; const xOf=(i)=>PAD+(i/(pts.length-1||1))*(W-PAD*2); const yOf=(v)=>PAD+(1-(v-minV)/range)*(H-PAD*2); const grad=ctx.createLinearGradient(0,0,0,H); grad.addColorStop(0,'rgba(42,127,255,0.25)'); grad.addColorStop(1,'rgba(42,127,255,0)'); ctx.beginPath(); pts.forEach((v,i)=>i===0?ctx.moveTo(xOf(i),yOf(v)):ctx.lineTo(xOf(i),yOf(v))); ctx.lineTo(xOf(pts.length-1),H); ctx.lineTo(xOf(0),H); ctx.closePath(); ctx.fillStyle=grad; ctx.fill(); ctx.beginPath(); pts.forEach((v,i)=>i===0?ctx.moveTo(xOf(i),yOf(v)):ctx.lineTo(xOf(i),yOf(v))); ctx.strokeStyle='rgba(42,127,255,0.7)'; ctx.lineWidth=1.5; ctx.lineJoin='round'; ctx.stroke(); }
+function refreshSparklines(){ servers.forEach(s=>queueSparkline(s.id)); }
 // -- Simple canvas chart with hover crosshair (no external libs)
 let _chartState = null;
 

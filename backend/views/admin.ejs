@@ -991,12 +991,13 @@ body{font-family:var(--sans);background:var(--bg);color:var(--text);min-height:1
           <div class="fg full"><label class="flabel">Name *</label><input class="finput" id="wName" placeholder="e.g. Discord Alerts"></div>
           <div class="fg full"><label class="flabel" id="wUrlLabel">URL *</label><input class="finput" id="wUrl" placeholder="https://discord.com/api/webhooks/..."></div>
           <div class="fg full"><label class="flabel">Format</label><select class="fselect" id="wFormat" onchange="updateWebhookUrlHint()">
-            <option value="auto">Auto-detect (Discord / Slack / Teams / Telegram / Pushover / Email)</option>
+            <option value="auto">Auto-detect (Discord / Slack / Teams / Telegram / Pushover / ntfy / Email)</option>
             <option value="discord">Discord</option>
             <option value="slack">Slack</option>
             <option value="teams">Microsoft Teams</option>
             <option value="telegram">Telegram</option>
             <option value="pushover">Pushover</option>
+            <option value="ntfy">ntfy.sh (push notifications)</option>
             <option value="email">Email</option>
             <option value="generic">Generic JSON</option>
           </select></div>
@@ -2349,6 +2350,10 @@ function renderCrows(){
       detail = sqSelect
              + `<input class="finput" placeholder="Location ID" value="${ck.location_id||""}" oninput="upCk(${i},'location_id',this.value)">`
              + `<input class="finput" placeholder="Device ID (optional — blank = any device)" value="${ck.device_id||""}" oninput="upCk(${i},'device_id',this.value)">`;
+    } else if (ck.type === "tls_cert") {
+      detail = `<input class="finput" type="number" placeholder="Port (default 443)" value="${ck.port||443}" oninput="upCk(${i},'port',parseInt(this.value)||443)" style="max-width:140px">` 
+             + `<input class="finput" type="number" placeholder="Warn days threshold (default 14)" value="${ck.warn_days||14}" oninput="upCk(${i},'warn_days',parseInt(this.value)||14)" style="max-width:280px">` 
+             + `<span class="crow-hint">🔒 Fails when cert expires in fewer than warn_days days.</span>`;
     } else if (ck.type === "script") {
       detail = `<div style="width:100%"><div style="display:flex;align-items:center;gap:6px;background:var(--orange-soft);border:1px solid rgba(255,140,42,.3);border-radius:6px;padding:5px 9px;margin-bottom:6px;font-size:11px;color:var(--orange)">⚠️ Script checks run commands on the monitor host. Admin only.</div>`
              + `<input class="finput" placeholder="Command  e.g. /opt/checks/my-check.sh" value="${ck.command||""}" oninput="upCk(${i},'command',this.value)" style="font-family:var(--mono);font-size:11px">`
@@ -2369,6 +2374,7 @@ function renderCrows(){
       + "<option value=\"unifi_wan\"      " + sel("unifi_wan")      + ">UniFi WAN Health</option>"
       + "<option value=\"unifi_client_count\" " + sel("unifi_client_count") + ">UniFi Client Count</option>"
       + "<option value=\"square_pos\" "    + sel("square_pos")    + ">Square POS</option>"
+      + "<option value=\"tls_cert\" " + sel("tls_cert") + ">TLS/SSL Certificate Expiry</option>"
       + (isAdmin() ? "<option value=\"script\" " + sel("script") + ">Script (exit code)</option>" : "")
       + "</select>"
       + "<div class=\"crow-detail\">" + detail + "</div>"
@@ -3223,7 +3229,8 @@ function updateWebhookUrlHint(){
     slack:    "https://hooks.slack.com/services/...",
     teams:    "https://xxxx.webhook.office.com/webhookb2/...",
     telegram: "https://api.telegram.org/bot{TOKEN}/sendMessage?chat_id={CHAT_ID}",
-    pushover: "https://api.pushover.net/1/messages.json?token={APP_TOKEN}&user={USER_KEY}",
+    pushover: "https://api.pushover.net/1/messages.json?token=***&user={USER_KEY}",
+    ntfy:     "https://ntfy.sh/your-topic-name",
     email:    "alerts@example.com",
     generic:  "https://your-endpoint.example.com/webhook",
     auto:     "https://discord.com/api/webhooks/..."
