@@ -1,8 +1,7 @@
-# Node 24 is the current Active LTS (Oct 2025 → Apr 2028). Alpine 3.21 is the
-# latest Alpine release paired with it — choosing an explicit pair means we
-# pick up security patches from both streams on each rebuild and keeps Docker
-# Scout's "outdated base image" check green.
-FROM node:25-alpine3.21
+# Node 24 is the current Active LTS line. Use the floating Alpine variant so
+# rebuilds pick up the newest supported Alpine patch stream published by the
+# official Node image maintainers.
+FROM node:24-alpine
 
 # Pull the latest Alpine security patches into the base layer before adding
 # anything else. `apk upgrade` picks up CVE fixes that land between base-image

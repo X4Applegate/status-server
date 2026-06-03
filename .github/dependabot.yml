@@ -19,7 +19,7 @@ updates:
       prefix: deps
       include: scope
 
-  # Docker base image updates — keeps node:20-alpine fresh with security fixes.
+  # Docker base image updates — keeps node:24-alpine fresh with security fixes.
   - package-ecosystem: docker
     directory: /backend
     schedule:

@@ -120,10 +120,10 @@ Badge URLs are shown directly in the server edit form for easy copying.
 ## Stack
 
 - **Runtime:** Node.js 18+
-- **Framework:** Express 4
+- **Framework:** Express 5
 - **Templates:** EJS
 - **Database:** MariaDB (or MySQL)
-- **Deployment:** Docker + Docker Compose
+- **Deployment:** Docker + Docker Compose (`applegater/status-server:latest` or version tags such as `v3.6.1`)
 - **Reverse proxy:** Caddy (recommended) or any HTTPS proxy
 - **No build step** — plain HTML/CSS/JS embedded in EJS templates
 

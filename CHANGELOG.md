@@ -6,6 +6,19 @@ All notable changes to this project are documented here.
 
 ---
 
+## [3.6.1] — 2026-06-03
+
+### Security
+- Updated transitive `qs` dependency to `6.15.2`, resolving the moderate npm advisory reported by `npm audit` for production installs.
+
+### Changed
+- Moved the Docker runtime image back onto the Node 24 LTS Alpine line (`node:24-alpine`) instead of the short-lived Node 25 line.
+- Updated CI to test Node 18 (declared minimum) and Node 24 (Docker runtime), so release checks match the supported runtime envelope.
+
+### Fixed
+- Refreshed `backend/package-lock.json` metadata from `3.4.0` to `3.6.1` so package, lockfile, Docker tags, and release notes stay aligned.
+- Updated README stack details to reflect the current Express 5 runtime.
+
 ## [3.6.0] — 2026-05-25
 
 ### Added

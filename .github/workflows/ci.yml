@@ -21,7 +21,7 @@ jobs:
       fail-fast: false
       matrix:
         # Test against the minimum we declare (engines) and the runtime we ship in Docker.
-        node-version: [18.x, 20.x]
+        node-version: [18.x, 24.x]
     steps:
       - uses: actions/checkout@v6
 
