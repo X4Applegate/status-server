@@ -1,7 +1,7 @@
-# Node 24 is the current Active LTS line. Use the floating Alpine variant so
+# Use the floating Node 26 Alpine variant so
 # rebuilds pick up the newest supported Alpine patch stream published by the
 # official Node image maintainers.
-FROM node:24-alpine
+FROM node:26-alpine
 
 # Pull the latest Alpine security patches into the base layer before adding
 # anything else. `apk upgrade` picks up CVE fixes that land between base-image

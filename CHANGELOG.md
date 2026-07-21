@@ -17,6 +17,9 @@ All notable changes to this project are documented here.
 ### Documentation
 - Updated the README Docker image version example to `v3.6.2`.
 
+### Dependencies
+- Updated the backend Docker runtime base image from `node:24-alpine` to `node:26-alpine`.
+
 ## [3.6.2] — 2026-07-21
 
 ### Security
