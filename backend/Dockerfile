@@ -1,4 +1,4 @@
-# Node 24 is the current Active LTS line. Use the floating Alpine variant so
+# Use the floating Node 26 Alpine variant so
 # rebuilds pick up the newest supported Alpine patch stream published by the
 # official Node image maintainers.
 FROM node:26-alpine
