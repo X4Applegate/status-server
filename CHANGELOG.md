@@ -6,6 +6,19 @@ All notable changes to this project are documented here.
 
 ---
 
+## [3.6.2] — 2026-07-21
+
+### Security
+- Updated `nodemailer` to `9.0.3`, resolving current high and moderate npm advisories.
+- Updated `undici` to `8.8.0`, resolving current high, moderate, and low npm advisories.
+- Updated transitive `body-parser` to `2.3.0`, clearing the remaining npm audit alert.
+
+### Changed
+- Updated backend dependency set: `express-rate-limit` `8.6.0`, `google-auth-library` `10.9.0`, `helmet` `8.3.0`, and `mysql2` `3.23.1`.
+- Raised the declared Node runtime minimum to `22.19.0` because current `undici` releases no longer load correctly on Node 18.
+- Updated CI to test Node 22 and Node 24, matching the declared minimum and Docker runtime.
+- Updated GitHub Actions checkout to v7.
+
 ## [3.6.1] — 2026-06-03
 
 ### Security
