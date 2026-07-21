@@ -119,7 +119,7 @@ Badge URLs are shown directly in the server edit form for easy copying.
 
 ## Stack
 
-- **Runtime:** Node.js 18+
+- **Runtime:** Node.js 22.19+ or 24+
 - **Framework:** Express 5
 - **Templates:** EJS
 - **Database:** MariaDB (or MySQL)
