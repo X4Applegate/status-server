@@ -8,6 +8,8 @@ All notable changes to this project are documented here.
 
 ## [Unreleased]
 
+## [3.6.3] — 2026-07-21
+
 ### Security
 - Added rate limiting to the unauthenticated `/health` endpoint to satisfy CodeQL's public-route abuse check.
 - Hardened UniFi controller API URL construction by sanitizing controller paths before outbound fetches.
@@ -15,7 +17,7 @@ All notable changes to this project are documented here.
 - Reworked UniFi site/device admin rendering to build DOM nodes with `textContent` and event listeners instead of interpolating controller data into `innerHTML` handlers.
 
 ### Documentation
-- Updated the README Docker image version example to `v3.6.2`.
+- Updated the README Docker image version example to `v3.6.3`.
 
 ### Dependencies
 - Updated the backend Docker runtime base image from `node:24-alpine` to `node:26-alpine`.
