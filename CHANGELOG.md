@@ -6,6 +6,17 @@ All notable changes to this project are documented here.
 
 ---
 
+## [Unreleased]
+
+### Security
+- Added rate limiting to the unauthenticated `/health` endpoint to satisfy CodeQL's public-route abuse check.
+- Hardened UniFi controller API URL construction by sanitizing controller paths before outbound fetches.
+- Changed the TLS certificate expiry check to keep normal certificate validation enabled instead of disabling TLS verification.
+- Reworked UniFi site/device admin rendering to build DOM nodes with `textContent` and event listeners instead of interpolating controller data into `innerHTML` handlers.
+
+### Documentation
+- Updated the README Docker image version example to `v3.6.2`.
+
 ## [3.6.2] — 2026-07-21
 
 ### Security

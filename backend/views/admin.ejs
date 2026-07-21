@@ -3730,11 +3730,11 @@ async function showUnifiSites(controllerId) {
     if (!r.ok) throw new Error(await r.text());
     const sites = await r.json();
     unifiSitesCache[controllerId] = sites;
-    document.getElementById("ufSitesList").innerHTML = sites.map(s =>
-      `<div class="admin-server-row"><div class="admin-server-info"><div class="admin-server-name">${s.name}</div><div class="admin-checks-label">id: ${s.id}</div></div><div class="admin-server-actions"><button class="btn btn-sm" onclick="addUnifiGatewayServer(${controllerId},'${s.id}','${s.name.replace(/'/g,"\\'")}')">Add Gateway</button><button class="btn btn-sm" onclick="addUnifiWanServer(${controllerId},'${s.id}','${s.name.replace(/'/g,"\\'")}')">WAN</button><button class="btn btn-sm" onclick="addUnifiClientCountServer(${controllerId},'${s.id}','${s.name.replace(/'/g,"\\'")}')">Clients</button><button class="btn btn-sm" onclick="showUnifiDevices(${controllerId},'${s.id}','${s.name.replace(/'/g,"\\'")}')">Devices</button></div></div>`
-    ).join("") || '<div class="admin-empty">No sites found.</div>';
+    renderUnifiSitesList(controllerId, sites);
   } catch(e) {
-    document.getElementById("ufSitesList").innerHTML = `<div style="color:var(--red)">${e.message}</div>`;
+    const list = document.getElementById("ufSitesList");
+    list.textContent = e.message;
+    list.style.color = "var(--red)";
   }
 }
 
@@ -3743,17 +3743,101 @@ async function showUnifiDevices(controllerId, siteId, siteName) {
   if (!r.ok) { alert("Error loading devices"); return; }
   const devices = await r.json();
   function fmtUp(s){if(!s)return"";var d2=Math.floor(s/86400),h=Math.floor((s%86400)/3600),m=Math.floor((s%3600)/60);return(d2?d2+"d ":"")+(h?h+"h ":"")+(m?m+"m":"").trim();}
-  var rows = devices.map(function(d) {
-    var meta=[d.model||d.type,d.ip,d.version?"fw:"+d.version:null,fmtUp(d.uptime),d.clients!=null?d.clients+" clients":null,d.state===1?"online":"offline"].filter(Boolean).join(" \u00b7 ");
-    var ss=siteName.replace(/'/g,"\\'"); var sn=d.name.replace(/'/g,"\\'");
-    return '<div class="admin-server-row"><div class="admin-server-info"><div class="admin-server-name">'+d.name+'</div>'
-           + '<div class="admin-checks-label">'+meta+'</div></div>'
-           + '<div class="admin-server-actions"><button class="btn btn-sm" onclick="addUnifiDeviceServer('+controllerId+',\''+siteId+'\',\''+ss+'\',\''+d.mac+'\',\''+sn+'\')">Add Check</button></div></div>';
-  }).join("") || '<div class="admin-empty">No devices.</div>';
-  document.getElementById("ufSitesList").innerHTML =
-    '<button class="btn btn-sm" onclick="showUnifiSites('+controllerId+')" style="margin-bottom:10px">&#8592; Back</button>'
-    + '<div class="form-heading" style="margin-bottom:10px">'+siteName+' Devices</div>'
-    + rows;
+  renderUnifiDevicesList(controllerId, siteId, siteName, devices, fmtUp);
+}
+
+function appendUnifiAction(actions, label, handler) {
+  const btn = document.createElement("button");
+  btn.className = "btn btn-sm";
+  btn.type = "button";
+  btn.textContent = label;
+  btn.addEventListener("click", handler);
+  actions.appendChild(btn);
+}
+
+function renderUnifiSitesList(controllerId, sites) {
+  const list = document.getElementById("ufSitesList");
+  list.style.color = "";
+  list.replaceChildren();
+  if (!sites.length) {
+    const empty = document.createElement("div");
+    empty.className = "admin-empty";
+    empty.textContent = "No sites found.";
+    list.appendChild(empty);
+    return;
+  }
+  sites.forEach(site => {
+    const row = document.createElement("div");
+    row.className = "admin-server-row";
+    const info = document.createElement("div");
+    info.className = "admin-server-info";
+    const name = document.createElement("div");
+    name.className = "admin-server-name";
+    name.textContent = site.name || site.id || "Unnamed site";
+    const detail = document.createElement("div");
+    detail.className = "admin-checks-label";
+    detail.textContent = `id: ${site.id || ""}`;
+    info.append(name, detail);
+    const actions = document.createElement("div");
+    actions.className = "admin-server-actions";
+    appendUnifiAction(actions, "Add Gateway", () => addUnifiGatewayServer(controllerId, site.id, site.name));
+    appendUnifiAction(actions, "WAN", () => addUnifiWanServer(controllerId, site.id, site.name));
+    appendUnifiAction(actions, "Clients", () => addUnifiClientCountServer(controllerId, site.id, site.name));
+    appendUnifiAction(actions, "Devices", () => showUnifiDevices(controllerId, site.id, site.name));
+    row.append(info, actions);
+    list.appendChild(row);
+  });
+}
+
+function renderUnifiDevicesList(controllerId, siteId, siteName, devices, fmtUp) {
+  const list = document.getElementById("ufSitesList");
+  list.style.color = "";
+  list.replaceChildren();
+  const back = document.createElement("button");
+  back.className = "btn btn-sm";
+  back.type = "button";
+  back.style.marginBottom = "10px";
+  back.textContent = "\u2190 Back";
+  back.addEventListener("click", () => showUnifiSites(controllerId));
+  const heading = document.createElement("div");
+  heading.className = "form-heading";
+  heading.style.marginBottom = "10px";
+  heading.textContent = `${siteName || "Site"} Devices`;
+  list.append(back, heading);
+  if (!devices.length) {
+    const empty = document.createElement("div");
+    empty.className = "admin-empty";
+    empty.textContent = "No devices.";
+    list.appendChild(empty);
+    return;
+  }
+  devices.forEach(device => {
+    const row = document.createElement("div");
+    row.className = "admin-server-row";
+    const info = document.createElement("div");
+    info.className = "admin-server-info";
+    const name = document.createElement("div");
+    name.className = "admin-server-name";
+    name.textContent = device.name || device.mac || "Unnamed device";
+    const meta = document.createElement("div");
+    meta.className = "admin-checks-label";
+    meta.textContent = [
+      device.model || device.type,
+      device.ip,
+      device.version ? `fw:${device.version}` : null,
+      fmtUp(device.uptime),
+      device.clients != null ? `${device.clients} clients` : null,
+      device.state === 1 ? "online" : "offline"
+    ].filter(Boolean).join(" \u00b7 ");
+    info.append(name, meta);
+    const actions = document.createElement("div");
+    actions.className = "admin-server-actions";
+    appendUnifiAction(actions, "Add Check", () =>
+      addUnifiDeviceServer(controllerId, siteId, siteName, device.mac, device.name)
+    );
+    row.append(info, actions);
+    list.appendChild(row);
+  });
 }
 
 function addUnifiGatewayServer(controllerId, siteId, siteName) {

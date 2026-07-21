@@ -103,6 +103,13 @@ const pageLimiter = rateLimit({
   legacyHeaders:   false,
   message:         "Too many requests — slow down."
 });
+const healthLimiter = rateLimit({
+  windowMs:        60 * 1000,
+  max:             240,
+  standardHeaders: true,
+  legacyHeaders:   false,
+  message:         { error: "Too many health checks — slow down." }
+});
 
 const { version: APP_VERSION } = require("./package.json");
 const APP_OWNER     = process.env.APP_OWNER         || "Richard Applegate";
@@ -412,7 +419,7 @@ app.use("/api/", apiLimiter);
 // Pass ?strict=1 to additionally require serverConfig.length > 0 (useful to keep
 // a replica out of rotation until it has fully loaded its config).
 // Response is tiny JSON and never cached.
-app.get("/health", async (req, res) => {
+app.get("/health", healthLimiter, async (req, res) => {
   res.setHeader("Cache-Control", "no-store");
   const strict = req.query.strict === "1" || req.query.strict === "true";
   const body = {
@@ -608,6 +615,20 @@ function sanitizePathSegment(value) {
   const str = String(value || "").trim();
   if (!/^[A-Za-z0-9_\-]+$/.test(str)) throw new Error(`Invalid path segment: "${str}"`);
   return str;
+}
+
+function sanitizeControllerPath(rawPath) {
+  const str = String(rawPath || "");
+  if (!str.startsWith("/")) throw new Error("Invalid controller API path");
+  const [pathOnly, queryString] = str.split("?");
+  const safePath = pathOnly
+    .split("/")
+    .map(seg => seg.replace(/[^A-Za-z0-9\-_.:@!$&'()*+,;=~]/g, ""))
+    .join("/");
+  const safeQuery = queryString
+    ? "?" + queryString.replace(/[^A-Za-z0-9\-_.~=&%]/g, "")
+    : "";
+  return `${safePath}${safeQuery}`;
 }
 
 /**
@@ -1976,7 +1997,8 @@ async function unifiGetHeaders(controller) {
     return { "Cookie": cached.cookies, "Content-Type": "application/json" };
   }
   const safeBase = await sanitizeBaseUrl(controller.base_url);
-  const r = await fetch(safeBase + "/api/auth/login", {
+  const loginUrl = `${safeBase}${sanitizeControllerPath("/api/auth/login")}`;
+  const r = await fetch(loginUrl, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ username: controller.username, password: controller.password }),
@@ -1994,7 +2016,8 @@ async function unifiGetHeaders(controller) {
 async function unifiApiGet(controller, path) {
   const safeBase = await sanitizeBaseUrl(controller.base_url);
   const headers = await unifiGetHeaders(controller);
-  const r = await fetch(safeBase + path, {
+  const safePath = sanitizeControllerPath(path);
+  const r = await fetch(`${safeBase}${safePath}`, {
     headers,
     dispatcher: unifiDispatcher(controller.verify_tls),
     signal: AbortSignal.timeout(8000)
@@ -2236,7 +2259,7 @@ function tlsCertCheck(host, port = 443, warnDays = 14, timeout = 8000) {
     const t0 = Date.now();
     let done = false;
     const finish = (result) => { if (done) return; done = true; clearTimeout(timer); try { socket.destroy(); } catch(_) {} resolve(result); };
-    const socket = require("tls").connect({ host, port, servername: host, rejectUnauthorized: false }, () => {
+    const socket = require("tls").connect({ host, port, servername: host, rejectUnauthorized: true }, () => {
       const response_ms = Date.now() - t0;
       try {
         const cert = socket.getPeerCertificate();
