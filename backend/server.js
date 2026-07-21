@@ -631,6 +631,21 @@ function sanitizeControllerPath(rawPath) {
   return `${safePath}${safeQuery}`;
 }
 
+async function buildControllerUrl(rawBaseUrl, rawPath) {
+  const safeBase = await sanitizeBaseUrl(rawBaseUrl);
+  const baseUrl = new URL(safeBase);
+  const requestUrl = new URL("http://example.invalid/");
+  requestUrl.protocol = baseUrl.protocol;
+  requestUrl.hostname = baseUrl.hostname;
+  requestUrl.port = baseUrl.port;
+
+  const [pathOnly, queryString] = sanitizeControllerPath(rawPath).split("?");
+  requestUrl.pathname = pathOnly;
+  requestUrl.search = queryString ? `?${queryString}` : "";
+
+  return requestUrl;
+}
+
 /**
  * Sanitize a hostname or IP used in a shell command (ping) or TCP connection.
  * Allows only characters valid in DNS names and IPv4/IPv6 literals.
@@ -1996,8 +2011,7 @@ async function unifiGetHeaders(controller) {
   if (cached && cached.expiresAt > Date.now() + 60_000) {
     return { "Cookie": cached.cookies, "Content-Type": "application/json" };
   }
-  const safeBase = await sanitizeBaseUrl(controller.base_url);
-  const loginUrl = sanitizeRequestUrl(`${safeBase}${sanitizeControllerPath("/api/auth/login")}`);
+  const loginUrl = await buildControllerUrl(controller.base_url, "/api/auth/login");
   const r = await fetch(loginUrl, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
@@ -2014,10 +2028,8 @@ async function unifiGetHeaders(controller) {
 }
 
 async function unifiApiGet(controller, path) {
-  const safeBase = await sanitizeBaseUrl(controller.base_url);
   const headers = await unifiGetHeaders(controller);
-  const safePath = sanitizeControllerPath(path);
-  const requestUrl = sanitizeRequestUrl(`${safeBase}${safePath}`);
+  const requestUrl = await buildControllerUrl(controller.base_url, path);
   const r = await fetch(requestUrl, {
     headers,
     dispatcher: unifiDispatcher(controller.verify_tls),
