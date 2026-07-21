@@ -1997,7 +1997,7 @@ async function unifiGetHeaders(controller) {
     return { "Cookie": cached.cookies, "Content-Type": "application/json" };
   }
   const safeBase = await sanitizeBaseUrl(controller.base_url);
-  const loginUrl = `${safeBase}${sanitizeControllerPath("/api/auth/login")}`;
+  const loginUrl = sanitizeRequestUrl(`${safeBase}${sanitizeControllerPath("/api/auth/login")}`);
   const r = await fetch(loginUrl, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
@@ -2017,7 +2017,8 @@ async function unifiApiGet(controller, path) {
   const safeBase = await sanitizeBaseUrl(controller.base_url);
   const headers = await unifiGetHeaders(controller);
   const safePath = sanitizeControllerPath(path);
-  const r = await fetch(`${safeBase}${safePath}`, {
+  const requestUrl = sanitizeRequestUrl(`${safeBase}${safePath}`);
+  const r = await fetch(requestUrl, {
     headers,
     dispatcher: unifiDispatcher(controller.verify_tls),
     signal: AbortSignal.timeout(8000)
