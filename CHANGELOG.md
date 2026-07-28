@@ -8,6 +8,19 @@ All notable changes to this project are documented here.
 
 ## [Unreleased]
 
+## [3.6.4] — 2026-07-27
+
+### Dependencies
+- Updated `ejs` from `5.0.2` to `6.0.1`, including upstream prototype-poisoning hardening and packaging improvements.
+- Updated `express-rate-limit` from `8.6.0` to `8.6.1`.
+- Updated `google-auth-library` from `10.9.0` to `10.9.1`.
+- Updated `mysql2` from `3.23.1` to `3.23.2`.
+- Updated `undici` from `8.8.0` to `8.9.0`.
+
+### Changed
+- Updated CI runtime coverage to test the declared Node 22 minimum and the Node 26 Docker runtime, with an EJS template-compilation smoke test.
+- Updated README runtime and deployment-version references for the `v3.6.4` release.
+
 ## [3.6.3] — 2026-07-21
 
 ### Security

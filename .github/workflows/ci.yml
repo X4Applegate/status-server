@@ -21,7 +21,7 @@ jobs:
       fail-fast: false
       matrix:
         # Test against the minimum we declare (engines) and the runtime we ship in Docker.
-        node-version: [22.x, 24.x]
+        node-version: [22.x, 26.x]
     steps:
       - uses: actions/checkout@v7
 
@@ -42,6 +42,27 @@ jobs:
 
       - name: Syntax check
         run: node --check server.js
+        working-directory: backend
+
+      - name: Compile EJS templates
+        run: |
+          node <<'NODE'
+          const fs = require('fs');
+          const path = require('path');
+          const ejs = require('ejs');
+
+          function compileTemplates(directory) {
+            for (const entry of fs.readdirSync(directory, { withFileTypes: true })) {
+              const file = path.join(directory, entry.name);
+              if (entry.isDirectory()) compileTemplates(file);
+              else if (entry.name.endsWith('.ejs')) {
+                ejs.compile(fs.readFileSync(file, 'utf8'), { filename: file });
+              }
+            }
+          }
+
+          compileTemplates(path.join(process.cwd(), 'views'));
+          NODE
         working-directory: backend
 
       - name: Smoke test — logger loads and emits

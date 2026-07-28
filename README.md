@@ -2,7 +2,7 @@
 
 [![CI](https://github.com/X4Applegate/status-server/actions/workflows/ci.yml/badge.svg)](https://github.com/X4Applegate/status-server/actions/workflows/ci.yml)
 [![Release](https://img.shields.io/github/v/release/X4Applegate/status-server?color=39d98a)](https://github.com/X4Applegate/status-server/releases)
-[![Node](https://img.shields.io/badge/node-%E2%89%A518-green)](https://nodejs.org)
+[![Node](https://img.shields.io/badge/node-%E2%89%A522.19-green)](https://nodejs.org)
 [![License](https://img.shields.io/badge/license-source--available-blue)](./LICENSE)
 
 A self-hosted, multi-tenant server and network status monitoring platform built with Node.js, Express, and MariaDB. Designed for operators who need separate branded dashboards for different teams or clients — each with their own login, branding, and server visibility — from a single deployment.
@@ -119,11 +119,11 @@ Badge URLs are shown directly in the server edit form for easy copying.
 
 ## Stack
 
-- **Runtime:** Node.js 22.19+ or 24+
+- **Runtime:** Node.js 22.19+ (Docker image uses Node 26)
 - **Framework:** Express 5
 - **Templates:** EJS
 - **Database:** MariaDB (or MySQL)
-- **Deployment:** Docker + Docker Compose (`applegater/status-server:latest` or version tags such as `v3.6.3`)
+- **Deployment:** Docker + Docker Compose (`applegater/status-server:latest` or version tags such as `v3.6.4`)
 - **Reverse proxy:** Caddy (recommended) or any HTTPS proxy
 - **No build step** — plain HTML/CSS/JS embedded in EJS templates
 
