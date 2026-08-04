@@ -8,6 +8,8 @@ All notable changes to this project are documented here.
 
 ## [Unreleased]
 
+## [3.6.5] — 2026-08-04
+
 ### Added
 - Added a public-first system-health overview with live operational, degraded, outage, and pending states.
 - Added clearly labeled summary metrics for monitored services, operational services, active issues, and average response time.
