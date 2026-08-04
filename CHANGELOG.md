@@ -8,6 +8,9 @@ All notable changes to this project are documented here.
 
 ## [Unreleased]
 
+### Security
+- Updated `express-rate-limit` to `8.6.2` and pinned transitive `ip-address` to `10.4.0` to clear the current npm high-severity SSRF/trust-boundary advisory in CI.
+
 ## [3.6.7] — 2026-08-04
 
 ### Fixed
