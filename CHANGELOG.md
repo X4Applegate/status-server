@@ -8,6 +8,19 @@ All notable changes to this project are documented here.
 
 ## [Unreleased]
 
+### Added
+- Added a public-first system-health overview with live operational, degraded, outage, and pending states.
+- Added clearly labeled summary metrics for monitored services, operational services, active issues, and average response time.
+- Added service search, All/Online/Issues filters, a visible status key, and plain-language health summaries for every dashboard area and subgroup.
+- Added a white/black theme control that starts from the dashboard default and persists each visitor's choice in the browser.
+
+### Improved
+- Reworked the status dashboard into a restrained enterprise visual system with neutral page surfaces, flat component panels, thin borders, compact controls, and color reserved for operational meaning.
+- Redesigned service cards to identify current status, response time, certificate lifetime, 24-hour latency trend, and recent probe history without relying on color alone.
+- Reworked phone and tablet layouts with larger touch targets, compact two-column summary metrics, clearer area headers, single-column service cards, responsive menus, and safer detail/incident wrapping.
+- Added keyboard controls and expanded-state semantics to collapsible dashboard areas.
+- Prevented server detail pages from remaining on loading placeholders when history requests time out, return an error, or encounter stale browser cache data; affected pages now recover and offer an explicit retry.
+
 ## [3.6.4] — 2026-07-27
 
 ### Dependencies

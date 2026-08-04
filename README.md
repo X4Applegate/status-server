@@ -110,10 +110,13 @@ Badge URLs are shown directly in the server edit form for easy copying.
 - Deep-link edit: navigate to `/admin?edit=<serverId>` to open a server's edit form directly
 
 ### Appearance
-- Dark and light theme toggle (persisted per browser)
-- Fully responsive — tested on mobile (iOS / Android) and desktop
-- Full-width heartbeat bars that stretch to fill the container
-- Clean sidebar with active-row accent, no visual clutter
+- Enterprise white and black themes with a clear toggle persisted per browser
+- Neutral backgrounds, flat component panels, and status-only green, amber, and red color usage
+- Live system-health overview with clearly labeled totals, issues, response time, and last-check time
+- Plain-language health summaries and service counts for every dashboard area
+- Search plus All, Online, and Issues filters for large service inventories
+- Responsive phone, tablet, and desktop layouts with touch-friendly controls and accessible keyboard navigation
+- Service cards with explicit status, latency, certificate lifetime, 24-hour response trend, and recent probe history
 
 ---
 

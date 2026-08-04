@@ -36,7 +36,7 @@
     </button>
     <div class="topbar-dash-popup" id="topbarDashPopup"></div>
   </div>
-  <button class="topbar-hamburger" id="topbarHamburger" onclick="toggleTopbarMenu(event)" title="Menu" aria-label="Open menu">
+  <button class="topbar-hamburger" id="topbarHamburger" onclick="toggleTopbarMenu(event)" title="Menu" aria-label="Open menu" aria-expanded="false" aria-controls="topbarRight">
     <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="3" y1="6" x2="21" y2="6"/><line x1="3" y1="12" x2="21" y2="12"/><line x1="3" y1="18" x2="21" y2="18"/></svg>
   </button>
   <div class="topbar-right" id="topbarRight">
@@ -45,13 +45,18 @@
       <span id="globalStatus">All systems operational</span>
     </div>
     <div class="topbar-clock" id="clock">00:00:00</div>
+    <button class="theme-toggle" id="themeToggle" type="button" onclick="togglePageTheme()" aria-label="Switch color theme" title="Switch color theme">
+      <svg class="theme-icon theme-icon-light" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="4"/><line x1="12" y1="2" x2="12" y2="4"/><line x1="12" y1="20" x2="12" y2="22"/><line x1="4.93" y1="4.93" x2="6.34" y2="6.34"/><line x1="17.66" y1="17.66" x2="19.07" y2="19.07"/><line x1="2" y1="12" x2="4" y2="12"/><line x1="20" y1="12" x2="22" y2="12"/><line x1="4.93" y1="19.07" x2="6.34" y2="17.66"/><line x1="17.66" y1="6.34" x2="19.07" y2="4.93"/></svg>
+      <svg class="theme-icon theme-icon-dark" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20.5 14.1A8.5 8.5 0 0 1 9.9 3.5 8.5 8.5 0 1 0 20.5 14.1Z"/></svg>
+      <span id="themeToggleLabel">Theme</span>
+    </button>
 <% if (adminHref) { %>
       <a class="topbar-admin" href="<%= adminHref %>">Admin</a>
     <% } %>
     <div id="topbarManageBtn"></div>
-    <button id="topbarMapBtn" class="map-toggle-btn" onclick="toggleMapView()" style="display:none">&#x1F5FA;&#xFE0F; Map</button>
+    <button id="topbarMapBtn" class="map-toggle-btn" onclick="toggleMapView()" style="display:none"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polygon points="1 6 8 2 16 6 23 2 23 18 16 22 8 18 1 22 1 6"/><line x1="8" y1="2" x2="8" y2="18"/><line x1="16" y1="6" x2="16" y2="22"/></svg> Map</button>
     <% if (typeof groupSlug !== 'undefined' && groupSlug) { %>
-    <button id="topbarSubscribeBtn" class="topbar-login" onclick="openSubscribeModal()" style="display:none">&#x1F514; Alerts</button>
+    <button id="topbarSubscribeBtn" class="topbar-login" onclick="openSubscribeModal()" style="display:none"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M18 8a6 6 0 0 0-12 0c0 7-3 7-3 9h18c0-2-3-2-3-9"/><path d="M13.7 21a2 2 0 0 1-3.4 0"/></svg> Alerts</button>
     <% } %>
     <div id="topbarAuthBtn"></div>
   </div>
