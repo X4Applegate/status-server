@@ -323,6 +323,7 @@ const sentDownAlerts    = new Set(); // serverIds whose down-alert was actually 
 // on every runChecks() call.
 let maintenanceCache = new Map();
 let serverConfig = [];
+let uptimeHistorySeedInFlight = false;
 let eventLog     = [];
 // Liveness marker for /health — updated at the end of each pollAll() pass.
 let lastPollAt   = 0;
@@ -1288,36 +1289,6 @@ async function loadConfig() {
       lng: r.lng != null ? parseFloat(r.lng) : null,
     }));
 
-    // Seed uptimeHistory from database for servers that don't have it yet (e.g. after restart)
-    const needsHistory = serverConfig.filter(s => !serverStatus[s.id] || !serverStatus[s.id].uptimeHistory || !serverStatus[s.id].uptimeHistory.length);
-    if (needsHistory.length) {
-      try {
-        const [histRows] = await db.query(
-          `SELECT server_id, MIN(ok) AS ok, checked_at
-           FROM status_history
-           WHERE checked_at >= DATE_SUB(NOW(), INTERVAL 1 HOUR)
-           GROUP BY server_id, checked_at
-           ORDER BY checked_at DESC`
-        );
-        const histByServer = {};
-        for (const r of histRows) {
-          (histByServer[r.server_id] ||= []).push(!!r.ok);
-        }
-        for (const sid of Object.keys(histByServer)) {
-          histByServer[sid] = histByServer[sid].reverse().slice(-20);
-        }
-        for (const s of needsHistory) {
-          if (histByServer[s.id]) {
-            if (!serverStatus[s.id]) {
-              serverStatus[s.id] = { id:s.id, name:s.name, host:s.host, description:s.description, category:s.category, sub_category:s.sub_category, group_ids:s.group_ids, tags:s.tags, checks:[], overall:"pending", lastChecked:null, uptimeHistory: histByServer[s.id], lat:s.lat||null, lng:s.lng||null };
-            } else {
-              serverStatus[s.id].uptimeHistory = histByServer[s.id];
-            }
-          }
-        }
-      } catch(e) { /* proceed without history */ }
-    }
-
     serverConfig.forEach(s => {
       if (!serverStatus[s.id]) {
         serverStatus[s.id] = { id:s.id, name:s.name, host:s.host, description:s.description, category:s.category, sub_category:s.sub_category, runbook:s.runbook||"", group_ids:s.group_ids, tags:s.tags, checks:[], overall:"pending", lastChecked:null, uptimeHistory:[], lat:s.lat||null, lng:s.lng||null };
@@ -1331,6 +1302,43 @@ async function loadConfig() {
     // Remove stale status entries for deleted servers
     const ids = new Set(serverConfig.map(s => s.id));
     Object.keys(serverStatus).forEach(id => { if (!ids.has(id)) delete serverStatus[id]; });
+
+    // Seed uptime history in the background so a large recent-history scan can't
+    // block the dashboard or health endpoints from binding during startup.
+    const needsHistory = serverConfig.filter(s => !serverStatus[s.id] || !serverStatus[s.id].uptimeHistory || !serverStatus[s.id].uptimeHistory.length);
+    if (needsHistory.length && !uptimeHistorySeedInFlight) {
+      uptimeHistorySeedInFlight = true;
+      const serverIds = needsHistory.map(s => s.id);
+      Promise.resolve().then(async () => {
+        try {
+          const [histRows] = await db.query(
+            `SELECT server_id, MIN(ok) AS ok, checked_at
+             FROM status_history
+             WHERE checked_at >= DATE_SUB(NOW(), INTERVAL 1 HOUR)
+               AND server_id IN (?)
+             GROUP BY server_id, checked_at
+             ORDER BY checked_at DESC`,
+            [serverIds]
+          );
+          const histByServer = {};
+          for (const r of histRows) {
+            (histByServer[r.server_id] ||= []).push(!!r.ok);
+          }
+          for (const sid of Object.keys(histByServer)) {
+            histByServer[sid] = histByServer[sid].reverse().slice(-20);
+          }
+          for (const sid of serverIds) {
+            if (serverStatus[sid] && histByServer[sid]) {
+              serverStatus[sid].uptimeHistory = histByServer[sid];
+            }
+          }
+        } catch(e) {
+          addLog({ level:"warn", server:"system", message:`uptime history seed skipped: ${e.message}` });
+        } finally {
+          uptimeHistorySeedInFlight = false;
+        }
+      });
+    }
 
   } catch(err) {
     addLog({ level:"error", server:"system", message:`loadConfig failed: ${err.message}` });

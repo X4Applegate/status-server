@@ -8,6 +8,11 @@ All notable changes to this project are documented here.
 
 ## [Unreleased]
 
+## [3.6.7] — 2026-08-04
+
+### Fixed
+- Stopped one-hour uptime-history seeding from blocking startup by moving it into a background task and limiting it to servers that still need cached history after a restart.
+
 ## [3.6.6] — 2026-08-04
 
 ### Fixed
