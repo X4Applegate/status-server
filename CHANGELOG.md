@@ -8,6 +8,11 @@ All notable changes to this project are documented here.
 
 ## [Unreleased]
 
+## [3.6.6] — 2026-08-04
+
+### Fixed
+- Started the HTTP server before the initial monitoring poll so slow or stalled first-check runs cannot block the dashboard and health endpoint from binding to port `3000` during container startup.
+
 ## [3.6.5] — 2026-08-04
 
 ### Added

@@ -6429,7 +6429,14 @@ app.use((err, req, res, next) => {
   await initDB();
   await loadConfig();
   await refreshMaintenanceCache();
-  await pollAll(true);  // force everything on startup
+  // Start serving as soon as core state is ready; slow first-poll checks should
+  // not block the health endpoint or the dashboard from binding its port.
+  const httpServer = app.listen(PORT, "::", () => {
+    addLog({ level:"info", server:"system", message:`Server started on :${PORT} (dual-stack), interval ${CHECK_INTERVAL/1000}s` });
+  });
+  pollAll(true).catch((error) => {
+    addLog({ level:"error", server:"system", message:`Initial poll failed: ${error.message}` });
+  });
   // Tick every 5 seconds — pollAll() picks only servers that are DUE based on their
   // own poll_interval_sec. This lets fast servers (20s) and slow ones (5 min) coexist.
   const TICK = 5000;
@@ -6441,13 +6448,6 @@ app.use((err, req, res, next) => {
   // Refresh maintenance cache every 60s — CRUD endpoints also refresh inline;
   // this is a safety net for windows that become active/inactive purely by time passing.
   setInterval(() => { refreshMaintenanceCache().catch(() => {}); }, 60 * 1000);
-  // Listen on dual-stack (::) so both IPv4 and IPv6 clients connect with no fallback delay.
-  // Without this, "localhost" resolves to ::1, the connection attempt fails, and the client
-  // waits ~200ms before retrying on 127.0.0.1 — adding 200ms latency to every request.
-  const httpServer = app.listen(PORT, "::", () => {
-    addLog({ level:"info", server:"system", message:`Server started on :${PORT} (dual-stack), interval ${CHECK_INTERVAL/1000}s` });
-  });
-
   // Graceful shutdown. Container orchestrators send SIGTERM; Ctrl-C sends
   // SIGINT. We stop accepting new connections, end SSE streams, close the
   // DB pool, then exit. A 10s hard-kill guards against hung drains.
