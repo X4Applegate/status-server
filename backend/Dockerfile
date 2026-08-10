@@ -23,7 +23,7 @@ COPY --chown=node:node package.json package-lock.json ./
 RUN npm ci --omit=dev --no-audit --no-fund && npm cache clean --force
 
 # App source.
-COPY --chown=node:node server.js ./
+COPY --chown=node:node server.js public-status.js ./
 COPY --chown=node:node views ./views
 
 ENV NODE_ENV=production

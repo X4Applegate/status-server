@@ -8,8 +8,25 @@ All notable changes to this project are documented here.
 
 ## [Unreleased]
 
+## [3.7.0] — 2026-08-10
+
+### Added
+- Added a public upcoming-maintenance summary to each dashboard, with active/scheduled state, visitor-local dates, operator notes, affected services, and a link to full details.
+- Expanded the public status history page to show active, upcoming, and recently completed maintenance alongside incident timelines.
+- Added an RSS 2.0 feed at `/dashboard/<slug>/feed.rss` that combines incident updates, resolutions, and scheduled/in-progress/completed maintenance events, including browser feed-discovery metadata and public RSS links.
+- Added unit coverage for maintenance grouping and RSS generation, and made the unit suite part of CI on Node 22 and Node 26.
+
+### Improved
+- Grouped multi-service maintenance rows into one visitor-facing event instead of repeating the same maintenance window once per server.
+- Corrected the status-history back link so regular and custom-domain dashboards return visitors to the dashboard they came from.
+
 ### Security
 - Updated `express-rate-limit` to `8.6.2` and pinned transitive `ip-address` to `10.4.0` to clear the current npm high-severity SSRF/trust-boundary advisory in CI.
+
+### Dependencies
+- Updated `google-auth-library` from `10.9.1` to `11.0.0`.
+- Updated `nodemailer` from `9.0.3` to `9.0.5`.
+- Updated `undici` from `8.9.0` to `8.10.0`.
 
 ## [3.6.7] — 2026-08-04
 

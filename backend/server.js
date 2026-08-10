@@ -17,6 +17,7 @@ const pino         = require("pino");
 const pinoHttp     = require("pino-http");
 const { Agent: UndiciAgent } = require("undici"); // for Omada TLS dispatcher
 const { OAuth2Client } = require("google-auth-library");
+const { buildStatusRss, groupMaintenanceRows } = require("./public-status");
 
 const app  = express();
 
@@ -5343,6 +5344,60 @@ app.get("/api/public/incidents/:id", allowGroupedOrAuth, async (req, res) => {
   } catch(e) { res.status(500).json({ error: e.message }); }
 });
 
+async function getPublicIncidentFeed(groupId) {
+  const [serverRows] = await db.query(
+    "SELECT server_id FROM status_server_group_map WHERE group_id=?",
+    [groupId]
+  );
+  const serverIds = serverRows.map(r => r.server_id);
+  if (!serverIds.length) return { open: [], recent: [] };
+
+  const [rows] = await db.query(
+    `SELECT * FROM status_incidents
+     WHERE server_id IN (?) AND public=1
+     ORDER BY started_at DESC LIMIT 60`,
+    [serverIds]
+  );
+  const ids = rows.map(r => r.id);
+  const updatesByIncident = {};
+  if (ids.length) {
+    const [uRows] = await db.query(
+      `SELECT id, incident_id, status, message, created_at
+       FROM status_incident_updates WHERE incident_id IN (?)
+       ORDER BY created_at ASC`,
+      [ids]
+    );
+    for (const update of uRows) {
+      (updatesByIncident[update.incident_id] = updatesByIncident[update.incident_id] || []).push(update);
+    }
+  }
+  const enriched = rows.map(row => ({ ...row, updates: updatesByIncident[row.id] || [] }));
+  return {
+    open: enriched.filter(row => !row.ended_at),
+    recent: enriched.filter(row => row.ended_at),
+  };
+}
+
+async function getPublicMaintenance(groupId, { includeRecent = false } = {}) {
+  const [rows] = await db.query(
+    `SELECT m.id, m.server_id, m.title, m.notes, m.start_time, m.end_time, m.created_at,
+            s.name AS server_name
+     FROM status_maintenance_windows m
+     JOIN status_server_group_map gm ON gm.server_id = m.server_id
+     JOIN status_servers s ON s.id = m.server_id
+     WHERE gm.group_id=?
+       AND m.end_time >= CASE
+         WHEN ? = 1 THEN DATE_SUB(NOW(), INTERVAL 30 DAY)
+         ELSE NOW()
+       END
+       AND m.start_time <= DATE_ADD(NOW(), INTERVAL 90 DAY)
+     ORDER BY m.start_time ASC, m.id ASC
+     LIMIT 500`,
+    [groupId, includeRecent ? 1 : 0]
+  );
+  return groupMaintenanceRows(rows);
+}
+
 // Public incident feed for a group dashboard. Returns incidents for every server
 // in the group (filtered to public=1) with their update timelines. Used by the
 // /dashboard/:slug/incidents page and can be polled by external integrations.
@@ -5350,37 +5405,18 @@ app.get("/api/public/group/:slug/incidents", async (req, res) => {
   try {
     const [groups] = await db.query("SELECT id FROM status_groups WHERE slug=?", [req.params.slug]);
     if (!groups.length) return res.status(404).json({ error: "Group not found" });
-    const groupId = groups[0].id;
-    const [serverRows] = await db.query(
-      "SELECT server_id FROM status_server_group_map WHERE group_id=?",
-      [groupId]
-    );
-    const serverIds = serverRows.map(r => r.server_id);
-    if (!serverIds.length) return res.json({ open: [], recent: [] });
+    res.json(await getPublicIncidentFeed(groups[0].id));
+  } catch(e) { res.status(500).json({ error: e.message }); }
+});
 
-    const [rows] = await db.query(
-      `SELECT * FROM status_incidents
-       WHERE server_id IN (?) AND public=1
-       ORDER BY started_at DESC LIMIT 60`,
-      [serverIds]
-    );
-    const ids = rows.map(r => r.id);
-    let updatesByIncident = {};
-    if (ids.length) {
-      const [uRows] = await db.query(
-        `SELECT id, incident_id, status, message, created_at
-         FROM status_incident_updates WHERE incident_id IN (?)
-         ORDER BY created_at ASC`,
-        [ids]
-      );
-      for (const u of uRows) {
-        (updatesByIncident[u.incident_id] = updatesByIncident[u.incident_id] || []).push(u);
-      }
-    }
-    const enriched = rows.map(r => ({ ...r, updates: updatesByIncident[r.id] || [] }));
-    const open   = enriched.filter(r => !r.ended_at);
-    const recent = enriched.filter(r =>  r.ended_at);
-    res.json({ open, recent });
+// Public upcoming/active maintenance feed. Rows created together for multiple
+// services are grouped into one visitor-facing event with an affected-services list.
+app.get("/api/public/group/:slug/maintenance", async (req, res) => {
+  try {
+    const [groups] = await db.query("SELECT id FROM status_groups WHERE slug=?", [req.params.slug]);
+    if (!groups.length) return res.status(404).json({ error: "Group not found" });
+    const includeRecent = req.query.include === "recent";
+    res.json(await getPublicMaintenance(groups[0].id, { includeRecent }));
   } catch(e) { res.status(500).json({ error: e.message }); }
 });
 
@@ -6051,6 +6087,78 @@ app.use((req, res, next) => {
 });
 
 // -- Page routes (EJS templates) ----------------------------------------------
+function dashboardUrlForGroup(req, group) {
+  if (group.custom_domain) return `https://${group.custom_domain}`;
+  const dashboardPath = `/dashboard/${encodeURIComponent(group.slug)}`;
+  if (EXTERNAL_URL) return `${EXTERNAL_URL}${dashboardPath}`;
+
+  const host = String(req.get("host") || "").replace(/[^A-Za-z0-9.:[\]-]/g, "");
+  const protocol = req.protocol === "https" ? "https" : "http";
+  return host ? `${protocol}://${host}${dashboardPath}` : dashboardPath;
+}
+
+function incidentDisplayTitle(incident) {
+  if (incident.title) return incident.title;
+  const cause = incident.cause ? ` — ${String(incident.cause).split(",")[0].trim()}` : "";
+  return `${incident.server_name}${cause}`;
+}
+
+async function sendStatusRss(req, res, group) {
+  const [incidentFeed, maintenance] = await Promise.all([
+    getPublicIncidentFeed(group.id),
+    getPublicMaintenance(group.id, { includeRecent: true }),
+  ]);
+  const dashboardUrl = dashboardUrlForGroup(req, group).replace(/\/$/, "");
+  const historyUrl = `${dashboardUrl}/incidents`;
+  const feedUrl = `${dashboardUrl}/feed.rss`;
+  const items = [];
+
+  for (const incident of [...incidentFeed.open, ...incidentFeed.recent]) {
+    const updates = incident.updates.length
+      ? incident.updates
+      : [{ id: "initial", status: incident.status, message: incident.cause || "Incident reported.", created_at: incident.started_at }];
+    for (const update of updates) {
+      const status = update.status || incident.status || (incident.ended_at ? "resolved" : "investigating");
+      const statusLabel = status.replace(/_/g, " ").replace(/^./, char => char.toUpperCase());
+      const link = `${historyUrl}#incident-${incident.id}`;
+      items.push({
+        title: `[${statusLabel}] ${incidentDisplayTitle(incident)}`,
+        description: `${update.message}\n\nService: ${incident.server_name}\nImpact: ${incident.impact || "minor"}`,
+        link,
+        guid: `${link}-update-${update.id}`,
+        pubDate: update.created_at || incident.started_at,
+      });
+    }
+  }
+
+  for (const event of maintenance) {
+    const statusLabel = event.status === "in_progress"
+      ? "Maintenance in progress"
+      : event.status === "completed"
+        ? "Maintenance completed"
+        : "Scheduled maintenance";
+    const link = `${historyUrl}#maintenance-${event.id}`;
+    const affected = event.services.map(service => service.name).join(", ");
+    items.push({
+      title: `[${statusLabel}] ${event.title}`,
+      description: `${event.notes || "Planned maintenance window."}\n\nAffected services: ${affected}\nWindow: ${new Date(event.start_time).toUTCString()} – ${new Date(event.end_time).toUTCString()}`,
+      link,
+      guid: `${link}-${event.status}`,
+      pubDate: event.status === "completed" ? event.end_time : event.status === "in_progress" ? event.start_time : event.created_at,
+    });
+  }
+
+  const rss = buildStatusRss({
+    title: `${group.name} status updates`,
+    description: `Incidents and scheduled maintenance for ${group.name}.`,
+    link: dashboardUrl,
+    feedUrl,
+    items,
+  });
+  res.set("Cache-Control", "public, max-age=60");
+  res.type("application/rss+xml").send(rss);
+}
+
 const DEFAULT_BRANDING = {
   groupSlug:    null,
   groupName:    "Applegate Monitor",
@@ -6093,6 +6201,9 @@ app.use(async (req, res, next) => {
           ? res.render("group-legal", { g, type: "terms", content: g.terms_text })
           : res.render("terms");
       }
+      if (req.path === "/feed.rss") {
+        return await sendStatusRss(req, res, g);
+      }
       if (req.path === "/incidents") {
         return res.render("incidents", {
           groupSlug:    g.slug,
@@ -6102,9 +6213,11 @@ app.use(async (req, res, next) => {
           logoText:     g.logo_text || "",
           logoImage:    g.logo_image || null,
           logoSize:     g.logo_size || 42,
-          pageTitle:    `${g.name} — Incident History`,
+          pageTitle:    `${g.name} — Status History`,
           privacyUrl:   g.privacy_text ? "/privacy" : null,
           termsUrl:     g.terms_text   ? "/terms"   : null,
+          dashboardUrl: "/",
+          feedUrl:      "/feed.rss",
         });
       }
       return res.render("index", {
@@ -6137,6 +6250,17 @@ app.get("/admin",  requireAuthPage, (req, res) => res.render("admin"));
 app.get("/login",   (req, res) => res.render("login", { googleEnabled: !!googleOAuth }));
 app.get("/privacy", (req, res) => res.render("privacy"));
 app.get("/terms",   (req, res) => res.render("terms"));
+
+app.get("/dashboard/:slug/feed.rss", pageLimiter, async (req, res) => {
+  try {
+    const [rows] = await db.query("SELECT * FROM status_groups WHERE slug=?", [req.params.slug]);
+    if (!rows.length) return res.status(404).type("text/plain").send("Dashboard not found");
+    return await sendStatusRss(req, res, rows[0]);
+  } catch(e) {
+    req.log.error({ err: e }, "Failed to build status RSS feed");
+    return res.status(500).type("text/plain").send("Failed to build status feed");
+  }
+});
 
 // Beta: Public status page — only accessible when group has public_enabled=1
 app.get("/status/:slug", pageLimiter, async (req, res) => {
@@ -6219,9 +6343,11 @@ app.get("/dashboard/:slug/incidents", pageLimiter, async (req, res) => {
       logoText:     g.logo_text || "",
       logoImage:    g.logo_image || null,
       logoSize:     g.logo_size || 42,
-      pageTitle:    `${g.name} — Incident History`,
+      pageTitle:    `${g.name} — Status History`,
       privacyUrl:   g.privacy_text ? `/dashboard/${g.slug}/privacy` : "/privacy",
       termsUrl:     g.terms_text   ? `/dashboard/${g.slug}/terms`   : "/terms",
+      dashboardUrl: `/dashboard/${g.slug}`,
+      feedUrl:      `/dashboard/${g.slug}/feed.rss`,
     });
   } catch(e) { res.status(500).send("Server error"); }
 });
