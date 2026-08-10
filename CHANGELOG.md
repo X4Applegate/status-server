@@ -8,6 +8,12 @@ All notable changes to this project are documented here.
 
 ## [Unreleased]
 
+## [3.7.1] — 2026-08-10
+
+### Fixed
+- Fixed the Network Controller submenu appearing off-screen on desktop displays wider than the 1080px admin drawer.
+- Kept the submenu aligned while the window resizes or the tab strip scrolls, and exposed its open state to assistive technology.
+
 ## [3.7.0] — 2026-08-10
 
 ### Added

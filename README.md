@@ -133,7 +133,7 @@ Badge URLs are shown directly in the server edit form for easy copying.
 - **Framework:** Express 5
 - **Templates:** EJS
 - **Database:** MariaDB (or MySQL)
-- **Deployment:** Docker + Docker Compose (`applegater/status-server:latest` or version tags such as `v3.7.0`)
+- **Deployment:** Docker + Docker Compose (`applegater/status-server:latest` or version tags such as `v3.7.1`)
 - **Reverse proxy:** Caddy (recommended) or any HTTPS proxy
 - **No build step** — plain HTML/CSS/JS embedded in EJS templates
 
