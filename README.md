@@ -95,6 +95,13 @@ Badge URLs are shown directly in the server edit form for easy copying.
 - Response time chart (last 24h bucketed by hour)
 - Incident log with timestamp and duration
 
+### Incident & Maintenance Communication
+- Public status history with operator updates from **investigating** through **resolved**
+- Upcoming and active maintenance windows shown directly on each affected dashboard
+- Maintenance details include visitor-local start/end times, notes, and affected services
+- Public email subscriptions for down and recovery alerts
+- RSS 2.0 feeds for incident updates and the scheduled/in-progress/completed maintenance lifecycle at `/dashboard/<slug>/feed.rss`
+
 ### Login Protection (Cloudflare Turnstile)
 - Optional **Cloudflare Turnstile** CAPTCHA on the login form — blocks bots and brute-force attacks without user friction
 - Privacy-friendly alternative to reCAPTCHA — no distorted text puzzles
@@ -126,7 +133,7 @@ Badge URLs are shown directly in the server edit form for easy copying.
 - **Framework:** Express 5
 - **Templates:** EJS
 - **Database:** MariaDB (or MySQL)
-- **Deployment:** Docker + Docker Compose (`applegater/status-server:latest` or version tags such as `v3.6.7`)
+- **Deployment:** Docker + Docker Compose (`applegater/status-server:latest` or version tags such as `v3.7.0`)
 - **Reverse proxy:** Caddy (recommended) or any HTTPS proxy
 - **No build step** — plain HTML/CSS/JS embedded in EJS templates
 
@@ -177,8 +184,10 @@ Navigate to `http://localhost:3000/login` (or your domain). On first visit you'l
 status-server/
 ├── backend/
 │   ├── server.js           Main application — routes, polling, SSE, DB logic
+│   ├── public-status.js    Maintenance grouping and RSS generation helpers
 │   ├── package.json
 │   ├── Dockerfile
+│   ├── test/               Node unit tests
 │   └── views/
 │       ├── index.ejs       Status dashboard (master view + per-group dashboards)
 │       ├── admin.ejs       Admin management panel
@@ -215,6 +224,21 @@ Admin panel → **Users** tab → **Add User**:
 - When they log in, they land directly on their dashboard
 
 Viewers only see their assigned servers. They can add and edit servers within their groups but cannot delete servers, manage users, or view other groups.
+
+---
+
+## Public Status Feeds
+
+Each dashboard exposes visitor-safe incident and maintenance feeds:
+
+```text
+/dashboard/<slug>/feed.rss                     RSS 2.0 incident and maintenance updates
+/api/public/group/<slug>/incidents             JSON incident history and operator updates
+/api/public/group/<slug>/maintenance           JSON active/upcoming maintenance (next 90 days)
+/api/public/group/<slug>/maintenance?include=recent  Include completed windows from the last 30 days
+```
+
+The RSS feed is linked from the dashboard, alert dialog, and status-history page, and is advertised with browser feed-discovery metadata.
 
 ---
 

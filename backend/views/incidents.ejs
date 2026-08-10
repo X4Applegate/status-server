@@ -3,6 +3,7 @@
 <head>
 <meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title><%= pageTitle %></title>
+<link rel="alternate" type="application/rss+xml" title="<%= groupName %> status updates" href="<%= feedUrl %>">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
 <style>
@@ -32,7 +33,19 @@ h1{font-size:30px;font-weight:700;color:var(--text-white);letter-spacing:-.02em;
 .subtitle{font-size:14px;color:var(--text-2);margin-bottom:40px}
 .section-label{font-size:11px;font-weight:700;letter-spacing:.1em;text-transform:uppercase;color:var(--text-2);margin:32px 0 14px;padding-bottom:10px;border-bottom:1px solid var(--border)}
 .empty{padding:32px 24px;text-align:center;color:var(--text-2);background:var(--surface);border:1px solid var(--border);border-radius:var(--r);font-size:14px}
+.maintenance{scroll-margin-top:20px;background:var(--surface);border:1px solid rgba(245,158,11,.3);border-left:4px solid var(--orange);border-radius:var(--r);margin-bottom:18px;padding:18px 20px}
+.maintenance.in-progress{border-color:rgba(99,102,241,.35);border-left-color:var(--accent)}
+.maintenance.completed{border-color:rgba(16,184,122,.22);border-left-color:var(--green)}
+.maintenance-head{display:flex;align-items:flex-start;justify-content:space-between;gap:14px}
+.maintenance-title{font-size:17px;font-weight:700;color:var(--text-white);line-height:1.35}
+.maintenance-status{flex-shrink:0;padding:4px 9px;border-radius:20px;background:rgba(245,158,11,.12);border:1px solid rgba(245,158,11,.25);color:var(--orange);font-size:10px;font-weight:750;letter-spacing:.055em;text-transform:uppercase}
+.maintenance.in-progress .maintenance-status{background:var(--accent-soft);border-color:var(--accent);color:var(--text-hi)}
+.maintenance.completed .maintenance-status{background:rgba(16,184,122,.1);border-color:rgba(16,184,122,.25);color:var(--green)}
+.maintenance-notes{margin-top:8px;color:var(--text-hi);font-size:13px;line-height:1.6;white-space:pre-wrap}
+.maintenance-meta{display:flex;flex-wrap:wrap;gap:8px 18px;margin-top:12px;color:var(--text-2);font-size:12px}
+.maintenance-meta strong{color:var(--text-hi);font-weight:600}
 .incident{background:var(--surface);border:1px solid var(--border-hi);border-radius:var(--r);margin-bottom:18px;overflow:hidden}
+.incident{scroll-margin-top:20px}
 .incident.open{border-color:rgba(239,61,90,.35);box-shadow:0 0 0 1px rgba(239,61,90,.15)}
 .inc-head{padding:18px 22px;border-bottom:1px solid var(--border)}
 .inc-title{display:flex;align-items:flex-start;gap:12px;margin-bottom:10px}
@@ -73,7 +86,7 @@ h1{font-size:30px;font-weight:700;color:var(--text-white);letter-spacing:-.02em;
 <div class="bg-glow"></div>
 
 <div class="wrap">
-  <a class="back" href="/">
+  <a class="back" href="<%= dashboardUrl %>">
     <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="15 18 9 12 15 6"/></svg>
     Back to status dashboard
   </a>
@@ -89,8 +102,13 @@ h1{font-size:30px;font-weight:700;color:var(--text-white);letter-spacing:-.02em;
     <div class="brand-name"><%= groupName %></div>
   </div>
 
-  <h1>Incident History</h1>
-  <p class="subtitle">Operational updates for <%= groupName %>.</p>
+  <h1>Status History</h1>
+  <p class="subtitle">Incidents and planned maintenance for <%= groupName %>.</p>
+
+  <div id="maintenanceSection" style="display:none">
+    <div class="section-label">Maintenance Activity</div>
+    <div id="maintenanceList"></div>
+  </div>
 
   <div id="openSection" style="display:none">
     <div class="section-label">Active Incidents</div>
@@ -106,6 +124,8 @@ h1{font-size:30px;font-weight:700;color:var(--text-white);letter-spacing:-.02em;
 </div>
 
 <footer style="text-align:center;padding:24px 16px;font-size:12px;color:var(--text-2)">
+  <a href="<%= feedUrl %>" type="application/rss+xml" style="color:var(--text-2);text-decoration:none;margin:0 8px" onmouseover="this.style.color='var(--text-hi)'" onmouseout="this.style.color='var(--text-2)'">RSS Feed</a>
+  <% if (privacyUrl || termsUrl) { %>·<% } %>
   <% if (privacyUrl || termsUrl) { %>
     <% if (privacyUrl) { %><a href="<%= privacyUrl %>" style="color:var(--text-2);text-decoration:none;margin:0 8px" onmouseover="this.style.color='var(--text-hi)'" onmouseout="this.style.color='var(--text-2)'">Privacy</a><% } %>
     <% if (privacyUrl && termsUrl) { %>·<% } %>
@@ -160,7 +180,7 @@ function renderIncident(inc) {
     : `<span><strong>Ongoing</strong> since ${escapeHtml(fmtDate(inc.started_at))}</span>`;
 
   return `
-    <div class="incident ${isOpen ? "open" : ""}">
+    <div class="incident ${isOpen ? "open" : ""}" id="incident-${encodeURIComponent(inc.id)}">
       <div class="inc-head">
         <div class="inc-title">
           <h2>${escapeHtml(title)}</h2>
@@ -180,7 +200,60 @@ function renderIncident(inc) {
   `;
 }
 
-async function load() {
+function formatMaintenanceRange(event) {
+  const start = new Date(event.start_time);
+  const end = new Date(event.end_time);
+  const sameDay = start.toDateString() === end.toDateString();
+  const startText = start.toLocaleString(undefined, { month:"short", day:"numeric", year:"numeric", hour:"numeric", minute:"2-digit" });
+  const endText = sameDay
+    ? end.toLocaleTimeString(undefined, { hour:"numeric", minute:"2-digit" })
+    : end.toLocaleString(undefined, { month:"short", day:"numeric", year:"numeric", hour:"numeric", minute:"2-digit" });
+  return `${startText} – ${endText}`;
+}
+
+function renderMaintenance(event) {
+  const inProgress = event.status === "in_progress";
+  const completed = event.status === "completed";
+  const services = Array.isArray(event.services) ? event.services.map(service => service.name).join(", ") : "";
+  return `
+    <article class="maintenance ${inProgress ? "in-progress" : completed ? "completed" : ""}" id="maintenance-${encodeURIComponent(event.id)}">
+      <div class="maintenance-head">
+        <h2 class="maintenance-title">${escapeHtml(event.title)}</h2>
+        <span class="maintenance-status">${inProgress ? "In progress" : completed ? "Completed" : "Scheduled"}</span>
+      </div>
+      ${event.notes ? `<div class="maintenance-notes">${escapeHtml(event.notes)}</div>` : ""}
+      <div class="maintenance-meta">
+        <span><strong>Window:</strong> ${escapeHtml(formatMaintenanceRange(event))}</span>
+        <span><strong>Affected:</strong> ${escapeHtml(services || "Services on this dashboard")}</span>
+      </div>
+    </article>`;
+}
+
+function scrollToHashTarget() {
+  if (!window.location.hash) return;
+  const id = decodeURIComponent(window.location.hash.slice(1));
+  requestAnimationFrame(() => {
+    const target = document.getElementById(id);
+    if (target) target.scrollIntoView({ behavior:"smooth", block:"start" });
+  });
+}
+
+async function loadMaintenance() {
+  try {
+    const response = await fetch(`/api/public/group/${encodeURIComponent(GROUP_SLUG)}/maintenance?include=recent`);
+    if (!response.ok) throw new Error("Failed to load maintenance");
+    const events = await response.json();
+    if (Array.isArray(events) && events.length) {
+      document.getElementById("maintenanceList").innerHTML = events.map(renderMaintenance).join("");
+      document.getElementById("maintenanceSection").style.display = "block";
+      scrollToHashTarget();
+    }
+  } catch (_) {
+    // Incident history remains useful if the optional maintenance feed fails.
+  }
+}
+
+async function loadIncidents() {
   try {
     const r = await fetch(`/api/public/group/${encodeURIComponent(GROUP_SLUG)}/incidents`);
     if (!r.ok) throw new Error("Failed to load");
@@ -201,13 +274,15 @@ async function load() {
     } else {
       recentEl.innerHTML = `<div class="empty">No past incidents to show. All systems have been running smoothly. ✨</div>`;
     }
+    scrollToHashTarget();
   } catch(e) {
     document.getElementById("recentList").innerHTML =
       `<div class="empty" style="color:var(--red)">Failed to load incident history. Please try again in a moment.</div>`;
   }
 }
 
-load();
+loadMaintenance();
+loadIncidents();
 </script>
 </body>
 </html>

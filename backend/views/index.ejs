@@ -15,6 +15,7 @@
 </script>
 <% if (groupSlug) { %>
 <link rel="manifest" href="/dashboard/<%= groupSlug %>/manifest.json">
+<link rel="alternate" type="application/rss+xml" title="<%= groupName %> status updates" href="/dashboard/<%= groupSlug %>/feed.rss">
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-title" content="<%= groupName %>">
@@ -912,6 +913,31 @@ html[data-theme="light"] .theme-icon-dark,html[data-theme="dark"] .theme-icon-li
 .overview-metric-value{font-size:18px}
 .overview-metric-label{font-size:9px;letter-spacing:.055em}
 
+/* Public notice for the nearest active or upcoming maintenance window. */
+.maintenance-summary{
+  display:none;
+  grid-template-columns:auto minmax(0,1fr) auto;
+  align-items:start;
+  gap:14px;
+  margin:-12px 0 30px;
+  padding:17px 18px;
+  border:1px solid rgba(245,158,11,.28);
+  border-left:4px solid var(--orange);
+  border-radius:10px;
+  background:color-mix(in srgb,var(--surface) 92%,var(--orange) 8%);
+}
+.maintenance-summary.visible{display:grid}
+.maintenance-summary.in-progress{border-color:rgba(42,127,255,.28);border-left-color:var(--blue);background:color-mix(in srgb,var(--surface) 92%,var(--blue) 8%)}
+.maintenance-summary-icon{display:flex;align-items:center;justify-content:center;width:36px;height:36px;border-radius:8px;color:var(--orange);background:var(--orange-soft)}
+.maintenance-summary.in-progress .maintenance-summary-icon{color:var(--blue);background:var(--blue-soft)}
+.maintenance-summary-kicker{font-size:10px;font-weight:750;letter-spacing:.08em;text-transform:uppercase;color:var(--orange)}
+.maintenance-summary.in-progress .maintenance-summary-kicker{color:var(--blue)}
+.maintenance-summary-title{margin-top:3px;color:var(--text-white);font-size:15px;font-weight:700;line-height:1.35}
+.maintenance-summary-notes{margin-top:4px;color:var(--text);font-size:12px;line-height:1.5;white-space:pre-wrap}
+.maintenance-summary-meta{display:flex;flex-wrap:wrap;gap:6px 14px;margin-top:9px;color:var(--text-2);font-size:11px}
+.maintenance-summary-link{align-self:center;white-space:nowrap;color:var(--text-hi);font-size:11px;font-weight:700;text-decoration:none;padding:7px 10px;border:1px solid var(--border-hi);border-radius:7px;background:var(--surface)}
+.maintenance-summary-link:hover{border-color:var(--orange);color:var(--orange)}
+
 /* Directory controls use familiar enterprise form patterns. */
 .sidebar-header{padding:0 0 15px}
 .sidebar-title{font-size:19px;letter-spacing:-.02em}
@@ -990,6 +1016,8 @@ html[data-theme="light"] .theme-icon-dark,html[data-theme="dark"] .theme-icon-li
   .layout,.sidebar{min-height:calc(100vh - 60px)}
   .sidebar-scroll{padding:18px 12px 40px}
   .status-overview{padding:20px 17px;margin-bottom:24px;border-radius:10px}
+  .maintenance-summary{grid-template-columns:auto minmax(0,1fr);margin:-8px 0 24px;padding:15px 14px}
+  .maintenance-summary-link{grid-column:2;justify-self:start}
   .overview-title{font-size:27px}
   .overview-metrics{margin-top:20px;padding-top:14px}
   .overview-metric{padding:9px 10px}
@@ -1073,6 +1101,7 @@ html[data-theme="light"] .theme-icon-dark,html[data-theme="dark"] .theme-icon-li
           </div>
         </div>
       </section>
+      <section id="maintenanceSummary" class="maintenance-summary" aria-live="polite" hidden></section>
       <div class="sidebar-header">
         <div>
           <div class="sidebar-title">Services</div>
@@ -2804,10 +2833,72 @@ async function loadAdminBanners(){
 // Initial load + refresh every 60s so scheduled banners roll on/off without a page reload.
 loadAdminBanners();
 setInterval(loadAdminBanners, 60 * 1000);
+
+// ── Planned maintenance summary ───────────────────────────────────────────
+function formatMaintenanceRange(event){
+  const start = new Date(event.start_time);
+  const end = new Date(event.end_time);
+  const sameDay = start.toDateString() === end.toDateString();
+  const startText = start.toLocaleString(undefined, { month:"short", day:"numeric", year:"numeric", hour:"numeric", minute:"2-digit" });
+  const endText = sameDay
+    ? end.toLocaleTimeString(undefined, { hour:"numeric", minute:"2-digit" })
+    : end.toLocaleString(undefined, { month:"short", day:"numeric", year:"numeric", hour:"numeric", minute:"2-digit" });
+  return `${startText} – ${endText}`;
+}
+
+function renderMaintenanceSummary(events){
+  const host = document.getElementById("maintenanceSummary");
+  if (!host) return;
+  if (!Array.isArray(events) || !events.length) {
+    host.hidden = true;
+    host.className = "maintenance-summary";
+    host.innerHTML = "";
+    return;
+  }
+
+  const event = events.find(item => item.status === "in_progress") || events[0];
+  const inProgress = event.status === "in_progress";
+  const services = Array.isArray(event.services) ? event.services : [];
+  const serviceNames = services.slice(0, 3).map(service => escapeHtml(service.name));
+  if (services.length > 3) serviceNames.push(`+${services.length - 3} more`);
+  const moreWindows = events.length > 1 ? ` · ${events.length - 1} more scheduled` : "";
+  const icon = `<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="9"/><polyline points="12 7 12 12 15 14"/></svg>`;
+
+  host.className = `maintenance-summary visible${inProgress ? " in-progress" : ""}`;
+  host.hidden = false;
+  host.innerHTML = `
+    <div class="maintenance-summary-icon">${icon}</div>
+    <div>
+      <div class="maintenance-summary-kicker">${inProgress ? "Maintenance in progress" : "Scheduled maintenance"}</div>
+      <div class="maintenance-summary-title">${escapeHtml(event.title)}</div>
+      ${event.notes ? `<div class="maintenance-summary-notes">${escapeHtml(event.notes)}</div>` : ""}
+      <div class="maintenance-summary-meta">
+        <span>${escapeHtml(formatMaintenanceRange(event))}${moreWindows}</span>
+        <span>Affected: ${serviceNames.join(", ") || "Services on this dashboard"}</span>
+      </div>
+    </div>
+    <a class="maintenance-summary-link" href="/dashboard/${encodeURIComponent(GROUP_SLUG)}/incidents#maintenance-${encodeURIComponent(event.id)}">View details</a>`;
+}
+
+async function loadPublicMaintenance(){
+  if (!GROUP_SLUG) return;
+  try {
+    const response = await fetch(`/api/public/group/${encodeURIComponent(GROUP_SLUG)}/maintenance`);
+    if (!response.ok) throw new Error("Maintenance feed unavailable");
+    renderMaintenanceSummary(await response.json());
+  } catch (_) {
+    // Leave the status page usable if the optional maintenance feed is unavailable.
+  }
+}
+
+loadPublicMaintenance();
+setInterval(loadPublicMaintenance, 60 * 1000);
 </script>
 <footer style="text-align:center;padding:28px 16px 20px;font-size:12px;color:var(--text-2)">
   <% if (typeof groupSlug !== 'undefined' && groupSlug) { %>
-    <a href="/dashboard/<%= groupSlug %>/incidents" style="color:var(--text-2);text-decoration:none;margin:0 10px" onmouseover="this.style.color='var(--text-hi)'" onmouseout="this.style.color='var(--text-2)'">Incident History</a>
+    <a href="/dashboard/<%= groupSlug %>/incidents" style="color:var(--text-2);text-decoration:none;margin:0 10px" onmouseover="this.style.color='var(--text-hi)'" onmouseout="this.style.color='var(--text-2)'">Status History</a>
+    <span style="opacity:.3">·</span>
+    <a href="/dashboard/<%= groupSlug %>/feed.rss" type="application/rss+xml" style="color:var(--text-2);text-decoration:none;margin:0 10px" onmouseover="this.style.color='var(--text-hi)'" onmouseout="this.style.color='var(--text-2)'">RSS Feed</a>
     <span style="opacity:.3">·</span>
   <% } %>
   <a href="<%- privacyUrl || '/privacy' %>" style="color:var(--text-2);text-decoration:none;margin:0 10px" onmouseover="this.style.color='var(--text-hi)'" onmouseout="this.style.color='var(--text-2)'">Privacy Policy</a>
@@ -2823,6 +2914,10 @@ setInterval(loadAdminBanners, 60 * 1000);
     <button onclick="closeSubscribeModal()" style="position:absolute;top:12px;right:14px;background:none;border:none;color:var(--text-2);cursor:pointer;font-size:18px">&#x2715;</button>
     <h3 style="margin:0 0 4px;color:var(--text-hi)">&#x1F514; Alert Subscriptions</h3>
     <p style="margin:0 0 16px;font-size:12px;color:var(--text-2)">Get email alerts when servers go down or recover.</p>
+
+    <a href="/dashboard/<%= groupSlug %>/feed.rss" type="application/rss+xml" style="display:flex;align-items:center;justify-content:space-between;gap:12px;margin:0 0 16px;padding:10px 12px;border:1px solid var(--border);border-radius:8px;background:var(--surface2);color:var(--text-hi);font-size:12px;text-decoration:none">
+      <span>Follow incidents and maintenance by RSS</span><span style="color:var(--orange);font-weight:700">RSS →</span>
+    </a>
 
     <!-- Step 1: email entry -->
     <div id="subStepEmail">
