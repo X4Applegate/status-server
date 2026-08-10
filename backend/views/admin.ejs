@@ -588,7 +588,7 @@ body{font-family:var(--sans);background:var(--bg);color:var(--text);min-height:1
   </div>
   <div id="aListView" class="admin-section">
     <div class="drawer-toolbar">
-      <div class="admin-tabs"><button class="admin-tab active" id="tabServers" onclick="switchTab('servers')">Servers</button><button class="admin-tab" id="tabGroups" onclick="switchTab('groups')">Groups</button><div class="admin-tab-group" id="tabNetCtrl"><button class="admin-tab" id="tabNetCtrlBtn" onclick="toggleNetCtrl(event)">Network Controller &#9662;</button><div class="admin-tab-submenu" id="tabNetCtrlMenu"><button id="tabOmadaSub" onclick="switchTab('omada');closeNetCtrl()">Omada</button><button id="tabUnifiSub" onclick="switchTab('unifi');closeNetCtrl()">UniFi</button></div></div><button id="tabOmada" style="display:none"></button><button id="tabUnifi" style="display:none"></button><button class="admin-tab" id="tabSquare" onclick="switchTab('square')">Square</button><button class="admin-tab" id="tabMaint" onclick="switchTab('maint')">Maintenance</button><button class="admin-tab" id="tabIncidents" onclick="switchTab('incidents')">Incidents</button><button class="admin-tab" id="tabBanners" onclick="switchTab('banners')">Banners</button><button class="admin-tab" id="tabApiKeys" onclick="switchTab('apikeys')">API Keys</button><button class="admin-tab" id="tabUsers" onclick="switchTab('users')">Users</button><button class="admin-tab" id="tabWebhooks" onclick="switchTab('webhooks')">Webhooks</button><button class="admin-tab" id="tabSettings" onclick="switchTab('settings')">Settings</button><button class="admin-tab" id="tabAudit" onclick="switchTab('audit')">Audit</button></div>
+      <div class="admin-tabs"><button class="admin-tab active" id="tabServers" onclick="switchTab('servers')">Servers</button><button class="admin-tab" id="tabGroups" onclick="switchTab('groups')">Groups</button><div class="admin-tab-group" id="tabNetCtrl"><button type="button" class="admin-tab" id="tabNetCtrlBtn" aria-haspopup="menu" aria-expanded="false" aria-controls="tabNetCtrlMenu" onclick="toggleNetCtrl(event)">Network Controller &#9662;</button><div class="admin-tab-submenu" id="tabNetCtrlMenu" role="menu"><button type="button" role="menuitem" id="tabOmadaSub" onclick="switchTab('omada');closeNetCtrl()">Omada</button><button type="button" role="menuitem" id="tabUnifiSub" onclick="switchTab('unifi');closeNetCtrl()">UniFi</button></div></div><button id="tabOmada" style="display:none"></button><button id="tabUnifi" style="display:none"></button><button class="admin-tab" id="tabSquare" onclick="switchTab('square')">Square</button><button class="admin-tab" id="tabMaint" onclick="switchTab('maint')">Maintenance</button><button class="admin-tab" id="tabIncidents" onclick="switchTab('incidents')">Incidents</button><button class="admin-tab" id="tabBanners" onclick="switchTab('banners')">Banners</button><button class="admin-tab" id="tabApiKeys" onclick="switchTab('apikeys')">API Keys</button><button class="admin-tab" id="tabUsers" onclick="switchTab('users')">Users</button><button class="admin-tab" id="tabWebhooks" onclick="switchTab('webhooks')">Webhooks</button><button class="admin-tab" id="tabSettings" onclick="switchTab('settings')">Settings</button><button class="admin-tab" id="tabAudit" onclick="switchTab('audit')">Audit</button></div>
       <span style="font-size:11px;color:var(--text-2)" id="aCount"></span>
       <div class="drawer-spacer"></div>
       <button class="btn" id="importBtn" onclick="triggerImport()" style="font-size:11px;padding:5px 11px;display:none" title="Import servers from JSON">⬆ Import</button>
@@ -1927,20 +1927,62 @@ function closeAdmin(){
   closeDrawer("adminDrawer");
 }
 
+// Keep these marker comments in place: the unit test evaluates this pure helper.
+// NET_CTRL_POSITION_HELPER_START
+function getNetCtrlMenuPosition(buttonRect, drawerRect, menuWidth) {
+  const edgeGap = 8;
+  const idealLeft = buttonRect.left - drawerRect.left;
+  const maxLeft = Math.max(edgeGap, drawerRect.width - menuWidth - edgeGap);
+  return {
+    top: buttonRect.bottom - drawerRect.top + 4,
+    left: Math.min(Math.max(edgeGap, idealLeft), maxLeft),
+  };
+}
+// NET_CTRL_POSITION_HELPER_END
+
+function positionNetCtrlMenu() {
+  const menu = document.getElementById("tabNetCtrlMenu");
+  if (!menu || !menu.classList.contains("open")) return;
+  const btn = document.getElementById("tabNetCtrlBtn");
+  const drawer = document.getElementById("adminDrawer");
+  if (!btn || !drawer) return;
+  // A transformed ancestor becomes the containing block for position:fixed.
+  // Convert viewport coordinates into drawer-local coordinates so the menu
+  // stays under its button on desktop screens wider than the 1080px drawer.
+  const pos = getNetCtrlMenuPosition(
+    btn.getBoundingClientRect(),
+    drawer.getBoundingClientRect(),
+    menu.offsetWidth,
+  );
+  menu.style.top = pos.top + "px";
+  menu.style.left = pos.left + "px";
+}
+
 function toggleNetCtrl(e) {
-  e.stopPropagation();
+  if (e) {
+    e.preventDefault();
+    e.stopPropagation();
+  }
   const menu = document.getElementById("tabNetCtrlMenu");
   const btn = document.getElementById("tabNetCtrlBtn");
-  if (menu.classList.contains("open")) { menu.classList.remove("open"); return; }
-  const r = btn.getBoundingClientRect();
-  menu.style.top = (r.bottom + 4) + "px";
-  menu.style.left = r.left + "px";
+  if (!menu || !btn) return;
+  if (menu.classList.contains("open")) { closeNetCtrl(); return; }
   menu.classList.add("open");
+  btn.setAttribute("aria-expanded", "true");
+  positionNetCtrlMenu();
 }
 function closeNetCtrl() {
-  document.getElementById("tabNetCtrlMenu").classList.remove("open");
+  const menu = document.getElementById("tabNetCtrlMenu");
+  const btn = document.getElementById("tabNetCtrlBtn");
+  if (menu) menu.classList.remove("open");
+  if (btn) btn.setAttribute("aria-expanded", "false");
 }
-document.addEventListener("click", () => closeNetCtrl());
+document.addEventListener("click", e => {
+  const group = document.getElementById("tabNetCtrl");
+  if (!group || !group.contains(e.target)) closeNetCtrl();
+});
+window.addEventListener("resize", positionNetCtrlMenu);
+document.querySelector(".admin-tabs").addEventListener("scroll", positionNetCtrlMenu, { passive: true });
 
 async function switchTab(tab){
   // Viewers can access Servers, Omada, Square, Maintenance, Webhooks, and Groups. Admin-only tabs bounce back.
