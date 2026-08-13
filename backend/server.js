@@ -5485,7 +5485,7 @@ app.get("/api/admin/incidents", requireAuth, async (req, res) => {
       const allowed = await getUserAllowedGroupIds(req.session.userId, req.session.role) || [];
       if (!allowed.length) return res.json([]);
       sql += ` JOIN status_server_group_map m ON m.server_id = i.server_id
-               WHERE m.group_id IN (?)`;
+               WHERE i.public=1 AND m.group_id IN (?)`;
       params.push(allowed);
     }
     sql += ` GROUP BY i.id ORDER BY i.started_at DESC LIMIT 200`;

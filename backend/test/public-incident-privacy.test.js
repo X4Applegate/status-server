@@ -37,6 +37,17 @@ test("the per-server public incident query enforces the visibility decision", ()
   assert.match(route, /const ids = rows\.map\(r => r\.id\)/, "updates must be queried only for visible incidents");
 });
 
+test("the authenticated admin incident feed hides private incidents from viewers", () => {
+  const routeStart = serverSource.indexOf('app.get("/api/admin/incidents"');
+  const routeEnd = serverSource.indexOf('app.put("/api/admin/incidents/:id"', routeStart);
+  assert.notEqual(routeStart, -1, "expected the admin incident feed");
+  assert.notEqual(routeEnd, -1, "expected the admin incident mutation route");
+  const route = serverSource.slice(routeStart, routeEnd);
+  assert.match(route, /if \(req\.session\.role !== "admin"\)/);
+  assert.match(route, /WHERE i\.public=1 AND m\.group_id IN \(\?\)/);
+  assert.match(route, /updatesByIncident\[r\.id\] \|\| \[\]/, "updates must be attached only after incidents are filtered");
+});
+
 test("uptime counts poll cycles and marks a cycle down when any check fails", () => {
   const routeStart = serverSource.indexOf('app.get("/api/public/uptime/:id"');
   const routeEnd = serverSource.indexOf('app.get("/api/public/response/:id"', routeStart);
