@@ -99,7 +99,7 @@ Open `http://localhost:3000/login`, or the HTTPS domain configured in your rever
 |---|---|
 | Monitoring | Multiple checks per service, per-service polling and failure thresholds, latency tracking, certificate expiry, 90-day check history, and 180-cycle heartbeat history |
 | Public status | Branded dashboards, custom domains, light/dark themes, service health, incident and maintenance history, announcements, RSS, email subscriptions, and installable per-dashboard PWAs |
-| Operations | Enterprise overview, attention queue, permanent Services/Incidents/Maintenance workspaces, live logs, audit history, maps, private runbooks, import/export, and health endpoints |
+| Operations | Enterprise overview, attention queue, permanent on-page management workspaces, live logs, audit history, maps, private runbooks, import/export, and health endpoints |
 | Communication | Automated incidents, operator updates, public/private visibility, impact levels, planned maintenance, global or dashboard-scoped alerts, and weekly email reports |
 | Integrations | Omada SDN, UniFi Network, Square POS, Google OAuth, Cloudflare Turnstile, SMTP, Mapbox/MapLibre, generic webhooks, and common chat/push destinations |
 | Automation | Read/write API keys, external status pushes, visitor-safe JSON feeds, SSE live state, and embeddable SVG badges |
@@ -142,10 +142,10 @@ The admin console uses a consistent enterprise layout across desktop, tablet, an
 - **Services** — a permanent searchable directory beside selected-service uptime, checks, heartbeat, latency, and incident detail
 - **Incidents** — a searchable/filterable incident list beside impact, visibility, updates, and timeline controls
 - **Maintenance** — active, upcoming, and past windows beside the selected service-specific schedule
-- **Communication** — status pages, announcements, and alert channels
-- **Platform** — network controllers, Square, users and access, API keys, activity and audit, and settings
+- **Communication** — searchable status-page, announcement, and alert-channel directories with selected-record details
+- **Platform** — on-page Omada, UniFi, Square, users and access, API keys, activity and audit, and settings workspaces
 
-The three Monitoring workspaces stay on the page. On smaller screens, their directory stacks above the selected record. Focused create/edit tasks continue to use accessible drawers so operators keep their place.
+Every Monitoring, Communication, and Platform destination stays in the main admin page. On smaller screens, its directory stacks above the selected record. Focused create/edit tasks continue to use accessible drawers so operators keep their place.
 
 ### Public status pages
 
@@ -175,7 +175,7 @@ A service can appear on multiple dashboards. Create dashboards first, assign ser
 | Incidents | Edit, publish updates, resolve, and delete incidents opened automatically by failed checks | Read public incidents for assigned dashboards |
 | Maintenance | Manage all service windows | Manage windows for accessible services |
 | Alert channels | Global or dashboard-scoped | Assigned-dashboard scope only |
-| Omada, UniFi, and Square | Manage all resources | Manage assigned-dashboard Omada and Square resources; no UniFi workspace access |
+| Omada, UniFi, and Square | Manage all resources | Manage resources scoped to assigned dashboards, without access to global or unrelated mappings |
 | Users, API keys, settings, banners, audit, and system logs | Yes | No |
 | Script checks, import/export, and history cleanup | Yes | No |
 

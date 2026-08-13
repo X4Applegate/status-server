@@ -3916,6 +3916,55 @@ async function getUserAllowedGroupIds(userId, role) {
   return rows.map(r => r.group_id);
 }
 
+// Reconcile the group assignments a viewer is allowed to edit without dropping
+// assignments they cannot see.  Integration credentials are shared by every
+// mapped dashboard, so silently replacing the complete map with the viewer's
+// visible subset would affect resources outside their scope.
+function reconcileViewerManagedGroupIds(existingGroupIds, submittedGroupIds, allowedGroupIds, requireAccessibleGroup) {
+  const existing = Array.from(new Set((existingGroupIds || []).map(Number).filter(Number.isInteger)));
+  const allowed = Array.from(new Set((allowedGroupIds || []).map(Number).filter(Number.isInteger)));
+
+  // An omitted field means "leave mappings unchanged".
+  if (submittedGroupIds === undefined) return { ok:true, groupIds:existing };
+  if (!Array.isArray(submittedGroupIds)) {
+    return { ok:false, status:400, error:"group_ids must be an array" };
+  }
+
+  const submitted = [];
+  for (const rawId of submittedGroupIds) {
+    const groupId = Number(rawId);
+    if (!Number.isInteger(groupId) || groupId <= 0) {
+      return { ok:false, status:400, error:"group_ids must contain positive integers" };
+    }
+    if (!submitted.includes(groupId)) submitted.push(groupId);
+  }
+
+  const allowedSet = new Set(allowed);
+  if (submitted.some(groupId => !allowedSet.has(groupId))) {
+    return { ok:false, status:403, error:"You don't have access to one or more of those groups" };
+  }
+  if (requireAccessibleGroup && submitted.length === 0) {
+    return { ok:false, status:400, error:"Must keep at least one of your allowed groups" };
+  }
+
+  const inaccessible = existing.filter(groupId => !allowedSet.has(groupId));
+  return { ok:true, groupIds:Array.from(new Set([...submitted, ...inaccessible])) };
+}
+
+function viewerHasInaccessibleGroupMappings(existingGroupIds, allowedGroupIds) {
+  const allowed = new Set((allowedGroupIds || []).map(Number));
+  return (existingGroupIds || []).some(groupId => !allowed.has(Number(groupId)));
+}
+
+function scopeGroupMappingsForViewer(existingGroupIds, allowedGroupIds) {
+  const existing = Array.from(new Set((existingGroupIds || []).map(Number).filter(Number.isInteger)));
+  const allowed = new Set((allowedGroupIds || []).map(Number));
+  return {
+    groupIds: existing.filter(groupId => allowed.has(groupId)),
+    sharedOutsideScope: existing.some(groupId => !allowed.has(groupId))
+  };
+}
+
 // -- Settings (SMTP, etc.) ---------------------------------------------------
 app.get("/api/admin/settings/smtp", requireAdmin, async (req, res) => {
   try {
@@ -4288,7 +4337,7 @@ app.post("/api/admin/webhooks", requireAuth, async (req, res) => {
   if (!name || !url) return res.status(400).json({ error:"Name and URL required" });
   const isEmail = isValidEmail(url);
   if (!isEmail && !/^https?:\/\//i.test(url)) return res.status(400).json({ error:"URL must start with http:// or https:// (or be an email address)" });
-  const fmt = ["auto","generic","discord","slack","email"].includes(format) ? format : "auto";
+  const fmt = ["auto","generic","discord","slack","email","teams","telegram","pushover","ntfy"].includes(format) ? format : "auto";
   // Viewers must scope the webhook to one of their allowed groups; admin can omit (= global)
   let groupIdToStore = null;
   if (req.session.role !== "admin") {
@@ -4316,7 +4365,7 @@ app.put("/api/admin/webhooks/:id", requireAuth, async (req, res) => {
   if (!name || !url) return res.status(400).json({ error:"Name and URL required" });
   const isEmail = isValidEmail(url);
   if (!isEmail && !/^https?:\/\//i.test(url)) return res.status(400).json({ error:"URL must start with http:// or https:// (or be an email address)" });
-  const fmt = ["auto","generic","discord","slack","email"].includes(format) ? format : "auto";
+  const fmt = ["auto","generic","discord","slack","email","teams","telegram","pushover","ntfy"].includes(format) ? format : "auto";
   try {
     const [existing] = await db.query("SELECT group_id FROM status_webhooks WHERE id=?", [req.params.id]);
     if (!existing.length) return res.status(404).json({ error:"Webhook not found" });
@@ -4388,7 +4437,9 @@ app.post("/api/admin/webhooks/:id/test", requireAuth, async (req, res) => {
       time:     new Date().toISOString(),
       isRecovery: false,
       isTest:   true,
-      dashboardUrl
+      dashboardUrl,
+      webhookName: h.name,
+      hookUrl: h.url
     });
     try {
       if (body._email) {
@@ -4470,6 +4521,7 @@ function cleanCustomDomain(s) {
 
 app.post("/api/admin/groups", requireAdmin, async (req, res) => {
   const { name, slug, description, logo_text, logo_image, logo_size, accent_color, bg_color, default_theme, custom_domain, server_ids, privacy_text, terms_text } = req.body;
+  const public_enabled = req.body.public_enabled ? 1 : 0;
   if (!name) return res.status(400).json({ error: "Name is required" });
   const finalSlug = slugify(slug || name);
   if (!finalSlug) return res.status(400).json({ error: "Slug is required" });
@@ -4485,8 +4537,8 @@ app.post("/api/admin/groups", requireAdmin, async (req, res) => {
   const cleanLogoSize = Math.max(20, Math.min(120, parseInt(logo_size) || 42));
   try {
     const [result] = await db.query(
-      "INSERT INTO status_groups (slug, name, description, logo_text, logo_image, logo_size, accent_color, bg_color, default_theme, custom_domain, privacy_text, terms_text) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)",
-      [finalSlug, name, description || "", logo_text || "", cleanLogo, cleanLogoSize, accent_color || "#2a7fff", cleanBg, cleanTheme, cleanDomain, privacy_text || null, terms_text || null]
+      "INSERT INTO status_groups (slug, name, description, logo_text, logo_image, logo_size, accent_color, bg_color, default_theme, custom_domain, privacy_text, terms_text, public_enabled) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)",
+      [finalSlug, name, description || "", logo_text || "", cleanLogo, cleanLogoSize, accent_color || "#2a7fff", cleanBg, cleanTheme, cleanDomain, privacy_text || null, terms_text || null, public_enabled]
     );
     const newId = result.insertId;
     if (Array.isArray(server_ids) && server_ids.length) {
@@ -4607,7 +4659,12 @@ app.get("/api/admin/omada-controllers", requireAuth, async (req, res) => {
     const allowed = await getUserAllowedGroupIds(req.session.userId, req.session.role);
     const filtered = (allowed === null)
       ? withGroups
-      : withGroups.filter(r => r.group_ids.some(gid => allowed.includes(gid)));
+      : withGroups
+          .filter(r => r.group_ids.some(gid => allowed.includes(gid)))
+          .map(r => {
+            const scoped = scopeGroupMappingsForViewer(r.group_ids, allowed);
+            return { ...r, group_ids:scoped.groupIds, shared_outside_scope:scoped.sharedOutsideScope };
+          });
     res.json(filtered);
   } catch(e) { res.status(500).json({ error: e.message }); }
 });
@@ -4683,11 +4740,13 @@ app.put("/api/admin/omada-controllers/:id", requireAuth, async (req, res) => {
     }
     let cleanGroupIds = Array.isArray(group_ids) ? group_ids.map(Number).filter(Boolean) : existingGroupIds;
     if (req.session.role !== "admin") {
-      if (!cleanGroupIds.length) return res.status(400).json({ error: "Must keep at least one group as a viewer" });
       const allowed = await getUserAllowedGroupIds(req.session.userId, req.session.role);
-      if (!Array.isArray(allowed) || !cleanGroupIds.every(gid => allowed.includes(gid))) {
-        return res.status(403).json({ error: "Controller must remain in your allowed groups" });
+      if (viewerHasInaccessibleGroupMappings(existingGroupIds, allowed)) {
+        return res.status(403).json({ error:"Only an admin can edit a controller shared with other dashboards" });
       }
+      const reconciled = reconcileViewerManagedGroupIds(existingGroupIds, group_ids, allowed, true);
+      if (!reconciled.ok) return res.status(reconciled.status).json({ error:reconciled.error });
+      cleanGroupIds = reconciled.groupIds;
     }
     const finalSecret = (client_secret && client_secret.length) ? client_secret : existing.client_secret;
     let omadacId = existing.omadac_id;
@@ -4730,8 +4789,15 @@ app.delete("/api/admin/omada-controllers/:id", requireAuth, async (req, res) => 
     const [rows] = await db.query("SELECT name FROM status_omada_controllers WHERE id=?", [id]);
     if (!rows.length) return res.status(404).json({ error: "Controller not found" });
     const groupMap = await omadaLoadGroupIds([id]);
-    if (!(await userCanManageOmadaCtrl(req, groupMap[id] || []))) {
+    const controllerGroupIds = groupMap[id] || [];
+    if (!(await userCanManageOmadaCtrl(req, controllerGroupIds))) {
       return res.status(403).json({ error: "You don't have access to this controller" });
+    }
+    if (req.session.role !== "admin") {
+      const allowed = await getUserAllowedGroupIds(req.session.userId, req.session.role);
+      if (viewerHasInaccessibleGroupMappings(controllerGroupIds, allowed)) {
+        return res.status(403).json({ error:"Only an admin can delete a controller shared with other dashboards" });
+      }
     }
     await db.query("DELETE FROM status_omada_controller_groups WHERE controller_id=?", [id]);
     await db.query("DELETE FROM status_omada_controllers WHERE id=?", [id]);
@@ -4820,7 +4886,14 @@ app.get("/api/admin/unifi-controllers", requireAuth, async (req, res) => {
     const withGroups = rows.map(r => ({ ...r, group_ids: groupMap[r.id] || [] }));
     if (req.session.role === "admin") return res.json(withGroups);
     const allowed = await getUserAllowedGroupIds(req.session.userId, req.session.role);
-    const filtered = withGroups.filter(r => !r.group_ids.length || r.group_ids.some(gid => allowed.includes(gid)));
+    const filtered = withGroups
+      .filter(r => r.group_ids.some(gid => allowed.includes(gid)))
+      .map(r => {
+        const scoped = scopeGroupMappingsForViewer(r.group_ids, allowed);
+        const viewerSafe = { ...r };
+        delete viewerSafe.group_id;
+        return { ...viewerSafe, group_ids:scoped.groupIds, shared_outside_scope:scoped.sharedOutsideScope };
+      });
     res.json(filtered);
   } catch(e) { res.status(500).json({ error: e.message }); }
 });
@@ -4869,9 +4942,19 @@ app.put("/api/admin/unifi-controllers/:id", requireAuth, async (req, res) => {
     if (!rows.length) return res.status(404).json({ error: "Controller not found" });
     const existing = rows[0];
     const groupMap = await unifiLoadGroupIds([id]);
-    if (!(await userCanManageUnifiCtrl(req, groupMap[id] || [])))
+    const existingGroupIds = groupMap[id] || [];
+    if (!(await userCanManageUnifiCtrl(req, existingGroupIds)))
       return res.status(403).json({ error: "You don't have access to this controller" });
-    let cleanGroupIds = Array.isArray(group_ids) ? group_ids.map(Number).filter(Boolean) : (groupMap[id] || []);
+    let cleanGroupIds = Array.isArray(group_ids) ? group_ids.map(Number).filter(Boolean) : existingGroupIds;
+    if (req.session.role !== "admin") {
+      const allowed = await getUserAllowedGroupIds(req.session.userId, req.session.role);
+      if (viewerHasInaccessibleGroupMappings(existingGroupIds, allowed)) {
+        return res.status(403).json({ error:"Only an admin can edit a controller shared with other dashboards" });
+      }
+      const reconciled = reconcileViewerManagedGroupIds(existingGroupIds, group_ids, allowed, true);
+      if (!reconciled.ok) return res.status(reconciled.status).json({ error:reconciled.error });
+      cleanGroupIds = reconciled.groupIds;
+    }
     const url = String(base_url).replace(/\/$/, "");
     const vtls = verify_tls !== false;
     const finalPw  = (password && password.length)  ? password  : existing.password;
@@ -4899,8 +4982,15 @@ app.delete("/api/admin/unifi-controllers/:id", requireAuth, async (req, res) => 
     const [rows] = await db.query("SELECT name FROM status_unifi_controllers WHERE id=?", [id]);
     if (!rows.length) return res.status(404).json({ error: "Controller not found" });
     const groupMap = await unifiLoadGroupIds([id]);
-    if (!(await userCanManageUnifiCtrl(req, groupMap[id] || [])))
+    const controllerGroupIds = groupMap[id] || [];
+    if (!(await userCanManageUnifiCtrl(req, controllerGroupIds)))
       return res.status(403).json({ error: "You don't have access to this controller" });
+    if (req.session.role !== "admin") {
+      const allowed = await getUserAllowedGroupIds(req.session.userId, req.session.role);
+      if (viewerHasInaccessibleGroupMappings(controllerGroupIds, allowed)) {
+        return res.status(403).json({ error:"Only an admin can delete a controller shared with other dashboards" });
+      }
+    }
     await db.query("DELETE FROM status_unifi_controller_groups WHERE controller_id=?", [id]);
     await db.query("DELETE FROM status_unifi_controllers WHERE id=?", [id]);
     delete unifiSessions[id];
@@ -4984,12 +5074,13 @@ app.get("/api/admin/square-accounts", requireAuth, async (req, res) => {
   try {
     const isAdmin = req.session.role === "admin";
     let rows;
+    let allowed = null;
     if (isAdmin) {
       [rows] = await db.query(
         "SELECT id, name, application_id, environment, created_by, created_at FROM status_square_accounts ORDER BY created_at"
       );
     } else {
-      const allowed = await getUserAllowedGroupIds(req.session.userId, req.session.role);
+      allowed = await getUserAllowedGroupIds(req.session.userId, req.session.role);
       const params  = [req.session.userId];
       let sql = `SELECT DISTINCT sa.id, sa.name, sa.application_id, sa.environment, sa.created_by, sa.created_at
                  FROM status_square_accounts sa
@@ -5003,7 +5094,14 @@ app.get("/api/admin/square-accounts", requireAuth, async (req, res) => {
       [rows] = await db.query(sql, params);
     }
     const groupMap = await loadGroupIdsForSquareAccounts(rows.map(r => r.id));
-    res.json(rows.map(r => ({ ...r, group_ids: groupMap[r.id] || [] })));
+    if (isAdmin) {
+      return res.json(rows.map(r => ({ ...r, group_ids: groupMap[r.id] || [] })));
+    }
+    const scopedRows = rows.map(r => {
+      const scoped = scopeGroupMappingsForViewer(groupMap[r.id] || [], allowed);
+      return { ...r, group_ids:scoped.groupIds, shared_outside_scope:scoped.sharedOutsideScope };
+    });
+    res.json(scopedRows);
   } catch(e) { res.status(500).json({ error: e.message }); }
 });
 
@@ -5048,31 +5146,38 @@ app.put("/api/admin/square-accounts/:id", requireAuth, async (req, res) => {
   try {
     const [rows] = await db.query("SELECT access_token, created_by FROM status_square_accounts WHERE id=?", [id]);
     if (!rows.length) return res.status(404).json({ error: "Account not found" });
+    const groupMap = await loadGroupIdsForSquareAccounts([id]);
+    const accountGroupIds = groupMap[id] || [];
+    let replacementGroupIds = Array.isArray(group_ids) ? group_ids.map(Number).filter(Boolean) : null;
     // Viewer permission check
     if (req.session.role !== "admin") {
       const allowed = await getUserAllowedGroupIds(req.session.userId, req.session.role) || [];
-      const [g] = await db.query("SELECT group_id FROM status_square_account_groups WHERE account_id=?", [id]);
-      const accountGroupIds = g.map(r => r.group_id);
       const sharesGroup = accountGroupIds.some(gid => allowed.includes(gid));
       if (rows[0].created_by !== req.session.userId && !sharesGroup) {
         return res.status(403).json({ error: "You can only edit Square accounts in your allowed dashboards" });
       }
+      if (viewerHasInaccessibleGroupMappings(accountGroupIds, allowed)) {
+        return res.status(403).json({ error:"Only an admin can edit an account shared with other dashboards" });
+      }
+      const reconciled = reconcileViewerManagedGroupIds(
+        accountGroupIds,
+        group_ids,
+        allowed,
+        rows[0].created_by !== req.session.userId
+      );
+      if (!reconciled.ok) return res.status(reconciled.status).json({ error:reconciled.error });
+      if (group_ids !== undefined) replacementGroupIds = reconciled.groupIds;
     }
     const finalToken = (access_token && access_token !== "••••••") ? access_token.trim() : rows[0].access_token;
     await db.query("UPDATE status_square_accounts SET name=?, application_id=?, access_token=?, environment=? WHERE id=?",
       [name.trim(), (application_id||"").trim(), finalToken, env, id]);
     // Replace group mapping if provided
-    if (Array.isArray(group_ids)) {
-      let ids = group_ids.map(Number).filter(Boolean);
-      if (req.session.role !== "admin") {
-        const allowed = await getUserAllowedGroupIds(req.session.userId, req.session.role);
-        ids = ids.filter(gid => (allowed || []).includes(gid));
-      }
+    if (replacementGroupIds !== null) {
       await db.query("DELETE FROM status_square_account_groups WHERE account_id=?", [id]);
-      if (ids.length) {
+      if (replacementGroupIds.length) {
         await db.query(
           "INSERT IGNORE INTO status_square_account_groups (account_id, group_id) VALUES ?",
-          [ids.map(gid => [id, gid])]
+          [replacementGroupIds.map(gid => [id, gid])]
         );
       }
     }
@@ -5089,11 +5194,14 @@ app.delete("/api/admin/square-accounts/:id", requireAuth, async (req, res) => {
     if (!rows.length) return res.status(404).json({ error: "Account not found" });
     if (req.session.role !== "admin") {
       const allowed = await getUserAllowedGroupIds(req.session.userId, req.session.role) || [];
-      const [g] = await db.query("SELECT group_id FROM status_square_account_groups WHERE account_id=?", [id]);
-      const accountGroupIds = g.map(r => r.group_id);
+      const groupMap = await loadGroupIdsForSquareAccounts([id]);
+      const accountGroupIds = groupMap[id] || [];
       const sharesGroup = accountGroupIds.some(gid => allowed.includes(gid));
       if (rows[0].created_by !== req.session.userId && !sharesGroup) {
         return res.status(403).json({ error: "You can only delete Square accounts in your allowed dashboards" });
+      }
+      if (viewerHasInaccessibleGroupMappings(accountGroupIds, allowed)) {
+        return res.status(403).json({ error:"Only an admin can delete an account shared with other dashboards" });
       }
     }
     await db.query("DELETE FROM status_square_accounts WHERE id=?", [id]);

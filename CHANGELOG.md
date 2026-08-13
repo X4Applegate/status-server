@@ -8,6 +8,23 @@ All notable changes to this project are documented here.
 
 ## [Unreleased]
 
+## [3.10.0] — 2026-08-13
+
+### Added
+- Added permanent searchable list-and-detail workspaces for Status Pages, Announcements, Alert Channels, Omada, UniFi, Square, Users and Access, API Keys, Activity and Audit, and Settings.
+- Added responsive mobile layouts that stack each directory above its selected record while keeping focused create and edit tasks in accessible drawers.
+- Added regression coverage for on-page management navigation, stale-request handling, keyboard focus, integration onboarding, shared-resource permissions, webhook formats, and public status-page settings.
+
+### Improved
+- Reworked every Communication and Platform destination to stay within the main admin page, matching the Services, Incidents, and Maintenance workspace model.
+- Improved API-key creation, controller site and device browsing, UniFi service onboarding, settings search, empty states, keyboard focus restoration, explicit form labels, and live workspace badges.
+- Updated the README to document the unified on-page admin experience and current viewer capabilities.
+
+### Security
+- Restricted viewer integration responses to assigned dashboard mappings and made resources shared outside a viewer's scope browse-only.
+- Prevented viewers from editing or deleting Omada, UniFi, and Square resources that retain inaccessible group mappings.
+- Escaped dynamic management values and guarded asynchronous workspace loads so stale responses cannot replace the active view.
+
 ## [3.9.0] — 2026-08-13
 
 ### Added
