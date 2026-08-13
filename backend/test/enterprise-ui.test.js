@@ -122,7 +122,7 @@ test("admin keeps incident and maintenance browsing in responsive on-page worksp
   assert.doesNotMatch(maintenanceWorkspace, /role="dialog"|aria-modal="true"/);
 
   assert.match(admin, /\.admin-record-layout\{display:grid;/);
-  assert.match(admin, /@media\(max-width:980px\)\{[\s\S]*?\.admin-record-layout\{grid-template-columns:1fr\}/);
+  assert.match(admin, /@media\(max-width:980px\)\{[\s\S]*?\.admin-record-layout(?:,[^{]+)?\{grid-template-columns:1fr\}/);
   assert.match(admin, /data-nav-view="incidents" onclick="showAdminIncidents\(\)"/);
   assert.match(admin, /data-nav-view="maintenance" onclick="showAdminMaintenance\(\)"/);
   assert.match(admin, /function showAdminWorkspace\(name\)/);
@@ -151,7 +151,7 @@ test("record workspaces escape dynamic values, preserve selection, and keep muta
   assert.match(admin, /for="incTitle"/);
   assert.match(admin, /for="incImpact"/);
   assert.match(admin, /for="incPublic"/);
-  assert.match(admin, /async function openMaintenanceEditor\(id\)[\s\S]*openManagementTab\("maint"\)/);
+  assert.match(admin, /async function openMaintenanceEditor\(id\)[\s\S]*showAdminWorkspace\("maintenance"\)[\s\S]*showMaintForm\(match\)/);
   assert.match(admin, /await loadIncidentWorkspace\(id\)/);
   assert.match(admin, /await loadMaintenanceWorkspace\(id \|\| null\)/);
   assert.match(admin, /syncLiveMaintenanceFlags\(\)/);
