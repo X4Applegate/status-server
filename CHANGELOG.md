@@ -8,6 +8,16 @@ All notable changes to this project are documented here.
 
 ## [Unreleased]
 
+## [3.8.1] — 2026-08-13
+
+### Improved
+- Replaced popup-based service browsing in the admin workspace with a permanent searchable service directory beside the selected service's observability details.
+- Stacked the service directory above service details on smaller screens while keeping add and edit tasks in the focused configuration drawer.
+- Improved sticky workspace scrolling, keyboard selection, empty states, and stale-request handling when operators move quickly between services.
+
+### Security
+- Scoped authenticated browser caches to the active user and group grants, cleared legacy shared cache entries, escaped service-managed values before rendering, and encoded service identifiers used in API and badge URLs.
+
 ## [3.8.0] — 2026-08-13
 
 ### Added
