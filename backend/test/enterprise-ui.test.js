@@ -62,15 +62,63 @@ test("admin exposes its enterprise overview contract and a persisted theme contr
 
 test("admin keeps service observability inside the enterprise workspace", () => {
   assertHasId(admin, "adminServiceWorkspace");
+  assertHasId(admin, "adminServiceLayout");
+  assertHasId(admin, "serviceDirectory");
+  assertHasId(admin, "sidebarList");
   assertHasId(admin, "mainArea");
   assert.match(admin, /async function showAdminService\(/);
-  assert.match(admin, /fetch\(`\/api\/public\/response\/\$\{id\}`\)/);
-  assert.match(admin, /renderDetail\(server, uptime, heartbeat, incidents, responseSeries\)/);
+  assert.match(admin, /fetch\(`\/api\/public\/\$\{path\}\/\$\{encodedId\}`\)/);
+  assert.match(admin, /renderDetail\(currentServer, uptime, heartbeat, incidents, responseSeries\)/);
+
+  const workspaceStart = admin.indexOf('id="adminServiceWorkspace"');
+  const workspaceEnd = admin.indexOf("</section>", workspaceStart);
+  const workspace = admin.slice(workspaceStart, workspaceEnd);
+  assert.ok(workspaceStart >= 0 && workspaceEnd > workspaceStart, "expected service workspace markup");
+  assert.match(workspace, /id="serviceDirectory"[\s\S]*id="sidebarList"[\s\S]*id="mainArea"/);
+  assert.doesNotMatch(workspace, /role="dialog"|aria-modal="true"/);
+  assert.doesNotMatch(workspace, /Manage services|openManagementTab\(['"]servers['"]\)/);
+
+  assert.match(admin, /\.admin-service-layout\{display:grid;/);
+  assert.match(admin, /@media\(max-width:980px\)\{[\s\S]*?\.admin-service-layout\{grid-template-columns:1fr\}/);
+  assert.match(admin, /return `<button class="srv-row/);
+  assert.match(admin, /data-service-id="\$\{_escHtml\(s\.id\)\}"/);
+  assert.match(admin, /aria-current="true"/);
+  assert.match(admin, /window\.scrollTo\(\{ top:0, behavior:"auto" \}\)/);
+  assert.doesNotMatch(admin, /serviceWorkspace\?\.scrollIntoView/);
+  assert.match(admin, /function cacheClearServiceObservability\(/);
+  assert.doesNotMatch(admin, /function hydrateFromCache\(\)/);
   assert.doesNotMatch(
     admin,
-    /\.sidebar,\.content,\.page-footer\s*\{\s*display:none/,
-    "service detail content must not be hidden with the retired sidebar",
+    /\.sidebar(?:\s*,[^\{]+)?\s*\{[^}]*display\s*:\s*none/,
+    "the on-page service directory must not be hidden by an enterprise override",
   );
+  assert.doesNotMatch(
+    admin,
+    /\.service-directory\s*\{[^}]*display\s*:\s*none/,
+    "the permanent service directory itself must remain visible",
+  );
+});
+
+test("admin isolates authenticated caches and escapes service management values", () => {
+  assert.match(admin, /function sessionCacheFingerprint\(session\)/);
+  assert.match(admin, /return `\$\{session\.username \|\| ""\}\|\$\{session\.role \|\| "viewer"\}\|\$\{groups\}`/);
+  assert.match(admin, /sessionStorage\.getItem\("sm-session-fingerprint"\)/);
+  assert.match(admin, /function scopedCachePrefix\(\)/);
+  assert.match(admin, /sessionStorage\.getItem\(prefix \+ key\)/);
+  assert.match(admin, /function cacheClearLegacyPersistentCaches\(\)/);
+
+  assert.match(admin, /<div class="admin-name">\$\{_escHtml\(s\.name\)\}<\/div>/);
+  assert.match(admin, /<div class="admin-host">\$\{_escHtml\(s\.host\)\}/);
+  assert.match(admin, /data-service-id="\$\{serviceId\}" onclick="showServerForm\(findAdminServer\(this\.dataset\.serviceId\)\)"/);
+  assert.match(admin, /event\.target===event\.currentTarget&&\(event\.key==='Enter'/);
+  assert.match(admin, /categoryHints"\)\.innerHTML = cats\.map\(c => `<option value="\$\{_escHtml\(c\)\}">`\)/);
+  assert.match(admin, /value="\$\{_escHtml\(ck\.url\|\|""\)\}"/);
+  assert.match(admin, /value="\$\{_escHtml\(ck\.command\|\|""\)\}"/);
+  assert.match(admin, /_escHtml\(ck\.device_name \|\| ck\.device_mac \|\| "Unknown device"\)/);
+  assert.match(admin, /<optgroup label="\$\{_escHtml\(group\.name\)\}">/);
+  assert.doesNotMatch(admin, /value="\$\{ck\.url\|\|""\}"/);
+  assert.doesNotMatch(admin, /value="\$\{ck\.command\|\|""\}"/);
+  assert.doesNotMatch(admin, /adminServers\.find\(x=>x\.id==='\$\{s\.id\}'\)/);
 });
 
 test("admin overview distinguishes unavailable data and groups maintenance windows", () => {
