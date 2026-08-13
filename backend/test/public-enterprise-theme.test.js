@@ -35,7 +35,11 @@ function renderStatus(overrides = {}) {
 
 test("public status seeds the shared theme once and preserves a saved preference", () => {
   const html = renderStatus();
-  const bootstrap = html.match(/<script>([\s\S]*?)<\/script>/)[1];
+  const scriptStart = html.indexOf("<script>");
+  const scriptEnd = html.indexOf("</script>", scriptStart);
+  assert.notEqual(scriptStart, -1, "expected an inline theme bootstrap");
+  assert.notEqual(scriptEnd, -1, "expected the inline theme bootstrap to close");
+  const bootstrap = html.slice(scriptStart + "<script>".length, scriptEnd);
   const storage = new Map();
   const root = { dataset: { theme: "light" } };
   const context = {
