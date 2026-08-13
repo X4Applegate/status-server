@@ -2,11 +2,26 @@
 
 All notable changes to this project are documented here.
 
-> **AI Assistance:** This project was designed, built, and is maintained by **Richard Applegate**. [Claude](https://claude.ai) by Anthropic is used as a coding assistant to help with bug fixes, updates, security improvements, and code modifications. Claude did not create this project — all product decisions, architecture, and direction are made by the author.
+> **AI Assistance:** This project was designed, directed, and is maintained by **Richard Applegate**. AI coding assistants, including Anthropic Claude and OpenAI Codex, support implementation, testing, review, documentation, and security hardening. Product decisions and release authority remain with the author.
 
 ---
 
 ## [Unreleased]
+
+## [3.9.0] — 2026-08-13
+
+### Added
+- Added permanent searchable and filterable Incidents and Maintenance directories beside inline record details, matching the on-page Services workspace across desktop and mobile layouts.
+- Added regression coverage for responsive record workspaces, viewer-scoped maintenance actions, incident privacy, safe rendering, keyboard focus, selection persistence, and stale-request handling.
+
+### Improved
+- Moved incident editing and timeline updates into the Incidents workspace while retaining the focused Schedule/Edit drawer for maintenance changes.
+- Improved multi-service maintenance clarity, live maintenance badges, empty-filter states, date serialization, accessible field labels, and focus restoration between workspaces and drawers.
+- Rewrote the README with an accurate Docker Compose quick start, current feature and access-control reference, deployment and health guidance, API and feed examples, and database backup/restore instructions.
+
+### Security
+- Restricted viewer incident data to public incidents in assigned dashboards and kept private operator incidents visible only to administrators.
+- Escaped dynamic incident and maintenance values before rendering them in the admin workspace.
 
 ## [3.8.1] — 2026-08-13
 

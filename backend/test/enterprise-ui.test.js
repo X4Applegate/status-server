@@ -99,6 +99,84 @@ test("admin keeps service observability inside the enterprise workspace", () => 
   );
 });
 
+test("admin keeps incident and maintenance browsing in responsive on-page workspaces", () => {
+  for (const id of [
+    "adminIncidentWorkspace",
+    "incidentDirectoryList",
+    "incidentDetail",
+    "adminMaintenanceWorkspace",
+    "maintenanceDirectoryList",
+    "maintenanceDetail",
+  ]) assertHasId(admin, id);
+
+  const incidentStart = admin.indexOf('id="adminIncidentWorkspace"');
+  const incidentEnd = admin.indexOf('</section>', incidentStart);
+  const incidentWorkspace = admin.slice(incidentStart, incidentEnd);
+  assert.match(incidentWorkspace, /id="incidentDirectoryList"[\s\S]*id="incidentDetail"/);
+  assert.doesNotMatch(incidentWorkspace, /role="dialog"|aria-modal="true"/);
+
+  const maintenanceStart = admin.indexOf('id="adminMaintenanceWorkspace"');
+  const maintenanceEnd = admin.indexOf('</section>', maintenanceStart);
+  const maintenanceWorkspace = admin.slice(maintenanceStart, maintenanceEnd);
+  assert.match(maintenanceWorkspace, /id="maintenanceDirectoryList"[\s\S]*id="maintenanceDetail"/);
+  assert.doesNotMatch(maintenanceWorkspace, /role="dialog"|aria-modal="true"/);
+
+  assert.match(admin, /\.admin-record-layout\{display:grid;/);
+  assert.match(admin, /@media\(max-width:980px\)\{[\s\S]*?\.admin-record-layout\{grid-template-columns:1fr\}/);
+  assert.match(admin, /data-nav-view="incidents" onclick="showAdminIncidents\(\)"/);
+  assert.match(admin, /data-nav-view="maintenance" onclick="showAdminMaintenance\(\)"/);
+  assert.match(admin, /function showAdminWorkspace\(name\)/);
+  assert.match(admin, /button\.setAttribute\("aria-current", "page"\)/);
+});
+
+test("record workspaces escape dynamic values, preserve selection, and keep mutations focused", () => {
+  assert.match(admin, /return `<button class="record-row\$\{active \? " active" : ""\}" type="button" data-incident-id="\$\{_escHtml\(incident\.id\)\}"/);
+  assert.match(admin, /_escHtml\(_incidentTitle\(incident\)\)/);
+  assert.match(admin, /_escHtml\(window\.title \|\| "Maintenance"\)/);
+  assert.match(admin, /_escHtml\(window\.notes \|\| "No customer-facing notes were provided\."\)/);
+  assert.match(admin, /cacheSet\("selected-incident-id", match\.id\)/);
+  assert.match(admin, /cacheSet\("selected-maintenance-id", match\.id\)/);
+  assert.match(admin, /filtered\.length && !filtered\.some\(incident => String\(incident\.id\) === String\(selectedIncidentId\)\)/);
+  assert.match(admin, /filtered\.length && !filtered\.some\(window => String\(window\.id\) === String\(selectedMaintenanceId\)\)/);
+  assert.match(admin, /const requestId = \+\+incidentWorkspaceRequest/);
+  assert.match(admin, /if \(requestId !== incidentWorkspaceRequest\) return/);
+  assert.match(admin, /const requestId = \+\+maintenanceWorkspaceRequest/);
+  assert.match(admin, /if \(requestId !== maintenanceWorkspaceRequest\) return/);
+  assert.match(admin, /No maintenance windows match this filter\.[\s\S]*renderMaintenanceWorkspaceDetail\(null\)/);
+  assert.match(admin, /No incidents match this filter\.[\s\S]*showIncidentPanel\(null\)/);
+  assert.match(admin, /const updateComposer = canMutate && isOpen \?/);
+  assert.match(admin, /Read-only access: incident details and updates are visible/);
+  assert.match(admin, /for="incNewStatus"/);
+  assert.match(admin, /for="incNewMsg"/);
+  assert.match(admin, /for="incTitle"/);
+  assert.match(admin, /for="incImpact"/);
+  assert.match(admin, /for="incPublic"/);
+  assert.match(admin, /async function openMaintenanceEditor\(id\)[\s\S]*openManagementTab\("maint"\)/);
+  assert.match(admin, /await loadIncidentWorkspace\(id\)/);
+  assert.match(admin, /await loadMaintenanceWorkspace\(id \|\| null\)/);
+  assert.match(admin, /syncLiveMaintenanceFlags\(\)/);
+  assert.match(admin, /servers = reconcileLiveMaintenanceFlags\(servers, overviewMaintenance\)/);
+  assert.doesNotMatch(admin, /renderMaintenanceWorkspaceDirectory\(\);\s*renderMaintenanceWorkspaceDetail\(adminMaint/);
+  assert.doesNotMatch(admin, /renderIncidentWorkspaceDirectory\(\);\s*showIncidentPanel\(selectedIncidentId\)/);
+  assert.match(admin, /Multi-service schedule\./);
+  assert.match(admin, /start_time: startDate\.toISOString\(\), end_time: endDate\.toISOString\(\)/);
+  assert.doesNotMatch(admin, /askDelMaint\([^)]*,\s*['"]\$\{/);
+});
+
+test("maintenance workspace preserves authenticated, grant-scoped viewer actions", () => {
+  const routeStart = server.indexOf("// ── Maintenance Windows");
+  const routeEnd = server.indexOf("// Update own profile", routeStart);
+  const routes = server.slice(routeStart, routeEnd);
+  assert.match(routes, /app\.get\("\/api\/admin\/maintenance", requireAuth/);
+  assert.match(routes, /app\.post\("\/api\/admin\/maintenance", requireAuth/);
+  assert.match(routes, /app\.put\("\/api\/admin\/maintenance\/:id", requireAuth/);
+  assert.match(routes, /app\.delete\("\/api\/admin\/maintenance\/:id", requireAuth/);
+  assert.match(routes, /allowedServerIdsFor\(req\.session\)/);
+  assert.match(admin, /onclick="openNewMaintenance\(\)"/);
+  assert.match(admin, /onclick="openMaintenanceEditor\(this\.dataset\.maintenanceId\)"/);
+  assert.match(admin, /onclick="askDelMaint\(this\.dataset\.maintenanceId\)"/);
+});
+
 test("admin isolates authenticated caches and escapes service management values", () => {
   assert.match(admin, /function sessionCacheFingerprint\(session\)/);
   assert.match(admin, /return `\$\{session\.username \|\| ""\}\|\$\{session\.role \|\| "viewer"\}\|\$\{groups\}`/);
@@ -136,6 +214,10 @@ test("admin incident and overlay controls respect roles and dialog semantics", (
   assert.match(admin, /role="dialog" aria-modal="true" aria-labelledby="adminDrawerTitle"/);
   assert.match(admin, /event\.key === "Escape"/);
   assert.match(admin, /_drawerReturnFocus/);
+  assert.match(admin, /adminWorkspaceFocusIds/);
+  assert.match(admin, /adminMaintenanceWorkspaceTitle" tabindex="-1"/);
+  assert.match(admin, /closeAdminToWorkspace\('maintenance'\)/);
+  assert.match(admin, /_drawerReturnFocus = document\.getElementById\(adminWorkspaceFocusIds\[name\]\)/);
 });
 
 test("public status page exposes enterprise resources, incidents, and footer", () => {
