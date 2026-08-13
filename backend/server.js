@@ -18,6 +18,7 @@ const pinoHttp     = require("pino-http");
 const { Agent: UndiciAgent } = require("undici"); // for Omada TLS dispatcher
 const { OAuth2Client } = require("google-auth-library");
 const { buildStatusRss, groupMaintenanceRows } = require("./public-status");
+const { serializePublicGroup, serializePublicServers } = require("./public-status-serializer");
 
 const app  = express();
 
@@ -365,6 +366,7 @@ async function refreshMaintenanceCache() {
 // -- View engine ---------------------------------------------------------------
 app.set("view engine", "ejs");
 app.set("views", path.join(__dirname, "views"));
+app.use("/assets", express.static(path.join(__dirname, "public"), { index: false }));
 // Inject configurable vars into every EJS template automatically
 app.use((req, res, next) => {
   res.locals.APP_OWNER    = APP_OWNER;
@@ -3285,7 +3287,8 @@ async function pollAll(force = false) {
   }));
 
   // Each SSE client gets a payload filtered to what they're allowed to see —
-  // admins get everything, viewers get their granted groups, public gets any grouped server.
+  // admins get everything, viewers get their granted groups, and anonymous
+  // visitors get an allowlisted payload for their exact dashboard group.
   const all = Object.values(serverStatus);
   sseClients = sseClients.filter(r => !r.writableEnded);
   sseClients.forEach(r => {
@@ -3605,10 +3608,27 @@ app.post("/api/admin/change-password", requireAdmin, async (req, res) => {
   }
 });
 
-// -- Public API ----------------------------------------------------------------
-app.get("/api/status", (req, res) => res.json(Object.values(serverStatus)));
+// -- Live operator API ---------------------------------------------------------
+// Full live records contain infrastructure addresses, runbooks, coordinates,
+// failure state, and raw check details. Keep this legacy endpoint authenticated
+// and scope viewers to the dashboard groups they are assigned to.
+app.get("/api/status", requireAuth, async (req, res) => {
+  try {
+    const allowed = await getUserAllowedGroupIds(req.session.userId, req.session.role);
+    let servers = Object.values(serverStatus);
+    if (allowed !== null) {
+      const allowedSet = new Set(allowed.map(Number));
+      servers = servers.filter(server => Array.isArray(server.group_ids)
+        && server.group_ids.some(groupId => allowedSet.has(Number(groupId))));
+    }
+    res.json(servers);
+  } catch (e) {
+    res.status(500).json({ error: "Server error" });
+  }
+});
 
-app.get("/api/logs", (req, res) => {
+// Event logs contain internal probe output and operator identity data.
+app.get("/api/logs", requireAdmin, (req, res) => {
   let logs = [...eventLog].reverse();
   if (req.query.server) logs = logs.filter(l => l.serverId===req.query.server||l.server===req.query.server);
   if (req.query.level)  logs = logs.filter(l => l.level===req.query.level);
@@ -3634,6 +3654,18 @@ app.get("/api/events", async (req, res) => {
       res._allowed = new Set(ids || []);
     } catch(e) { res._allowed = new Set(); }
   }
+  // A public status page always connects with its group slug. Resolve it once
+  // so both this initial event and later broadcasts stay within that dashboard.
+  // Anonymous connections without a valid slug intentionally receive no rows.
+  res._publicGroupId = null;
+  if (!res._authed && res._slug) {
+    try {
+      const [groups] = await db.query("SELECT id FROM status_groups WHERE slug=? LIMIT 1", [res._slug]);
+      res._publicGroupId = groups.length ? Number(groups[0].id) : null;
+    } catch(e) {
+      res._publicGroupId = null;
+    }
+  }
   const initial = filterServersForSseClient(res, Object.values(serverStatus));
   res.write(`data: ${JSON.stringify(initial)}\n\n`);
   sseClients.push(res);
@@ -3641,17 +3673,19 @@ app.get("/api/events", async (req, res) => {
 });
 
 // Returns the subset of server records this SSE client is allowed to see.
-// Authenticated users and group-slug visitors get lat/lng (map feature).
-// Anonymous visitors on the root page have lat/lng stripped to protect locations.
+// Authenticated users retain the complete operator payload. Anonymous clients
+// receive a group-scoped, allowlisted visitor payload with no infrastructure
+// addresses, coordinates, runbook, failure state, or internal check details.
 function filterServersForSseClient(res, all) {
   if (res._isAdmin) return all;                                              // admin → everything
   if (res._authed) {
     return all.filter(s => Array.isArray(s.group_ids) && s.group_ids.some(gid => res._allowed.has(gid)));
   }
-  // Public / unauthenticated clients — only grouped servers, lat/lng + runbook stripped
-  // (runbook may include internal ops info and is only for authenticated on-call viewers).
-  const list = all.filter(s => Array.isArray(s.group_ids) && s.group_ids.length > 0);
-  return list.map(({ lat, lng, runbook, ...rest }) => rest);
+  return serializePublicServers(all, {
+    // NaN is deliberate when no valid slug was resolved: the serializer then
+    // returns an empty list instead of exposing every public dashboard at once.
+    groupId: res._publicGroupId === null ? Number.NaN : res._publicGroupId,
+  });
 }
 
 // Logs reveal internal system state — admin only
@@ -3665,7 +3699,7 @@ app.get("/api/log-events", requireAdmin, (req, res) => {
   req.on("close", () => { logClients = logClients.filter(c=>c!==res); });
 });
 
-app.post("/api/refresh", async (req, res) => {
+app.post("/api/refresh", requireAuth, async (req, res) => {
   await loadConfig();   // pick up newly added/edited servers without waiting for the next interval
   await pollAll(true);  // force-poll every server, ignoring per-server intervals
   res.json({ ok:true });
@@ -5245,19 +5279,34 @@ async function allowGroupedOrAuth(req, res, next) {
   res.status(401).json({ error: "Unauthorized" });
 }
 
+// Private incident details are operator data. The per-server history endpoint is
+// also used by public dashboards, so only an authenticated administrator may
+// opt out of the public=1 filter below.
+function canViewPrivateIncidents(req) {
+  return !!(req.session && req.session.userId && req.session.role === "admin");
+}
+
+function canViewInternalProbeDetails(req) {
+  return !!(req.session && req.session.userId);
+}
+
 // Uptime % for a server over a period
 app.get("/api/public/uptime/:id", allowGroupedOrAuth, async (req, res) => {
   try {
     const id = req.params.id;
-    // Count all checks for this server (not just ping). Servers monitored only by
-    // omada_gateway, http, tcp, etc. used to show no uptime data because the old
-    // query was hard-filtered to check_type='ping'.
+    // Treat each polling timestamp as one availability observation. A service
+    // with ping + TCP + HTTP checks should not have triple the weighting of a
+    // service with one check, and any failed check makes that poll cycle down.
     const calc = async (hours) => {
       const [rows] = await db.query(
-        `SELECT COUNT(*) as total, SUM(ok) as up_count
-         FROM status_history
-         WHERE server_id=?
-         AND checked_at >= DATE_SUB(NOW(), INTERVAL ? HOUR)`,
+        `SELECT COUNT(*) AS total, COALESCE(SUM(cycle_ok), 0) AS up_count
+         FROM (
+           SELECT MIN(ok) AS cycle_ok
+           FROM status_history
+           WHERE server_id=?
+             AND checked_at >= DATE_SUB(NOW(), INTERVAL ? HOUR)
+           GROUP BY checked_at
+         ) AS poll_cycles`,
         [id, hours]
       );
       const total = rows[0].total || 0;
@@ -5294,6 +5343,7 @@ app.get("/api/public/response/:id", allowGroupedOrAuth, async (req, res) => {
 // Heartbeat � last 90 check results (any check type)
 app.get("/api/public/heartbeat/:id", allowGroupedOrAuth, async (req, res) => {
   try {
+    const includeDetails = canViewInternalProbeDetails(req);
     // Group by poll cycle (checked_at) so servers with multiple check types
     // (ping + tcp + http etc.) still produce one dot per poll, not one per check.
     const [rows] = await db.query(
@@ -5308,23 +5358,27 @@ app.get("/api/public/heartbeat/:id", allowGroupedOrAuth, async (req, res) => {
     );
     // MIN(ok): if any check failed (0), the dot is "down"
     // AVG(response_ms): average across check types for the tooltip
-    res.json(rows.reverse().map(r => ({
-      ok: !!r.ok,
-      checked_at: r.checked_at,
-      detail: r.detail,
-      response_ms: r.response_ms != null ? Math.round(r.response_ms) : null
-    })));
+    res.json(rows.reverse().map(r => {
+      const heartbeat = {
+        ok: !!r.ok,
+        checked_at: r.checked_at,
+        response_ms: r.response_ms != null ? Math.round(r.response_ms) : null
+      };
+      if (includeDetails) heartbeat.detail = r.detail;
+      return heartbeat;
+    }));
   } catch(e) { res.status(500).json({ error: e.message }); }
 });
 
 // Incidents for a server — returns recent incidents with their full update timeline.
 app.get("/api/public/incidents/:id", allowGroupedOrAuth, async (req, res) => {
   try {
+    const includePrivate = canViewPrivateIncidents(req);
     const [rows] = await db.query(
       `SELECT * FROM status_incidents
-       WHERE server_id=?
+       WHERE server_id=? AND (public=1 OR ?=1)
        ORDER BY started_at DESC LIMIT 20`,
-      [req.params.id]
+      [req.params.id, includePrivate ? 1 : 0]
     );
     // Attach updates to each incident in one query (avoids N+1)
     const ids = rows.map(r => r.id);
@@ -5714,9 +5768,17 @@ app.get("/api/public/group/:slug", async (req, res) => {
     if (!groups.length) return res.status(404).json({ error: "Group not found" });
     const g = groups[0];
     const isAuthed = !!(req.session && req.session.userId);
-    const servers = Object.values(serverStatus)
-      .filter(s => Array.isArray(s.group_ids) && s.group_ids.includes(g.id))
-      .map(s => ({
+    let canViewInternal = false;
+    if (isAuthed && req.session.role === "admin") {
+      canViewInternal = true;
+    } else if (isAuthed) {
+      const allowed = await getUserAllowedGroupIds(req.session.userId, req.session.role);
+      canViewInternal = Array.isArray(allowed) && allowed.map(Number).includes(Number(g.id));
+    }
+    const matchingServers = Object.values(serverStatus)
+      .filter(s => Array.isArray(s.group_ids) && s.group_ids.includes(g.id));
+    const servers = canViewInternal
+      ? matchingServers.map(s => ({
         id: s.id, name: s.name, host: s.host,
         description: s.description, category: s.category || "", sub_category: s.sub_category || "", tags: s.tags, group_ids: s.group_ids,
         checks: s.checks || [],              // includes cert info for HTTPS checks
@@ -5724,12 +5786,13 @@ app.get("/api/public/group/:slug", async (req, res) => {
         uptimeHistory: s.uptimeHistory,
         // Coords are shown on the topbar map button (logged-in users only) — anonymous
         // visitors on a public dashboard don't need them and shouldn't see locations.
-        lat: isAuthed && s.lat != null ? s.lat : null,
-        lng: isAuthed && s.lng != null ? s.lng : null,
+        lat: s.lat != null ? s.lat : null,
+        lng: s.lng != null ? s.lng : null,
         // Runbook is for on-call only — don't surface to anonymous visitors.
-        runbook: isAuthed ? (s.runbook || "") : ""
-      }));
-    res.json({ group: g, servers });
+        runbook: s.runbook || ""
+      }))
+      : serializePublicServers(matchingServers, { groupId: g.id });
+    res.json({ group: canViewInternal ? g : serializePublicGroup(g), servers });
   } catch(e) { res.status(500).json({ error: e.message }); }
 });
 
@@ -6213,6 +6276,7 @@ app.use(async (req, res, next) => {
           logoText:     g.logo_text || "",
           logoImage:    g.logo_image || null,
           logoSize:     g.logo_size || 42,
+          defaultTheme: g.default_theme || "dark",
           pageTitle:    `${g.name} — Status History`,
           privacyUrl:   g.privacy_text ? "/privacy" : null,
           termsUrl:     g.terms_text   ? "/terms"   : null,
@@ -6343,6 +6407,7 @@ app.get("/dashboard/:slug/incidents", pageLimiter, async (req, res) => {
       logoText:     g.logo_text || "",
       logoImage:    g.logo_image || null,
       logoSize:     g.logo_size || 42,
+      defaultTheme: g.default_theme || "dark",
       pageTitle:    `${g.name} — Status History`,
       privacyUrl:   g.privacy_text ? `/dashboard/${g.slug}/privacy` : "/privacy",
       termsUrl:     g.terms_text   ? `/dashboard/${g.slug}/terms`   : "/terms",

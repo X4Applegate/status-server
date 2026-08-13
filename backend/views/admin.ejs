@@ -2,6 +2,14 @@
 <html lang="en" data-theme="dark">
 <head>
 <%- include('partials/head', { title: 'Applegate Monitor — Manage' }) %>
+<script>
+(function () {
+  try {
+    const savedTheme = localStorage.getItem("status-page-theme");
+    document.documentElement.dataset.theme = savedTheme === "light" || savedTheme === "dark" ? savedTheme : "dark";
+  } catch (_) { /* keep the server default */ }
+})();
+</script>
 <link href="https://unpkg.com/maplibre-gl@4/dist/maplibre-gl.css" rel="stylesheet">
 <style>
 *,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
@@ -12,7 +20,7 @@
   --text:#7a9cc0;--text-2:#3d6080;--text-hi:#c8dff0;--text-white:#e8f4ff;
   --shadow:rgba(0,0,20,0.5);--input-bg:#060c18;
   --glow-a:rgba(42,127,255,0.07);--glow-o:rgba(255,140,42,0.04);
-  --blue:#2a7fff;--blue-soft:rgba(42,127,255,0.12);--blue-glow:rgba(42,127,255,0.25);
+  --blue:#2a7fff;--accent:var(--blue);--blue-soft:rgba(42,127,255,0.12);--blue-glow:rgba(42,127,255,0.25);
   --orange:#ff8c2a;--orange-soft:rgba(255,140,42,0.12);--orange-glow:rgba(255,140,42,0.3);
   --green:#10e88a;--green-soft:rgba(16,232,138,0.10);
   --red:#ff3d5a;--red-soft:rgba(255,61,90,0.10);
@@ -470,7 +478,7 @@ body{font-family:var(--sans);background:var(--bg);color:var(--text);min-height:1
 #mainArea .uptime-row{display:grid;grid-template-columns:repeat(3,1fr);gap:12px;margin-bottom:24px}
 #mainArea .uptime-card{background:var(--surface);border:1px solid var(--border);border-radius:10px;padding:16px 20px;text-align:center}
 #mainArea .uptime-label{font-size:11px;font-weight:600;letter-spacing:.06em;text-transform:uppercase;color:var(--text-2);margin-bottom:8px}
-#mainArea .uptime-pct{font-size:28px;font-weight:700;letter-spacing:-.03em;line-height:1}
+#mainArea .uptime-pct{font-size:28px;font-weight:700;letter-spacing:-.03em;line-height:1;color:var(--text-white)}
 #mainArea .uptime-pct.great{color:var(--green)}
 #mainArea .uptime-pct.good {color:var(--blue)}
 #mainArea .uptime-pct.warn {color:var(--orange)}
@@ -524,24 +532,133 @@ body{font-family:var(--sans);background:var(--bg);color:var(--text);min-height:1
 #mainArea .dv-skeleton{background:linear-gradient(90deg,var(--surface) 25%,var(--surface2) 50%,var(--surface) 75%);background-size:200% 100%;animation:dvShimmer 1.5s infinite;border-radius:6px}
 @keyframes dvShimmer{0%{background-position:200% 0}100%{background-position:-200% 0}}
 </style>
+<style id="admin-enterprise-theme">
+/* Enterprise operations workspace. This final layer intentionally preserves the
+   existing forms and API contracts while giving monitoring and management one UI. */
+html{color-scheme:dark}
+html[data-theme="light"]{
+  color-scheme:light;
+  --bg:#f6f7f8;--bg2:#fff;--surface:#fff;--surface2:#f3f4f6;--surface3:#e8eaed;
+  --border:#e1e4e8;--border-hi:#c8cdd3;--text:#4c535d;--text-2:#69717d;
+  --text-hi:#25292f;--text-white:#111318;--shadow:rgba(16,24,40,.1);--input-bg:#fff;
+  --glow-a:transparent;--glow-o:transparent;--green:#16794a;--green-soft:#edf8f2;
+  --orange:#a15c00;--orange-soft:#fff6e6;--red:#b42318;--red-soft:#fff0ef;
+  --warn:#a15c00;--warn-soft:#fff6e6;
+}
+html[data-theme="dark"]{
+  color-scheme:dark;
+  --bg:#0c0d0f;--bg2:#111214;--surface:#17181b;--surface2:#1e2024;--surface3:#272a2f;
+  --border:#2a2d32;--border-hi:#3b3f46;--text:#c1c5cc;--text-2:#9ba1aa;
+  --text-hi:#e5e7eb;--text-white:#f7f7f8;--shadow:rgba(0,0,0,.36);--input-bg:#141518;
+  --glow-a:transparent;--glow-o:transparent;--green:#47cd89;--green-soft:#132b20;
+  --orange:#fdb022;--orange-soft:#30240f;--red:#f97066;--red-soft:#341918;
+  --warn:#fdb022;--warn-soft:#30240f;
+}
+body{background:var(--bg)}
+.bg-glow{display:none}
+*:focus-visible{outline:2px solid var(--blue);outline-offset:2px}
+.topbar{
+  min-height:68px;height:auto;padding:10px clamp(16px,3vw,34px);background:var(--bg2);
+  border-bottom:1px solid var(--border);box-shadow:none;gap:16px;
+}
+.brand-icon{width:38px;height:38px;border-radius:9px;background:var(--surface);border-color:var(--border)}
+.brand-name{font-size:16px}.brand-name span{color:var(--blue)}
+.topbar-dash-menu{margin-left:auto}.topbar-right{gap:7px}
+.btn,.topbar-dash-btn,.dash-nav,.user-badge,.map-toggle-btn{
+  min-height:34px;border-radius:7px;border-color:var(--border-hi);background:var(--surface);color:var(--text-hi);box-shadow:none;
+}
+.btn:hover,.topbar-dash-btn:hover,.dash-nav:hover,.map-toggle-btn:hover{background:var(--surface2);border-color:var(--text-2);color:var(--text-white)}
+.btn-primary{background:var(--blue)!important}.topbar-dash-popup,.topbar-right.menu-open{background:var(--surface);border-color:var(--border);box-shadow:0 16px 36px var(--shadow)}
+.theme-toggle-admin{min-width:38px;padding:0 11px;justify-content:center}
+.theme-toggle-admin svg{width:15px;height:15px}.theme-toggle-admin .theme-sun,.theme-toggle-admin .theme-moon{display:none}
+html[data-theme="light"] .theme-toggle-admin .theme-moon,html[data-theme="dark"] .theme-toggle-admin .theme-sun{display:block}
+.main-layout{min-height:calc(100vh - 68px);align-items:stretch}
+.admin-rail{width:252px;flex:0 0 252px;position:sticky;top:68px;height:calc(100vh - 68px);overflow-y:auto;background:var(--bg2);border-right:1px solid var(--border);padding:22px 14px;z-index:20}
+.admin-rail-heading{padding:0 10px 18px;border-bottom:1px solid var(--border);margin-bottom:14px}
+.admin-rail-eyebrow{font-size:10px;font-weight:700;letter-spacing:.1em;text-transform:uppercase;color:var(--text-2)}
+.admin-rail-title{margin-top:5px;font-size:18px;font-weight:700;letter-spacing:-.025em;color:var(--text-white)}
+.admin-rail-subtitle{margin-top:4px;font-size:11px;line-height:1.5;color:var(--text-2)}
+.admin-nav-section{margin-top:18px}.admin-nav-label{padding:0 10px 6px;font-size:9px;font-weight:750;letter-spacing:.1em;text-transform:uppercase;color:var(--text-2)}
+.admin-nav-item{width:100%;display:flex;align-items:center;gap:10px;min-height:38px;padding:8px 10px;border:1px solid transparent;border-radius:7px;background:transparent;color:var(--text);font:600 12px var(--sans);text-align:left;cursor:pointer;text-decoration:none}
+.admin-nav-item svg{width:16px;height:16px;flex:none;color:var(--text-2)}
+.admin-nav-item:hover{background:var(--surface2);color:var(--text-hi)}
+.admin-nav-item.active{background:var(--blue-soft);border-color:color-mix(in srgb,var(--blue) 30%,transparent);color:var(--blue)}
+.admin-nav-item.active svg{color:var(--blue)}
+.admin-only-nav,.admin-only-action{display:none!important}
+body.admin-role .admin-only-nav,body.admin-role .admin-only-action{display:flex!important}
+.admin-nav-item-badge{margin-left:auto;min-width:20px;padding:1px 6px;border-radius:10px;background:var(--surface2);color:var(--text-2);font:700 9px var(--mono);text-align:center}
+.admin-workspace{flex:1;min-width:0;background:var(--bg);padding:clamp(22px,3vw,38px)}
+.admin-overview{max-width:1420px;margin:0 auto}
+.admin-service-workspace{max-width:1420px;margin:0 auto}
+.admin-service-toolbar{display:flex;align-items:center;justify-content:space-between;gap:14px;margin-bottom:18px}
+.admin-service-toolbar-copy{min-width:0}.admin-service-toolbar-title{font-size:12px;font-weight:750;color:var(--text-hi)}.admin-service-toolbar-subtitle{margin-top:2px;font-size:10px;color:var(--text-2)}
+.admin-page-heading{display:flex;align-items:flex-start;justify-content:space-between;gap:20px;margin-bottom:26px}
+.admin-page-kicker{display:flex;align-items:center;gap:7px;font-size:10px;font-weight:750;letter-spacing:.09em;text-transform:uppercase;color:var(--text-2)}
+.admin-page-live{width:7px;height:7px;border-radius:50%;background:var(--green)}
+.admin-page-title{margin-top:7px;font-size:clamp(27px,3vw,38px);line-height:1.08;letter-spacing:-.04em;color:var(--text-white)}
+.admin-page-description{max-width:680px;margin-top:8px;color:var(--text);font-size:13px;line-height:1.6}
+.admin-page-actions{display:flex;align-items:center;gap:8px;flex-wrap:wrap;justify-content:flex-end}
+.admin-health-card{border:1px solid var(--border);border-left:4px solid var(--green);border-radius:13px;background:var(--surface);padding:24px;box-shadow:0 1px 2px var(--shadow)}
+.admin-health-card.has-issues{border-left-color:var(--orange)}.admin-health-card.has-outage{border-left-color:var(--red)}
+.admin-health-top{display:flex;align-items:flex-start;justify-content:space-between;gap:22px}
+.admin-health-eyebrow{font-size:10px;font-weight:750;letter-spacing:.09em;text-transform:uppercase;color:var(--text-2)}
+.admin-health-title{margin-top:8px;font-size:clamp(22px,2.4vw,31px);line-height:1.12;letter-spacing:-.035em;color:var(--text-white)}
+.admin-health-copy{margin-top:7px;color:var(--text);font-size:13px}
+.admin-health-state{display:flex;align-items:center;gap:9px;padding:10px 12px;border:1px solid var(--border);border-radius:8px;background:var(--surface2);font-size:11px;font-weight:700;color:var(--text-hi);white-space:nowrap}
+.admin-health-state-dot{width:9px;height:9px;border-radius:50%;background:var(--green)}
+.admin-health-card.has-issues .admin-health-state-dot{background:var(--orange)}.admin-health-card.has-outage .admin-health-state-dot{background:var(--red)}
+.admin-kpi-grid{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:0;margin-top:22px;padding-top:19px;border-top:1px solid var(--border)}
+.admin-kpi{display:flex;align-items:center;gap:11px;min-width:0;padding:5px 18px;border-left:1px solid var(--border)}
+.admin-kpi:first-child{padding-left:0;border-left:0}.admin-kpi-icon{display:flex;align-items:center;justify-content:center;width:32px;height:32px;border-radius:7px;background:var(--surface2);color:var(--text-2)}
+.admin-kpi-icon svg{width:16px;height:16px}.admin-kpi-value{font-size:19px;font-weight:750;color:var(--text-white);letter-spacing:-.03em}.admin-kpi-label{font-size:9px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;color:var(--text-2)}
+.admin-overview-grid{display:grid;grid-template-columns:minmax(0,1.4fr) minmax(300px,.75fr);gap:18px;margin-top:18px}
+.ops-card{border:1px solid var(--border);border-radius:11px;background:var(--surface);overflow:hidden;box-shadow:0 1px 2px var(--shadow)}
+.ops-card-head{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:15px 17px;border-bottom:1px solid var(--border);background:var(--surface2)}
+.ops-card-title{font-size:12px;font-weight:700;color:var(--text-hi)}.ops-card-meta{font-size:10px;color:var(--text-2)}
+.ops-card-body{padding:8px}.attention-item{width:100%;display:grid;grid-template-columns:auto minmax(0,1fr) auto;align-items:center;gap:11px;padding:11px;border:0;border-radius:8px;background:transparent;color:inherit;font-family:var(--sans);text-align:left;cursor:pointer}
+.attention-item:hover{background:var(--surface2)}.attention-dot{width:8px;height:8px;border-radius:50%;background:var(--orange)}.attention-dot.down{background:var(--red)}.attention-dot.pending{background:var(--text-2)}
+.attention-name,.attention-detail{display:block}.attention-name{color:var(--text-hi);font-size:12px;font-weight:650;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.attention-detail{margin-top:2px;color:var(--text-2);font-size:10px}.attention-state{font-size:9px;font-weight:750;letter-spacing:.05em;text-transform:uppercase;color:var(--orange)}
+.ops-empty{display:flex;flex-direction:column;align-items:center;text-align:center;padding:28px 18px;color:var(--text-2);font-size:12px;line-height:1.55}.ops-empty-icon{display:flex;align-items:center;justify-content:center;width:38px;height:38px;margin-bottom:10px;border-radius:50%;background:var(--green-soft);color:var(--green)}
+.ops-list-row{width:100%;display:flex;align-items:flex-start;gap:11px;padding:11px;border:0;border-radius:8px;background:transparent;color:inherit;font-family:var(--sans);text-align:left;cursor:pointer}.ops-list-row:hover{background:var(--surface2)}.ops-list-icon{display:flex;align-items:center;justify-content:center;width:30px;height:30px;flex:none;border-radius:7px;background:var(--surface2);color:var(--text-2)}.ops-list-copy{min-width:0;flex:1}.ops-list-title,.ops-list-meta{display:block}.ops-list-title{font-size:12px;font-weight:650;color:var(--text-hi)}.ops-list-meta{margin-top:3px;color:var(--text-2);font-size:10px;line-height:1.45}
+.quick-action-grid{display:grid;grid-template-columns:1fr 1fr;gap:8px}.quick-action{display:flex;align-items:center;gap:9px;min-height:54px;padding:10px;border:1px solid var(--border);border-radius:8px;background:var(--surface);color:var(--text-hi);font:650 11px var(--sans);text-align:left;cursor:pointer}.quick-action:hover{background:var(--surface2);border-color:var(--border-hi)}.quick-action svg{width:16px;height:16px;color:var(--blue)}
+.admin-resources{margin-top:18px}.admin-resources-intro{padding:17px}.admin-resource-grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px;padding:0 8px 8px}.admin-resource{display:flex;align-items:center;gap:11px;min-height:58px;padding:11px;border:1px solid var(--border);border-radius:8px;background:var(--surface);color:var(--text-hi);font-family:var(--sans);text-align:left;text-decoration:none;cursor:pointer}.admin-resource:hover{background:var(--surface2);border-color:var(--border-hi)}.admin-resource svg{width:17px;height:17px;color:var(--blue);flex:none}.admin-resource-title,.admin-resource-desc{display:block}.admin-resource-title{font-size:11px;font-weight:700}.admin-resource-desc{margin-top:2px;font-size:9px;color:var(--text-2);line-height:1.35}
+.sidebar,.page-footer{display:none}
+.admin-service-workspace .content{display:block;padding:0;overflow:visible;background:transparent}
+.admin-map-view{top:68px}
+.drawer{background:var(--bg2);border-color:var(--border-hi)}.drawer-overlay{background:rgba(0,0,0,.45)}
+.drawer-header,.drawer-toolbar,.drawer-footer,.form-footer{background:var(--bg2);border-color:var(--border)}
+.admin-tabs{gap:5px}.admin-tab{min-height:30px;border-radius:6px}.admin-tab.active{background:var(--surface2);border-color:var(--border-hi)}
+.admin-server-item:hover,.user-item:hover{background:var(--surface2)}
+.finput,.fselect,.modal-input{background:var(--input-bg);color:var(--text-white)}
+@media(max-width:1100px){
+  .admin-rail{width:220px;flex-basis:220px}.admin-overview-grid{grid-template-columns:1fr}.admin-resource-grid{grid-template-columns:1fr 1fr}
+}
+@media(max-width:820px){
+  .main-layout{display:block}.admin-rail{position:static;width:auto;height:auto;overflow:visible;border-right:0;border-bottom:1px solid var(--border);padding:10px 12px}.admin-rail-heading,.admin-nav-label{display:none}.admin-nav-section{display:flex;gap:6px;margin:0;overflow-x:auto;scrollbar-width:none}.admin-nav-section:not(:first-of-type){margin-top:7px}.admin-nav-item{width:auto;flex:none;min-height:34px;padding:7px 10px}.admin-nav-item span:not(.admin-nav-item-badge){white-space:nowrap}.admin-workspace{padding:20px 14px 36px}.admin-page-heading{flex-direction:column}.admin-page-actions{justify-content:flex-start}.admin-kpi-grid{grid-template-columns:1fr 1fr}.admin-kpi:nth-child(3){padding-left:0;border-left:0;margin-top:12px}.admin-kpi:nth-child(4){margin-top:12px}.admin-resource-grid{grid-template-columns:1fr}.topbar{min-height:60px}.main-layout{min-height:calc(100vh - 60px)}
+}
+@media(max-width:520px){
+  .brand-name{font-size:14px}.admin-page-title{font-size:27px}.admin-health-card{padding:18px 15px}.admin-health-top{display:block}.admin-health-state{margin-top:15px;white-space:normal}.admin-kpi{padding:7px 10px}.admin-kpi-icon{display:none}.admin-kpi-value{font-size:18px}.quick-action-grid{grid-template-columns:1fr}.admin-page-actions .btn{flex:1}.topbar-right.menu-open{left:10px;right:10px}.admin-nav-item svg{display:none}.admin-service-toolbar{align-items:flex-start;flex-direction:column}#mainArea .uptime-row{grid-template-columns:repeat(3,minmax(0,1fr))}#mainArea .uptime-card{min-width:0;padding:12px 4px}#mainArea .uptime-pct{font-size:clamp(17px,5vw,20px)}#mainArea .uptime-label{font-size:8px;white-space:nowrap}
+}
+@media(prefers-reduced-motion:reduce){*,*::before,*::after{scroll-behavior:auto!important;animation-duration:.01ms!important;animation-iteration-count:1!important;transition-duration:.01ms!important}}
+</style>
 </head>
 <body>
 <div class="bg-glow"></div>
-<div class="drawer-overlay" id="sharedOverlay" onclick="closeAll()"></div>
+<div class="drawer-overlay" id="sharedOverlay" onclick="closeAll()" aria-hidden="true"></div>
 
 <!-- Confirm dialog -->
-<div class="confirm-overlay" id="confirmDlg">
+<div class="confirm-overlay" id="confirmDlg" role="dialog" aria-modal="true" aria-labelledby="confirmTitle" aria-hidden="true">
   <div class="confirm-box">
-    <div class="confirm-title">Are you sure?</div>
+    <div class="confirm-title" id="confirmTitle">Are you sure?</div>
     <div class="confirm-msg" id="confirmMsg"></div>
     <div class="confirm-btns"><button class="btn" onclick="closeConfirm()">Cancel</button><button class="btn btn-danger" onclick="void(0)">Remove</button></div>
   </div>
 </div>
 
 <!-- Change Password Modal -->
-<div class="modal-overlay" id="changePwdModal">
+<div class="modal-overlay" id="changePwdModal" role="dialog" aria-modal="true" aria-labelledby="changePwdTitle" aria-hidden="true">
   <div class="modal-box">
-    <div class="modal-title">Change Password</div>
+    <div class="modal-title" id="changePwdTitle">Change Password</div>
     <div class="modal-group"><label class="modal-label">Current Password</label><input class="modal-input" id="pwdCurrent" type="password" placeholder="Current password"></div>
     <div class="modal-group"><label class="modal-label">New Password</label><input class="modal-input" id="pwdNew" type="password" placeholder="Min 8 characters"></div>
     <div class="modal-group"><label class="modal-label">Confirm New Password</label><input class="modal-input" id="pwdConfirm" type="password" placeholder="Repeat new password"></div>
@@ -550,9 +667,9 @@ body{font-family:var(--sans);background:var(--bg);color:var(--text);min-height:1
 </div>
 
 <!-- Profile Modal -->
-<div class="modal-overlay" id="profileModal">
+<div class="modal-overlay" id="profileModal" role="dialog" aria-modal="true" aria-labelledby="profileTitle" aria-hidden="true">
   <div class="modal-box" style="max-width:420px">
-    <div class="modal-title">My Profile</div>
+    <div class="modal-title" id="profileTitle">My Profile</div>
     <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:12px">
       <div class="modal-group" style="margin-bottom:0"><label class="modal-label">First Name</label><input class="modal-input" id="profFirstName" type="text" placeholder="First name" autocomplete="given-name"></div>
       <div class="modal-group" style="margin-bottom:0"><label class="modal-label">Last Name</label><input class="modal-input" id="profLastName" type="text" placeholder="Last name" autocomplete="family-name"></div>
@@ -565,10 +682,10 @@ body{font-family:var(--sans);background:var(--bg);color:var(--text);min-height:1
 <div class="toast-stack" id="toasts"></div>
 
 <!-- LOG DRAWER -->
-<div class="drawer" id="logDrawer">
+<div class="drawer" id="logDrawer" role="dialog" aria-modal="true" aria-labelledby="logDrawerTitle" aria-hidden="true">
   <div class="drawer-header">
-    <div class="drawer-title"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/></svg>Check Logs</div>
-    <button class="drawer-close" onclick="closeLogs()">✕</button>
+    <div class="drawer-title" id="logDrawerTitle"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/></svg>Check Logs</div>
+    <button class="drawer-close" onclick="closeLogs()" aria-label="Close check logs">✕</button>
   </div>
   <div class="drawer-toolbar">
     <div class="filter-tabs"><button class="filter-tab active" onclick="setLF('all',this)">All</button><button class="filter-tab" onclick="setLF('error',this)">Errors</button><button class="filter-tab" onclick="setLF('changes',this)">Changes</button></div>
@@ -581,10 +698,10 @@ body{font-family:var(--sans);background:var(--bg);color:var(--text);min-height:1
 </div>
 
 <!-- ADMIN DRAWER -->
-<div class="drawer" id="adminDrawer">
+<div class="drawer" id="adminDrawer" role="dialog" aria-modal="true" aria-labelledby="adminDrawerTitle" aria-hidden="true">
   <div class="drawer-header">
-    <div class="drawer-title"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.07 4.93a10 10 0 0 1 0 14.14M4.93 4.93a10 10 0 0 0 0 14.14"/></svg>Manage</div>
-    <button class="drawer-close" onclick="closeAdmin()">✕</button>
+    <div class="drawer-title" id="adminDrawerTitle"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.07 4.93a10 10 0 0 1 0 14.14M4.93 4.93a10 10 0 0 0 0 14.14"/></svg>Manage</div>
+    <button class="drawer-close" onclick="closeAdmin()" aria-label="Close management panel">✕</button>
   </div>
   <div id="aListView" class="admin-section">
     <div class="drawer-toolbar">
@@ -1030,17 +1147,21 @@ body{font-family:var(--sans);background:var(--bg);color:var(--text);min-height:1
     <!-- Dashboard quick-nav: pills on wide screens, dropdown on narrow -->
     <div class="topbar-dashboards" id="topbarDashboards"></div>
     <div class="topbar-dash-menu" id="topbarDashMenu">
-      <button class="topbar-dash-btn" id="topbarDashBtn" onclick="toggleDashMenu(event)">
+      <button class="topbar-dash-btn" id="topbarDashBtn" onclick="toggleDashMenu(event)" aria-expanded="false" aria-controls="topbarDashPopup">
         Dashboards
         <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"/></svg>
       </button>
       <div class="topbar-dash-popup" id="topbarDashPopup"></div>
     </div>
-    <button class="topbar-hamburger" id="topbarHamburger" onclick="toggleTopbarMenu(event)" title="Menu" aria-label="Open menu">
+    <button class="topbar-hamburger" id="topbarHamburger" onclick="toggleTopbarMenu(event)" title="Menu" aria-label="Open menu" aria-expanded="false" aria-controls="topbarRight">
       <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="3" y1="6" x2="21" y2="6"/><line x1="3" y1="12" x2="21" y2="12"/><line x1="3" y1="18" x2="21" y2="18"/></svg>
     </button>
     <div class="topbar-right" id="topbarRight">
       <span class="user-badge" id="userBadge" style="display:none;font-size:12px"></span>
+      <button class="btn theme-toggle-admin" id="adminThemeToggle" type="button" onclick="toggleAdminTheme()" title="Switch color theme" aria-label="Switch color theme">
+        <svg class="theme-sun" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="4"/><line x1="12" y1="2" x2="12" y2="4"/><line x1="12" y1="20" x2="12" y2="22"/><line x1="4.93" y1="4.93" x2="6.34" y2="6.34"/><line x1="17.66" y1="17.66" x2="19.07" y2="19.07"/><line x1="2" y1="12" x2="4" y2="12"/><line x1="20" y1="12" x2="22" y2="12"/><line x1="4.93" y1="19.07" x2="6.34" y2="17.66"/><line x1="17.66" y1="6.34" x2="19.07" y2="4.93"/></svg>
+        <svg class="theme-moon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20.5 14.1A8.5 8.5 0 0 1 9.9 3.5 8.5 8.5 0 1 0 20.5 14.1Z"/></svg>
+      </button>
       <button class="btn btn-icon" id="loginBtn" onclick="window.location.href='/login'" style="display:none" title="Login"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M15 3h4a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2h-4"/><polyline points="10 17 15 12 10 7"/><line x1="15" y1="12" x2="3" y2="12"/></svg></button>
 <button class="btn" id="adminMenuBtn" onclick="openAdmin()" style="display:none"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.07 4.93a10 10 0 0 1 0 14.14M4.93 4.93a10 10 0 0 0 0 14.14"/></svg>Manage</button>
       <button class="btn btn-icon" id="profileBtn" onclick="openProfile()" style="display:none" title="My profile"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg></button>
@@ -1067,6 +1188,132 @@ body{font-family:var(--sans);background:var(--bg);color:var(--text);min-height:1
 
   <!-- Split layout -->
   <div class="main-layout">
+    <aside class="admin-rail" id="adminPrimaryNav" aria-label="Operations navigation">
+      <div class="admin-rail-heading">
+        <div class="admin-rail-eyebrow">Operations console</div>
+        <div class="admin-rail-title">Control center</div>
+        <div class="admin-rail-subtitle">Monitor health, communicate incidents, and manage every status page.</div>
+      </div>
+      <div class="admin-nav-section">
+        <div class="admin-nav-label">Workspace</div>
+        <button class="admin-nav-item active" type="button" data-nav-view="overview" onclick="showAdminOverview()">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/></svg>
+          <span>Overview</span><span class="admin-nav-item-badge" id="navIssueCount">—</span>
+        </button>
+      </div>
+      <div class="admin-nav-section">
+        <div class="admin-nav-label">Monitoring</div>
+        <button class="admin-nav-item" type="button" data-nav-view="services" onclick="showAdminService()"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="6" rx="2"/><rect x="3" y="14" width="18" height="6" rx="2"/><line x1="7" y1="7" x2="7.01" y2="7"/><line x1="7" y1="17" x2="7.01" y2="17"/></svg><span>Services</span><span class="admin-nav-item-badge" id="navServiceCount">—</span></button>
+        <button class="admin-nav-item" type="button" onclick="openManagementTab('incidents',this)"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M10.3 2.9 1.8 17a2 2 0 0 0 1.7 3h17a2 2 0 0 0 1.7-3L13.7 2.9a2 2 0 0 0-3.4 0Z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg><span>Incidents</span><span class="admin-nav-item-badge" id="navIncidentCount">—</span></button>
+        <button class="admin-nav-item" type="button" onclick="openManagementTab('maint',this)"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="5" width="18" height="16" rx="2"/><line x1="16" y1="3" x2="16" y2="7"/><line x1="8" y1="3" x2="8" y2="7"/><line x1="3" y1="11" x2="21" y2="11"/></svg><span>Maintenance</span></button>
+      </div>
+      <div class="admin-nav-section">
+        <div class="admin-nav-label">Communication</div>
+        <button class="admin-nav-item" type="button" onclick="openManagementTab('groups',this)"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><line x1="3" y1="12" x2="21" y2="12"/><path d="M12 3a15 15 0 0 1 0 18M12 3a15 15 0 0 0 0 18"/></svg><span>Status pages</span></button>
+        <button class="admin-nav-item admin-only-nav" type="button" onclick="openManagementTab('banners',this)"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 15s1-1 4-1 5 2 8 2 4-1 4-1V3s-1 1-4 1-5-2-8-2-4 1-4 1z"/><line x1="4" y1="22" x2="4" y2="15"/></svg><span>Announcements</span></button>
+        <button class="admin-nav-item" type="button" onclick="openManagementTab('webhooks',this)"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 8a6 6 0 0 0-12 0c0 7-3 7-3 9h18c0-2-3-2-3-9"/><path d="M13.7 21a2 2 0 0 1-3.4 0"/></svg><span>Alert channels</span></button>
+      </div>
+      <div class="admin-nav-section">
+        <div class="admin-nav-label">Platform</div>
+        <button class="admin-nav-item" type="button" onclick="openManagementTab('omada',this)"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12.55a11 11 0 0 1 14.08 0"/><path d="M1.42 9a16 16 0 0 1 21.16 0"/><path d="M8.53 16.11a6 6 0 0 1 6.95 0"/><line x1="12" y1="20" x2="12.01" y2="20"/></svg><span>Network controllers</span></button>
+        <button class="admin-nav-item" type="button" onclick="openManagementTab('square',this)"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="4"/><rect x="8" y="8" width="8" height="8" rx="1"/></svg><span>Square</span></button>
+        <button class="admin-nav-item admin-only-nav" type="button" onclick="openManagementTab('users',this)"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M22 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg><span>Users & access</span></button>
+        <button class="admin-nav-item admin-only-nav" type="button" onclick="openManagementTab('apikeys',this)"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="7.5" cy="15.5" r="5.5"/><path d="m21 2-9.6 9.6"/><path d="m15 5 4 4"/></svg><span>API keys</span></button>
+        <button class="admin-nav-item admin-only-nav" type="button" onclick="openManagementTab('audit',this)"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="9" y1="13" x2="15" y2="13"/><line x1="9" y1="17" x2="15" y2="17"/></svg><span>Activity & audit</span></button>
+        <button class="admin-nav-item admin-only-nav" type="button" onclick="openManagementTab('settings',this)"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .34 1.88l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06A1.7 1.7 0 0 0 15 19.4a1.7 1.7 0 0 0-1 .6 1.7 1.7 0 0 0-.4 1.1V21a2 2 0 0 1-4 0v-.09A1.7 1.7 0 0 0 8.6 19.4a1.7 1.7 0 0 0-1.88.34l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06A1.7 1.7 0 0 0 4.6 15a1.7 1.7 0 0 0-.6-1 1.7 1.7 0 0 0-1.1-.4H3a2 2 0 0 1 0-4h.09A1.7 1.7 0 0 0 4.6 8.6a1.7 1.7 0 0 0-.34-1.88l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06A1.7 1.7 0 0 0 9 4.6a1.7 1.7 0 0 0 1-.6 1.7 1.7 0 0 0 .4-1.1V3a2 2 0 0 1 4 0v.09A1.7 1.7 0 0 0 15.4 4.6a1.7 1.7 0 0 0 1.88-.34l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06A1.7 1.7 0 0 0 19.4 9c.12.37.34.7.6 1 .3.27.68.42 1.1.4H21a2 2 0 0 1 0 4h-.09a1.7 1.7 0 0 0-1.51.6z"/></svg><span>Settings</span></button>
+      </div>
+    </aside>
+
+    <main class="admin-workspace">
+      <div class="admin-overview" id="adminOverview">
+        <header class="admin-page-heading">
+          <div>
+            <div class="admin-page-kicker"><span class="admin-page-live"></span>Live operations workspace</div>
+            <h1 class="admin-page-title">Infrastructure overview</h1>
+            <p class="admin-page-description">Health, incidents, maintenance, and the operator actions that matter now—across every monitored service and status page.</p>
+          </div>
+          <div class="admin-page-actions">
+            <button class="btn" type="button" onclick="triggerRefresh()"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M20 11a8.1 8.1 0 1 0 2 5.3"/><polyline points="20 4 20 11 13 11"/></svg>Run checks</button>
+            <button class="btn btn-primary" type="button" onclick="openNewService()"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>Add service</button>
+          </div>
+        </header>
+
+        <section class="admin-health-card" id="adminHealthCard" aria-labelledby="adminHealthHeadline">
+          <div class="admin-health-top">
+            <div>
+              <div class="admin-health-eyebrow">Environment health</div>
+              <h2 class="admin-health-title" id="adminHealthHeadline">Connecting to live service data</h2>
+              <p class="admin-health-copy" id="adminHealthCopy">The operations console will update as soon as the status stream is ready.</p>
+            </div>
+            <div class="admin-health-state"><span class="admin-health-state-dot"></span><span id="adminHealthState">Checking services</span></div>
+          </div>
+          <div class="admin-kpi-grid" aria-label="Infrastructure metrics">
+            <div class="admin-kpi"><div class="admin-kpi-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="4" width="18" height="6" rx="2"/><rect x="3" y="14" width="18" height="6" rx="2"/></svg></div><div><div class="admin-kpi-value" id="adminMetricTotal">—</div><div class="admin-kpi-label">Monitored</div></div></div>
+            <div class="admin-kpi"><div class="admin-kpi-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="20 6 9 17 4 12"/></svg></div><div><div class="admin-kpi-value" id="adminMetricUp">—</div><div class="admin-kpi-label">Operational</div></div></div>
+            <div class="admin-kpi"><div class="admin-kpi-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M10.3 2.9 1.8 17a2 2 0 0 0 1.7 3h17a2 2 0 0 0 1.7-3L13.7 2.9a2 2 0 0 0-3.4 0Z"/></svg></div><div><div class="admin-kpi-value" id="adminMetricIssues">—</div><div class="admin-kpi-label">Needs attention</div></div></div>
+            <div class="admin-kpi"><div class="admin-kpi-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 12h4l3-8 4 16 3-8h4"/></svg></div><div><div class="admin-kpi-value" id="adminMetricResponse">—</div><div class="admin-kpi-label">Avg response</div></div></div>
+          </div>
+        </section>
+
+        <div class="admin-overview-grid">
+          <section class="ops-card">
+            <div class="ops-card-head"><div class="ops-card-title">Needs attention</div><div class="ops-card-meta" id="attentionMeta">Live service exceptions</div></div>
+            <div class="ops-card-body" id="adminAttentionList"><div class="ops-empty">Waiting for service health…</div></div>
+          </section>
+          <section class="ops-card">
+            <div class="ops-card-head"><div class="ops-card-title">Quick actions</div><div class="ops-card-meta">Operator shortcuts</div></div>
+            <div class="ops-card-body"><div class="quick-action-grid">
+              <button class="quick-action" type="button" onclick="openNewService()"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>Add service</button>
+              <button class="quick-action" type="button" onclick="openNewMaintenance()"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="5" width="18" height="16" rx="2"/><line x1="3" y1="11" x2="21" y2="11"/></svg>Schedule maintenance</button>
+              <button class="quick-action admin-only-action" type="button" onclick="openNewStatusPage()"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="9"/><line x1="3" y1="12" x2="21" y2="12"/></svg>Create status page</button>
+              <button class="quick-action" type="button" onclick="openManagementTab('webhooks')"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 8a6 6 0 0 0-12 0c0 7-3 7-3 9h18c0-2-3-2-3-9"/></svg>Configure alerts</button>
+            </div></div>
+          </section>
+        </div>
+
+        <div class="admin-overview-grid">
+          <section class="ops-card">
+            <div class="ops-card-head"><div class="ops-card-title">Incident activity</div><button class="btn" type="button" onclick="openManagementTab('incidents')">View incidents</button></div>
+            <div class="ops-card-body" id="adminIncidentSummary"><div class="ops-empty">Loading incident activity…</div></div>
+          </section>
+          <section class="ops-card">
+            <div class="ops-card-head"><div class="ops-card-title">Maintenance schedule</div><button class="btn" type="button" onclick="openManagementTab('maint')">View calendar</button></div>
+            <div class="ops-card-body" id="adminMaintenanceSummary"><div class="ops-empty">Loading maintenance…</div></div>
+          </section>
+        </div>
+
+        <section class="ops-card admin-resources" id="statusResourceCenter">
+          <div class="ops-card-head admin-resources-intro"><div><div class="ops-card-title">Operational resources</div><div class="ops-card-meta">Direct paths to public status, reporting, integrations, and troubleshooting.</div></div></div>
+          <div class="admin-resource-grid" id="adminResourceGrid">
+            <a class="admin-resource" href="<%- APP_HOME_URL %>"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/></svg><span><span class="admin-resource-title">Public status</span><span class="admin-resource-desc">Open the customer-facing master view</span></span></a>
+            <button class="admin-resource" type="button" onclick="openManagementTab('groups')"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="9"/><path d="M3 12h18"/></svg><span><span class="admin-resource-title">Status pages</span><span class="admin-resource-desc">Branding, domains, service visibility</span></span></button>
+            <button class="admin-resource admin-only-action" type="button" onclick="openLogs()"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><line x1="8" y1="13" x2="16" y2="13"/></svg><span><span class="admin-resource-title">Live check logs</span><span class="admin-resource-desc">Troubleshoot polling and state changes</span></span></button>
+            <button class="admin-resource admin-only-action" type="button" onclick="exportServers()"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg><span><span class="admin-resource-title">Export configuration</span><span class="admin-resource-desc">Download a portable server inventory</span></span></button>
+            <button class="admin-resource admin-only-action" type="button" onclick="openManagementTab('apikeys')"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="7.5" cy="15.5" r="5.5"/><path d="m21 2-9.6 9.6"/></svg><span><span class="admin-resource-title">API access</span><span class="admin-resource-desc">Keys for external monitoring workflows</span></span></button>
+            <a class="admin-resource" href="https://github.com/X4Applegate/status-server#readme" target="_blank" rel="noopener"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"/><path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"/></svg><span><span class="admin-resource-title">Operator guide</span><span class="admin-resource-desc">Setup, badges, checks, and integrations</span></span></a>
+          </div>
+        </section>
+      </div>
+
+      <section class="admin-service-workspace" id="adminServiceWorkspace" hidden aria-labelledby="adminServiceWorkspaceTitle">
+        <div class="admin-service-toolbar">
+          <div class="admin-service-toolbar-copy">
+            <div class="admin-service-toolbar-title" id="adminServiceWorkspaceTitle">Service observability</div>
+            <div class="admin-service-toolbar-subtitle">Availability, checks, heartbeat, response time, and incident history.</div>
+          </div>
+          <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
+            <button class="btn" type="button" onclick="showAdminOverview()">Back to overview</button>
+            <button class="btn" type="button" onclick="openManagementTab('servers')">Manage services</button>
+          </div>
+        </div>
+        <div class="content" id="contentArea">
+          <div id="mainArea">
+            <div class="empty-main">Select a service to view details</div>
+          </div>
+        </div>
+      </section>
+    </main>
+
     <!-- Sidebar -->
     <div class="sidebar">
       <div class="sidebar-stats">
@@ -1089,12 +1336,6 @@ body{font-family:var(--sans);background:var(--bg);color:var(--text);min-height:1
       <div class="sidebar-body" id="sidebarList"></div>
     </div>
 
-    <!-- Content -->
-    <div class="content" id="contentArea">
-      <div id="mainArea">
-        <div class="empty-main">Select a server to view details</div>
-      </div>
-    </div>
   </div>
 
   <!-- Map view — shown when map toggle is active -->
@@ -1115,6 +1356,193 @@ body{font-family:var(--sans);background:var(--bg);color:var(--text);min-height:1
 // ── Server detail view state ─────────────────────────────────────────────────
 let selectedServerId = null;
 let liveServers      = []; // latest snapshot from SSE / cache
+let overviewIncidents = null;
+let overviewMaintenance = null;
+
+function toggleAdminTheme(){
+  if (window.EnterpriseTheme && typeof window.EnterpriseTheme.toggle === "function") {
+    window.EnterpriseTheme.toggle();
+  } else {
+    const next = document.documentElement.dataset.theme === "light" ? "dark" : "light";
+    document.documentElement.dataset.theme = next;
+    try { localStorage.setItem("status-page-theme", next); } catch (_) {}
+  }
+  const nextLabel = document.documentElement.dataset.theme === "light" ? "dark" : "light";
+  const control = document.getElementById("adminThemeToggle");
+  if (control) {
+    control.title = `Switch to ${nextLabel} mode`;
+    control.setAttribute("aria-label", `Switch to ${nextLabel} mode`);
+  }
+}
+
+function setAdminNavActive(button){
+  document.querySelectorAll("#adminPrimaryNav .admin-nav-item").forEach(item => item.classList.remove("active"));
+  if (button) button.classList.add("active");
+}
+
+function showAdminOverview(){
+  if (activeDrawer) closeAll();
+  setAdminNavActive(document.querySelector('[data-nav-view="overview"]'));
+  const overview = document.getElementById("adminOverview");
+  const serviceWorkspace = document.getElementById("adminServiceWorkspace");
+  if (overview) overview.hidden = false;
+  if (serviceWorkspace) serviceWorkspace.hidden = true;
+  document.getElementById("adminOverview")?.scrollIntoView({ block:"start" });
+}
+
+async function showAdminService(id = selectedServerId || liveServers[0]?.id){
+  if (!sessionRole) { window.location.href = "/login"; return; }
+  if (activeDrawer) closeAll();
+  setAdminNavActive(document.querySelector('[data-nav-view="services"]'));
+  const overview = document.getElementById("adminOverview");
+  const serviceWorkspace = document.getElementById("adminServiceWorkspace");
+  if (overview) overview.hidden = true;
+  if (serviceWorkspace) serviceWorkspace.hidden = false;
+  if (id !== undefined && id !== null) await selectServer(id);
+  serviceWorkspace?.scrollIntoView({ block:"start" });
+}
+
+async function openManagementTab(tab, button){
+  if (!sessionRole) { window.location.href = "/login"; return; }
+  setAdminNavActive(button || null);
+  openDrawer("adminDrawer");
+  await switchTab(tab);
+}
+
+async function openNewService(){
+  await openManagementTab("servers");
+  showServerForm(null);
+}
+
+async function openServiceEditor(id){
+  const match = liveServers.find(server => String(server.id) === String(id));
+  if (match) await showAdminService(match.id);
+  else toast("Service is no longer available", "error");
+}
+
+async function openNewMaintenance(){
+  await openManagementTab("maint");
+  showMaintForm(null);
+}
+
+async function openNewStatusPage(){
+  if (!isAdmin()) { toast("Only admins can create status pages", "error"); return; }
+  await openManagementTab("groups");
+  showGroupForm(null);
+}
+
+function adminFormatDate(value){
+  if (!value) return "Not scheduled";
+  const date = new Date(value);
+  if (!Number.isFinite(date.getTime())) return "Not scheduled";
+  return date.toLocaleString(undefined, { month:"short", day:"numeric", hour:"numeric", minute:"2-digit" });
+}
+
+function renderAdminOverview(servers = liveServers){
+  const list = Array.isArray(servers) ? servers : [];
+  const up = list.filter(server => server.overall === "up").length;
+  const down = list.filter(server => server.overall === "down").length;
+  const degraded = list.filter(server => server.overall === "degraded").length;
+  const pending = list.filter(server => !server.overall || server.overall === "pending").length;
+  const responseSamples = list.flatMap(server => (server.checks || [])
+    .map(check => check.response_ms)
+    .filter(value => value !== null && value !== undefined && value !== "" && Number.isFinite(Number(value)) && Number(value) >= 0)
+    .map(Number));
+  const averageResponse = responseSamples.length
+    ? Math.round(responseSamples.reduce((sum, value) => sum + value, 0) / responseSamples.length)
+    : null;
+
+  const attention = [];
+  list.forEach(server => {
+    if (server.maintenance) return;
+    const status = server.overall || "pending";
+    if (status === "down" || status === "degraded" || status === "pending") {
+      attention.push({ server, status, detail: status === "down" ? "One or more configured checks are failing" : status === "degraded" ? "At least one configured check needs attention" : "Waiting for the first successful polling cycle" });
+      return;
+    }
+    const cert = (server.checks || []).map(check => check.cert).find(value => value && Number.isFinite(Number(value.days_left)) && Number(value.days_left) < 30);
+    if (cert) attention.push({ server, status:"certificate", detail:`TLS certificate expires in ${Number(cert.days_left)} day${Number(cert.days_left) === 1 ? "" : "s"}` });
+  });
+  attention.sort((a,b) => ({down:0,degraded:1,certificate:2,pending:3}[a.status] ?? 4) - ({down:0,degraded:1,certificate:2,pending:3}[b.status] ?? 4));
+  const issueCount = attention.length;
+
+  const healthCard = document.getElementById("adminHealthCard");
+  const headline = document.getElementById("adminHealthHeadline");
+  const copy = document.getElementById("adminHealthCopy");
+  const state = document.getElementById("adminHealthState");
+  if (healthCard) healthCard.className = `admin-health-card${down ? " has-outage" : issueCount ? " has-issues" : ""}`;
+  if (headline) headline.textContent = !list.length ? "No monitored services yet" : down ? `${down} service${down === 1 ? "" : "s"} currently offline` : degraded ? `${degraded} service${degraded === 1 ? "" : "s"} running degraded` : pending ? `${pending} service${pending === 1 ? " is" : "s are"} awaiting a check` : issueCount ? `${issueCount} certificate${issueCount === 1 ? " needs" : "s need"} attention` : "All monitored services are operational";
+  if (copy) copy.textContent = !list.length ? "Add your first service to begin monitoring availability, latency, and certificates." : issueCount ? `${up} of ${list.length} services are operational. Review the attention queue below for the fastest path to resolution.` : `Every monitored service and certificate is currently healthy. Live checks continue in the background.`;
+  if (state) state.textContent = down ? "Active outage" : degraded ? "Degraded performance" : pending ? "Checks in progress" : issueCount ? "Action recommended" : list.length ? "Fully operational" : "Setup required";
+
+  const setText = (id, value) => { const element = document.getElementById(id); if (element) element.textContent = value; };
+  setText("adminMetricTotal", list.length);
+  setText("adminMetricUp", up);
+  setText("adminMetricIssues", issueCount);
+  setText("adminMetricResponse", averageResponse === null ? "—" : `${averageResponse}ms`);
+  setText("navServiceCount", list.length);
+  setText("navIssueCount", issueCount);
+
+  setText("attentionMeta", `${attention.length} item${attention.length === 1 ? "" : "s"}`);
+  const attentionHost = document.getElementById("adminAttentionList");
+  if (attentionHost) {
+    attentionHost.innerHTML = attention.length ? attention.slice(0,8).map(item => {
+      const label = item.status === "down" ? "Offline" : item.status === "degraded" ? "Degraded" : item.status === "certificate" ? "Certificate" : "Pending";
+      return `<button class="attention-item" type="button" data-service-id="${_escHtml(item.server.id)}" onclick="openServiceEditor(this.dataset.serviceId)"><span class="attention-dot ${item.status}"></span><span><span class="attention-name">${_escHtml(item.server.name)}</span><span class="attention-detail">${_escHtml(item.detail)}</span></span><span class="attention-state">${label}</span></button>`;
+    }).join("") : `<div class="ops-empty"><span class="ops-empty-icon"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="20 6 9 17 4 12"/></svg></span><strong style="color:var(--text-hi)">Nothing needs attention</strong><span>All current checks and certificates are in a healthy state.</span></div>`;
+  }
+
+  renderAdminOverviewActivity();
+}
+
+function renderAdminOverviewActivity(){
+  const incidentHost = document.getElementById("adminIncidentSummary");
+  if (!Array.isArray(overviewIncidents)) {
+    if (incidentHost) incidentHost.innerHTML = `<div class="ops-empty"><strong style="color:var(--text-hi)">Incident data unavailable</strong><span>The console could not verify incident activity. Try again shortly.</span></div>`;
+    setTextIfPresent("navIncidentCount", "!");
+  } else {
+    const open = overviewIncidents.filter(incident => !incident.ended_at).slice(0,4);
+    if (incidentHost) incidentHost.innerHTML = open.length ? open.map(incident => `<button class="ops-list-row" type="button" onclick="openManagementTab('incidents')"><span class="ops-list-icon" style="color:var(--red)"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M10.3 2.9 1.8 17a2 2 0 0 0 1.7 3h17a2 2 0 0 0 1.7-3L13.7 2.9a2 2 0 0 0-3.4 0Z"/></svg></span><span class="ops-list-copy"><span class="ops-list-title">${_escHtml(incident.title || `${incident.server_name} incident`)}</span><span class="ops-list-meta">${_escHtml(incident.server_name || "Service")} · ${_escHtml(incident.status || "investigating")} · ${adminFormatDate(incident.started_at)}</span></span></button>`).join("") : `<div class="ops-empty"><span class="ops-empty-icon"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="20 6 9 17 4 12"/></svg></span><strong style="color:var(--text-hi)">No active incidents</strong><span>Customer communications are clear.</span></div>`;
+    setTextIfPresent("navIncidentCount", open.length);
+  }
+
+  const now = Date.now();
+  const maintenanceHost = document.getElementById("adminMaintenanceSummary");
+  if (!Array.isArray(overviewMaintenance)) {
+    if (maintenanceHost) maintenanceHost.innerHTML = `<div class="ops-empty"><strong style="color:var(--text-hi)">Maintenance data unavailable</strong><span>The console could not verify the schedule. Try again shortly.</span></div>`;
+    return;
+  }
+  const groupedWindows = new Map();
+  overviewMaintenance.forEach(window => {
+    const key = [window.title || "Maintenance", window.notes || "", window.start_time || "", window.end_time || ""].join("\u001f");
+    const existing = groupedWindows.get(key) || { ...window, serviceNames:[] };
+    if (window.server_name && !existing.serviceNames.includes(window.server_name)) existing.serviceNames.push(window.server_name);
+    groupedWindows.set(key, existing);
+  });
+  const schedule = [...groupedWindows.values()].filter(window => new Date(window.end_time).getTime() > now).sort((a,b) => new Date(a.start_time) - new Date(b.start_time)).slice(0,4);
+  if (maintenanceHost) maintenanceHost.innerHTML = schedule.length ? schedule.map(window => {
+    const active = new Date(window.start_time).getTime() <= now;
+    const affected = window.serviceNames.length === 1 ? window.serviceNames[0] : `${window.serviceNames.length || 1} affected services`;
+    return `<button class="ops-list-row" type="button" onclick="openManagementTab('maint')"><span class="ops-list-icon" style="color:var(--orange)"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="5" width="18" height="16" rx="2"/><line x1="3" y1="11" x2="21" y2="11"/></svg></span><span class="ops-list-copy"><span class="ops-list-title">${_escHtml(window.title)}</span><span class="ops-list-meta">${active ? "In progress" : adminFormatDate(window.start_time)} · ${_escHtml(affected)}</span></span></button>`;
+  }).join("") : `<div class="ops-empty"><span class="ops-empty-icon" style="color:var(--text-2);background:var(--surface2)"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="5" width="18" height="16" rx="2"/><line x1="3" y1="11" x2="21" y2="11"/></svg></span><strong style="color:var(--text-hi)">No upcoming maintenance</strong><span>The operations calendar is clear.</span></div>`;
+}
+
+function setTextIfPresent(id, value){
+  const element = document.getElementById(id);
+  if (element) element.textContent = value;
+}
+
+async function hydrateAdminOverview(){
+  const [incidentsResult, maintenanceResult] = await Promise.allSettled([
+    fetch("/api/admin/incidents").then(response => { if (!response.ok) throw new Error(`Incident request failed (${response.status})`); return response.json(); }),
+    fetch("/api/admin/maintenance").then(response => { if (!response.ok) throw new Error(`Maintenance request failed (${response.status})`); return response.json(); })
+  ]);
+  overviewIncidents = incidentsResult.status === "fulfilled" && Array.isArray(incidentsResult.value) ? incidentsResult.value : null;
+  overviewMaintenance = maintenanceResult.status === "fulfilled" && Array.isArray(maintenanceResult.value) ? maintenanceResult.value : null;
+  renderAdminOverview(liveServers);
+}
+
+setInterval(() => { if (sessionRole) hydrateAdminOverview(); }, 60000);
 
 // -- Helpers
 function fmtDur(secs){
@@ -1161,14 +1589,6 @@ function hideHbTip(){
   const t = document.getElementById("hbTip");
   if (t) t.remove();
 }
-function uptimeCls(pct){
-  if (pct === null || pct === undefined) return "";
-  if (pct >= 99) return "great";
-  if (pct >= 95) return "good";
-  if (pct >= 80) return "warn";
-  return "bad";
-}
-
 // ── Clock ─────────────────────────────────────────────────────────────────────
 setInterval(() => {
   document.getElementById("clock").textContent = new Date().toLocaleTimeString("en-US", {hour12:false});
@@ -1207,8 +1627,10 @@ function isViewer(){ return sessionRole === "viewer"; }
         badge.textContent = displayName;
       }
       applyRoleVisibility();
+      if (isAdmin()) connectLogs();
       // Populate the topbar dashboard quick-nav with the user's accessible dashboards
       renderTopbarDashboards();
+      hydrateAdminOverview();
       // If the page was opened with ?edit=<server_id>, auto-open the admin drawer + server form.
       // This powers the inline Edit buttons on the status page sidebar.
       const editId   = new URLSearchParams(window.location.search).get("edit");
@@ -1253,11 +1675,13 @@ function isViewer(){ return sessionRole === "viewer"; }
 // Viewers can use Servers, Omada, Webhooks, and Groups (scoped to their own dashboards).
 // Users tab stays admin-only.
 function applyRoleVisibility(){
+  document.body.classList.toggle("admin-role", isAdmin());
   if (isAdmin()) return;  // admins see everything; nothing to hide
   ["tabUsers", "tabSettings", "tabAudit", "tabApiKeys"].forEach(id => {
     const el = document.getElementById(id);
     if (el) el.style.display = "none";
   });
+  document.querySelectorAll(".admin-only-nav,.admin-only-action").forEach(el => { el.style.display = "none"; });
 }
 
 // Fetch the user's accessible dashboards and render them as clickable buttons in the topbar.
@@ -1296,6 +1720,7 @@ function toggleDashMenu(e){
   const isOpen = popup.classList.contains("open");
   popup.classList.toggle("open", !isOpen);
   btn.classList.toggle("open", !isOpen);
+  btn.setAttribute("aria-expanded", String(!isOpen));
 }
 function toggleTopbarMenu(e){
   e.stopPropagation();
@@ -1304,20 +1729,52 @@ function toggleTopbarMenu(e){
   const isOpen = right.classList.contains("menu-open");
   right.classList.toggle("menu-open", !isOpen);
   btn.classList.toggle("open", !isOpen);
+  btn.setAttribute("aria-expanded", String(!isOpen));
+  btn.setAttribute("aria-label", !isOpen ? "Close menu" : "Open menu");
 }
 document.addEventListener("click", (e) => {
   // Close dashboards dropdown
   const popup = document.getElementById("topbarDashPopup");
   const dbtn  = document.getElementById("topbarDashBtn");
   if (popup) popup.classList.remove("open");
-  if (dbtn)  dbtn.classList.remove("open");
+  if (dbtn)  { dbtn.classList.remove("open"); dbtn.setAttribute("aria-expanded", "false"); }
   // Close hamburger menu when clicking outside it
   const right = document.getElementById("topbarRight");
   const hbtn  = document.getElementById("topbarHamburger");
   if (right && hbtn && !right.contains(e.target) && !hbtn.contains(e.target)) {
     right.classList.remove("menu-open");
     hbtn.classList.remove("open");
+    hbtn.setAttribute("aria-expanded", "false");
+    hbtn.setAttribute("aria-label", "Open menu");
   }
+});
+
+document.addEventListener("keydown", event => {
+  const activeLayer = document.querySelector(".confirm-overlay.open,.modal-overlay.open,.drawer.open");
+  if (event.key === "Escape") {
+    if (document.getElementById("confirmDlg")?.classList.contains("open")) closeConfirm();
+    else if (document.getElementById("profileModal")?.classList.contains("open")) closeProfile();
+    else if (document.getElementById("changePwdModal")?.classList.contains("open")) closeChangePassword();
+    else if (activeDrawer) closeDrawer(activeDrawer);
+    else {
+      document.getElementById("topbarDashPopup")?.classList.remove("open");
+      document.getElementById("topbarDashBtn")?.classList.remove("open");
+      document.getElementById("topbarDashBtn")?.setAttribute("aria-expanded", "false");
+      document.getElementById("topbarRight")?.classList.remove("menu-open");
+      document.getElementById("topbarHamburger")?.classList.remove("open");
+      document.getElementById("topbarHamburger")?.setAttribute("aria-expanded", "false");
+    }
+    event.preventDefault();
+    return;
+  }
+  if (event.key !== "Tab" || !activeLayer) return;
+  const focusable = [...activeLayer.querySelectorAll('button:not([disabled]),[href],input:not([disabled]),select:not([disabled]),textarea:not([disabled]),[tabindex]:not([tabindex="-1"])')]
+    .filter(element => element.getClientRects().length > 0);
+  if (!focusable.length) return;
+  const first = focusable[0];
+  const last = focusable[focusable.length - 1];
+  if (event.shiftKey && document.activeElement === first) { last.focus(); event.preventDefault(); }
+  else if (!event.shiftKey && document.activeElement === last) { first.focus(); event.preventDefault(); }
 });
 
 // Auto-open the admin drawer with a specific server pre-filled for editing.
@@ -1388,6 +1845,24 @@ async function doLogout(){
 }
 
 // ── Change Password ───────────────────────────────────────────────────────────
+let _modalReturnFocus = null;
+function openModalLayer(id){
+  const modal = document.getElementById(id);
+  if (!modal) return;
+  _modalReturnFocus = document.activeElement;
+  modal.classList.add("open");
+  modal.setAttribute("aria-hidden", "false");
+  setTimeout(() => modal.querySelector("input,select,textarea,button,[href]")?.focus(), 30);
+}
+function closeModalLayer(id){
+  const modal = document.getElementById(id);
+  modal?.classList.remove("open");
+  modal?.setAttribute("aria-hidden", "true");
+  const returnTarget = _modalReturnFocus;
+  _modalReturnFocus = null;
+  if (returnTarget && document.contains(returnTarget)) setTimeout(() => returnTarget.focus(), 0);
+}
+
 async function openProfile(){
   try {
     const r = await fetch("/api/me");
@@ -1397,11 +1872,11 @@ async function openProfile(){
     document.getElementById("profEmail").value     = d.email      || "";
   } catch(e) {}
   document.getElementById("profErr").textContent = "";
-  document.getElementById("profileModal").classList.add("open");
+  openModalLayer("profileModal");
   setTimeout(() => document.getElementById("profFirstName").focus(), 50);
 }
 function closeProfile(){
-  document.getElementById("profileModal").classList.remove("open");
+  closeModalLayer("profileModal");
 }
 async function submitProfile(){
   const first_name = document.getElementById("profFirstName").value.trim();
@@ -1426,12 +1901,12 @@ async function submitProfile(){
 }
 
 function openChangePassword(){
-  document.getElementById("changePwdModal").classList.add("open");
+  openModalLayer("changePwdModal");
   ["pwdCurrent","pwdNew","pwdConfirm"].forEach(id => document.getElementById(id).value = "");
   document.getElementById("pwdErr").textContent = "";
 }
 function closeChangePassword(){
-  document.getElementById("changePwdModal").classList.remove("open");
+  closeModalLayer("changePwdModal");
 }
 async function submitChangePassword(){
   const cur = document.getElementById("pwdCurrent").value;
@@ -1456,14 +1931,24 @@ async function submitChangePassword(){
 // ── Drawer management ─────────────────────────────────────────────────────────
 let activeDrawer = null;
 let _panelScrollPoll = null;
+let _drawerReturnFocus = null;
 // Elements on the background page that could steal scroll events
 const _bgScrollEls = () => document.querySelectorAll(".main, .sidebar-scroll, #mainArea");
 
 function openDrawer(id){
-  if (activeDrawer && activeDrawer !== id) document.getElementById(activeDrawer).classList.remove("open");
+  if (!activeDrawer) _drawerReturnFocus = document.activeElement;
+  if (activeDrawer && activeDrawer !== id) {
+    const previous = document.getElementById(activeDrawer);
+    previous?.classList.remove("open");
+    previous?.setAttribute("aria-hidden", "true");
+  }
   activeDrawer = id;
-  document.getElementById(id).classList.add("open");
+  const drawer = document.getElementById(id);
+  if (!drawer) return;
+  drawer.classList.add("open");
+  drawer.setAttribute("aria-hidden", "false");
   document.getElementById("sharedOverlay").classList.add("open");
+  document.getElementById("sharedOverlay").setAttribute("aria-hidden", "false");
   document.body.style.overflow = "hidden";
   // Freeze background scrollable areas so wheel events go straight to the drawer panel
   _bgScrollEls().forEach(el => el.style.overflow = "hidden");
@@ -1473,17 +1958,31 @@ function openDrawer(id){
   // Polling fallback: keep buttons in sync every 600ms while drawer is open
   if (_panelScrollPoll) clearInterval(_panelScrollPoll);
   _panelScrollPoll = setInterval(updatePanelScrollBtns, 600);
+  setTimeout(() => drawer.querySelector(".drawer-close,button,[href],input,select,textarea")?.focus(), 30);
 }
 function closeDrawer(id){
-  document.getElementById(id)?.classList.remove("open");
+  const drawer = document.getElementById(id);
+  drawer?.classList.remove("open");
+  drawer?.setAttribute("aria-hidden", "true");
   document.getElementById("sharedOverlay").classList.remove("open");
+  document.getElementById("sharedOverlay").setAttribute("aria-hidden", "true");
   document.body.style.overflow = "";
   // Restore background scroll
   _bgScrollEls().forEach(el => el.style.overflow = "");
   activeDrawer = null;
   if (_panelScrollPoll) { clearInterval(_panelScrollPoll); _panelScrollPoll = null; }
+  if (id === "adminDrawer") restoreAdminWorkspaceNav();
+  const returnTarget = _drawerReturnFocus;
+  _drawerReturnFocus = null;
+  if (returnTarget && document.contains(returnTarget)) setTimeout(() => returnTarget.focus(), 0);
 }
 function closeAll(){ if (activeDrawer) closeDrawer(activeDrawer); }
+
+function restoreAdminWorkspaceNav(){
+  const serviceWorkspace = document.getElementById("adminServiceWorkspace");
+  const selector = serviceWorkspace && !serviceWorkspace.hidden ? '[data-nav-view="services"]' : '[data-nav-view="overview"]';
+  setAdminNavActive(document.querySelector(selector));
+}
 
 // ── Log Drawer ────────────────────────────────────────────────────────────────
 let logEntries = [], logFilter = "all", autoScroll = true, unread = 0;
@@ -1546,6 +2045,7 @@ function renderLogs(){
 function renderServers(servers){
   liveServers = servers;
   cacheSet("servers", servers);
+  renderAdminOverview(servers);
 
   // Sidebar list
   renderSidebarList(servers);
@@ -1643,18 +2143,19 @@ async function selectServer(id){
 
   // 1) Render from cache instantly
   const cached = cacheGet("detail-" + id);
-  if (cached) renderDetail(server, cached.uptime, cached.heartbeat, cached.incidents);
+  if (cached) renderDetail(server, cached.uptime, cached.heartbeat, cached.incidents, cached.responseSeries);
   else        renderDetailSkeleton(server);
 
   // 2) Fetch fresh in parallel
-  const [uptime, heartbeat, incidents] = await Promise.all([
+  const [uptime, heartbeat, incidents, responseSeries] = await Promise.all([
     fetch(`/api/public/uptime/${id}`).then(r=>r.json()).catch(()=>({})),
     fetch(`/api/public/heartbeat/${id}`).then(r=>r.json()).catch(()=>[]),
     fetch(`/api/public/incidents/${id}`).then(r=>r.json()).catch(()=>[]),
+    fetch(`/api/public/response/${id}`).then(r=>r.json()).catch(()=>[]),
   ]);
   if (selectedServerId !== id) return; // user moved on
-  renderDetail(server, uptime, heartbeat, incidents);
-  cacheSet("detail-" + id, { uptime, heartbeat, incidents });
+  renderDetail(server, uptime, heartbeat, incidents, responseSeries);
+  cacheSet("detail-" + id, { uptime, heartbeat, incidents, responseSeries });
 }
 
 function renderDetailSkeleton(s){
@@ -1673,10 +2174,11 @@ function renderDetailSkeleton(s){
   `;
 }
 
-function renderDetail(s, uptime, heartbeat, incidents){
+function renderDetail(s, uptime, heartbeat, incidents, responseSeries){
   uptime    = uptime    || {};
   heartbeat = heartbeat || [];
   incidents = incidents || [];
+  responseSeries = Array.isArray(responseSeries) ? responseSeries : [];
   const statusLabel = s.overall==="up"?"Online":s.overall==="down"?"Offline":s.overall==="degraded"?"Degraded":"Pending";
   const tags = (s.tags||[]).map(t=>`<span class="detail-tag">${t}</span>`).join("");
 
@@ -1687,8 +2189,8 @@ function renderDetail(s, uptime, heartbeat, incidents){
   ].map(u => `
     <div class="uptime-card">
       <div class="uptime-label">${u.label}</div>
-      <div class="uptime-pct ${uptimeCls(u.val)}">${u.val !== null && u.val !== undefined ? u.val+"%" : "—"}</div>
-      <div class="uptime-sub">${u.val >= 99 ? "Excellent" : u.val >= 95 ? "Good" : (u.val !== null && u.val !== undefined) ? "Needs attention" : "No data yet"}</div>
+      <div class="uptime-pct">${u.val !== null && u.val !== undefined ? u.val+"%" : "—"}</div>
+      <div class="uptime-sub">${u.val !== null && u.val !== undefined ? "Observed availability" : "No data yet"}</div>
     </div>`).join("");
 
   const hbPad  = Math.max(0, 180 - heartbeat.length);
@@ -1784,7 +2286,7 @@ function renderDetail(s, uptime, heartbeat, incidents){
         <span style="font-size:11px;color:var(--text-2)">Last 24h (avg ms)</span>
       </div>
       <div class="dv-section-body" style="padding:16px 20px">
-        ${heartbeat.filter(h => h.response_ms !== null && h.response_ms !== undefined).length > 0
+        ${responseSeries.some(point => point.avg_ms !== null && point.avg_ms !== undefined)
           ? `<div class="chart-wrap"><canvas id="responseChart"></canvas></div>`
           : `<div class="chart-empty">No response time data yet — check back after a few cycles</div>`
         }
@@ -1802,7 +2304,9 @@ function renderDetail(s, uptime, heartbeat, incidents){
     </div>
   `;
 
-  const chartData = heartbeat.filter(h => h.response_ms !== null && h.response_ms !== undefined);
+  const chartData = responseSeries
+    .filter(point => point.avg_ms !== null && point.avg_ms !== undefined && Number.isFinite(Number(point.avg_ms)))
+    .map(point => ({ response_ms:Number(point.avg_ms), checked_at:point.hour }));
   if (chartData.length > 0) drawChart(chartData);
 }
 
@@ -1890,20 +2394,25 @@ let _adminMap = null, _adminMarkers = [], _adminMapActive = false;
   es.onerror   = () => { es.close(); setTimeout(connectStatus, 5000); };
 })();
 
-// SSE - logs (admin only — /api/log-events returns 403 for viewers)
-if (isAdmin()) {
-  (function connectLogs(){
-    const es = new EventSource("/api/log-events");
-    es.onmessage = e => addLog(JSON.parse(e.data));
-    es.onerror   = () => { es.close(); setTimeout(connectLogs, 5000); };
-  })();
+// SSE - logs (admin only — connect after the asynchronous session check resolves)
+let logEventSource = null;
+function connectLogs(){
+  if (!isAdmin() || logEventSource) return;
+  const es = new EventSource("/api/log-events");
+  logEventSource = es;
+  es.onmessage = event => addLog(JSON.parse(event.data));
+  es.onerror = () => {
+    es.close();
+    logEventSource = null;
+    if (isAdmin()) setTimeout(connectLogs, 5000);
+  };
 }
 
 async function triggerRefresh(){
   const b = document.getElementById("rfBtn");
-  b.classList.add("spinning"); b.disabled = true;
+  if (b) { b.classList.add("spinning"); b.disabled = true; }
   try { await fetch("/api/refresh", {method:"POST"}); } catch(e){}
-  setTimeout(() => { b.classList.remove("spinning"); b.disabled = false; }, 900);
+  setTimeout(() => { if (b) { b.classList.remove("spinning"); b.disabled = false; } }, 900);
 }
 
 // ── Admin Panel ───────────────────────────────────────────────────────────────
@@ -2661,11 +3170,11 @@ async function submitForm(){
 function askDel(id, name){
   pendDel = id;
   document.getElementById("confirmMsg").textContent = `"${name}" will be removed.`;
-  document.getElementById("confirmDlg").classList.add("open");
+  openModalLayer("confirmDlg");
   document.querySelector("#confirmDlg .btn-danger").onclick = doDelete;
 }
 function closeConfirm(){
-  document.getElementById("confirmDlg").classList.remove("open");
+  closeModalLayer("confirmDlg");
   pendDel = null; pendDelUser = null; pendDelGroup = null; pendDelOmada = null;
 }
 async function doDelete(){
@@ -2846,7 +3355,7 @@ function askDelUser(id){
   pendDelUser = id;
   const u = _userStore[id];
   document.getElementById("confirmMsg").textContent = `"${u?.username}" will be permanently deleted.`;
-  document.getElementById("confirmDlg").classList.add("open");
+  openModalLayer("confirmDlg");
   document.querySelector("#confirmDlg .btn-danger").onclick = doDeleteUser;
 }
 async function doDeleteUser(){
@@ -3366,7 +3875,7 @@ function askDelWebhook(id){
   pendDelWebhook = id;
   const h = _webhookStore[id];
   document.getElementById("confirmMsg").textContent = `"${h?.name}" will be removed.`;
-  document.getElementById("confirmDlg").classList.add("open");
+  openModalLayer("confirmDlg");
   document.querySelector("#confirmDlg .btn-danger").onclick = doDeleteWebhook;
 }
 async function doDeleteWebhook(){
@@ -3625,7 +4134,7 @@ function onPublicToggle(){
 function askDelGroup(id, name){
   pendDelGroup = id;
   document.getElementById("confirmMsg").textContent = `Group "${name}" will be removed. Servers in it will become ungrouped.`;
-  document.getElementById("confirmDlg").classList.add("open");
+  openModalLayer("confirmDlg");
   document.querySelector("#confirmDlg .btn-danger").onclick = doDeleteGroup;
 }
 
@@ -4031,7 +4540,7 @@ async function submitOmadaForm(){
 function askDelOmada(id, name){
   pendDelOmada = id;
   document.getElementById("confirmMsg").textContent = `Omada controller "${name}" will be removed. Servers using it will fail their checks until reconfigured.`;
-  document.getElementById("confirmDlg").classList.add("open");
+  openModalLayer("confirmDlg");
   document.querySelector("#confirmDlg .btn-danger").onclick = doDeleteOmada;
 }
 
@@ -4599,7 +5108,7 @@ function renderAdminIncidentList(list){
         <div class="admin-checks-label">${meta}</div>
       </div>
       <div class="admin-row-actions" onclick="event.stopPropagation()">
-        <button class="btn btn-sm" onclick="showIncidentPanel(${inc.id})">Manage</button>
+        <button class="btn btn-sm" onclick="showIncidentPanel(${inc.id})">${isAdmin() ? "Manage" : "View"}</button>
       </div>
     </div>`;
   }).join("");
@@ -4634,6 +5143,8 @@ function showIncidentPanel(id){
   const impact = inc.impact || "minor";
   const isPublic = !!inc.public;
   const isOpen = !inc.ended_at;
+  const canMutate = isAdmin();
+  const readOnlyAttr = canMutate ? "" : " disabled";
 
   const updatesHtml = updates.length ? updates.map(u => `
     <div style="padding:12px 14px;border:1px solid var(--border);border-radius:8px;margin-bottom:8px;background:var(--surface)">
@@ -4641,55 +5152,13 @@ function showIncidentPanel(id){
         <span style="font-size:10px;font-weight:700;padding:2px 7px;border-radius:8px;background:var(--surface2);color:${_incStatusColor(u.status)};letter-spacing:.04em">${u.status.toUpperCase()}</span>
         <span style="font-size:11px;color:var(--text-2);font-family:var(--mono)">${_incFmtDate(u.created_at)}</span>
         <span style="flex:1"></span>
-        <button class="btn btn-sm btn-danger" style="font-size:10px;padding:2px 8px" onclick="askDelIncidentUpdate(${u.id}, ${inc.id})" title="Delete this update">✕</button>
+        ${canMutate ? `<button class="btn btn-sm btn-danger" style="font-size:10px;padding:2px 8px" onclick="askDelIncidentUpdate(${u.id}, ${inc.id})" title="Delete this update" aria-label="Delete incident update">✕</button>` : ""}
       </div>
       <div style="font-size:13px;color:var(--text-hi);white-space:pre-wrap;line-height:1.5">${_escHtml(u.message)}</div>
     </div>
   `).join("") : `<div style="padding:20px;text-align:center;color:var(--text-2);font-size:13px">No updates yet</div>`;
 
-  const el = document.getElementById("adminPanelBody");
-  el.innerHTML = `
-    <div style="padding:20px 24px;max-width:720px;margin:0 auto">
-      <a href="#" onclick="event.preventDefault();switchTab('incidents')" style="font-size:12px;color:var(--text-2);text-decoration:none;display:inline-flex;align-items:center;gap:4px;margin-bottom:16px">
-        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="15 18 9 12 15 6"/></svg>
-        Back to incidents
-      </a>
-      <div style="margin-bottom:24px">
-        <div style="font-size:11px;color:var(--text-2);text-transform:uppercase;letter-spacing:.08em;margin-bottom:4px">${_escHtml(inc.server_name)}</div>
-        <h2 style="font-size:20px;font-weight:700;color:var(--text-white);letter-spacing:-.01em">${_escHtml(inc.title || defaultTitle)}</h2>
-        <div style="font-size:12px;color:var(--text-2);margin-top:6px">
-          Started ${_incFmtDate(inc.started_at)} · ${isOpen ? '<span style="color:var(--red);font-weight:600">Ongoing</span>' : `Resolved after ${_incFmtDuration(inc.duration_s)}`}
-        </div>
-      </div>
-
-      <div style="background:var(--surface);border:1px solid var(--border-hi);border-radius:12px;padding:18px 20px;margin-bottom:18px">
-        <div style="font-size:12px;font-weight:700;color:var(--text-hi);text-transform:uppercase;letter-spacing:.08em;margin-bottom:14px">Incident Details</div>
-        <div class="form-grid">
-          <div class="fg full">
-            <label class="flabel">Custom Title <span style="font-weight:400;text-transform:none;letter-spacing:0;color:var(--text-2)">(leave blank to use "${_escHtml(defaultTitle)}")</span></label>
-            <input class="finput" id="incTitle" maxlength="200" value="${_escHtml(title)}" placeholder="${_escHtml(defaultTitle)}">
-          </div>
-          <div class="fg">
-            <label class="flabel">Impact</label>
-            <select class="fselect" id="incImpact">
-              <option value="minor"    ${impact==="minor"?"selected":""}>Minor</option>
-              <option value="major"    ${impact==="major"?"selected":""}>Major</option>
-              <option value="critical" ${impact==="critical"?"selected":""}>Critical</option>
-            </select>
-          </div>
-          <div class="fg">
-            <label class="flabel">Visibility</label>
-            <select class="fselect" id="incPublic">
-              <option value="1" ${isPublic?"selected":""}>🌐 Public — shown on incident page</option>
-              <option value="0" ${!isPublic?"selected":""}>🔒 Private — admin only</option>
-            </select>
-          </div>
-        </div>
-        <div style="display:flex;justify-content:flex-end;margin-top:14px">
-          <button class="btn btn-primary" onclick="submitIncidentMeta(${inc.id})">Save Details</button>
-        </div>
-      </div>
-
+  const updateComposer = canMutate ? `
       <div style="background:var(--surface);border:1px solid var(--border-hi);border-radius:12px;padding:18px 20px;margin-bottom:18px">
         <div style="font-size:12px;font-weight:700;color:var(--text-hi);text-transform:uppercase;letter-spacing:.08em;margin-bottom:14px">Post Update</div>
         <div class="form-grid">
@@ -4710,16 +5179,58 @@ function showIncidentPanel(id){
         <div style="display:flex;justify-content:flex-end;margin-top:14px">
           <button class="btn btn-primary" onclick="submitIncidentUpdate(${inc.id})">Post Update</button>
         </div>
+      </div>` : "";
+  const el = document.getElementById("adminPanelBody");
+  el.innerHTML = `
+    <div style="padding:20px 24px;max-width:720px;margin:0 auto">
+      <a href="#" onclick="event.preventDefault();switchTab('incidents')" style="font-size:12px;color:var(--text-2);text-decoration:none;display:inline-flex;align-items:center;gap:4px;margin-bottom:16px">
+        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="15 18 9 12 15 6"/></svg>
+        Back to incidents
+      </a>
+      <div style="margin-bottom:24px">
+        <div style="font-size:11px;color:var(--text-2);text-transform:uppercase;letter-spacing:.08em;margin-bottom:4px">${_escHtml(inc.server_name)}</div>
+        <h2 style="font-size:20px;font-weight:700;color:var(--text-white);letter-spacing:-.01em">${_escHtml(inc.title || defaultTitle)}</h2>
+        <div style="font-size:12px;color:var(--text-2);margin-top:6px">
+          Started ${_incFmtDate(inc.started_at)} · ${isOpen ? '<span style="color:var(--red);font-weight:600">Ongoing</span>' : `Resolved after ${_incFmtDuration(inc.duration_s)}`}
+        </div>
       </div>
+
+      ${canMutate ? "" : `<div style="margin-bottom:18px;padding:11px 13px;border:1px solid var(--border);border-radius:8px;background:var(--surface2);font-size:12px;color:var(--text)">Read-only access: incident details and updates are visible, but only administrators can publish changes.</div>`}
+
+      <div style="background:var(--surface);border:1px solid var(--border-hi);border-radius:12px;padding:18px 20px;margin-bottom:18px">
+        <div style="font-size:12px;font-weight:700;color:var(--text-hi);text-transform:uppercase;letter-spacing:.08em;margin-bottom:14px">Incident Details</div>
+        <div class="form-grid">
+          <div class="fg full">
+            <label class="flabel">Custom Title <span style="font-weight:400;text-transform:none;letter-spacing:0;color:var(--text-2)">(leave blank to use "${_escHtml(defaultTitle)}")</span></label>
+            <input class="finput" id="incTitle" maxlength="200" value="${_escHtml(title)}" placeholder="${_escHtml(defaultTitle)}"${readOnlyAttr}>
+          </div>
+          <div class="fg">
+            <label class="flabel">Impact</label>
+            <select class="fselect" id="incImpact"${readOnlyAttr}>
+              <option value="minor"    ${impact==="minor"?"selected":""}>Minor</option>
+              <option value="major"    ${impact==="major"?"selected":""}>Major</option>
+              <option value="critical" ${impact==="critical"?"selected":""}>Critical</option>
+            </select>
+          </div>
+          <div class="fg">
+            <label class="flabel">Visibility</label>
+            <select class="fselect" id="incPublic"${readOnlyAttr}>
+              <option value="1" ${isPublic?"selected":""}>🌐 Public — shown on incident page</option>
+              <option value="0" ${!isPublic?"selected":""}>🔒 Private — admin only</option>
+            </select>
+          </div>
+        </div>
+        ${canMutate ? `<div style="display:flex;justify-content:flex-end;margin-top:14px"><button class="btn btn-primary" onclick="submitIncidentMeta(${inc.id})">Save Details</button></div>` : ""}
+      </div>
+
+      ${updateComposer}
 
       <div style="background:var(--surface);border:1px solid var(--border-hi);border-radius:12px;padding:18px 20px;margin-bottom:18px">
         <div style="font-size:12px;font-weight:700;color:var(--text-hi);text-transform:uppercase;letter-spacing:.08em;margin-bottom:14px">Timeline</div>
         ${updatesHtml}
       </div>
 
-      <div style="display:flex;justify-content:flex-end;margin-top:20px">
-        <button class="btn btn-danger" onclick="askDelIncident(${inc.id})">Delete Incident</button>
-      </div>
+      ${canMutate ? `<div style="display:flex;justify-content:flex-end;margin-top:20px"><button class="btn btn-danger" onclick="askDelIncident(${inc.id})">Delete Incident</button></div>` : ""}
     </div>
   `;
 }

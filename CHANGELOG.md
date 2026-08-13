@@ -8,6 +8,24 @@ All notable changes to this project are documented here.
 
 ## [Unreleased]
 
+## [3.8.0] — 2026-08-13
+
+### Added
+- Added a unified enterprise operations overview to the admin workspace with service-health totals, attention and incident queues, grouped maintenance windows, quick actions, and operator resources.
+- Added shared enterprise theme assets for consistent light and dark presentation across the public dashboard, admin workspace, service observability view, and status-history page.
+- Added visitor-facing status resources for incident history, maintenance, RSS updates, email alerts, and service-health navigation.
+- Added regression coverage for enterprise UI contracts, theme persistence, anonymous payload redaction, private incident visibility, and uptime aggregation.
+
+### Improved
+- Reworked the public dashboard, admin workspace, service details, and status history with responsive layouts, clearer information hierarchy, accessible dialogs, keyboard controls, and focus restoration.
+- Restored complete per-service observability in the admin workspace, including uptime, heartbeat history, incident history, and real 24-hour response-time charts.
+- Corrected uptime calculations to count polling cycles instead of weighting services by their number of checks, and made response-time averages null-safe.
+
+### Security
+- Replaced anonymous live-status payloads with an allowlisted, dashboard-scoped serializer that excludes infrastructure addresses, coordinates, runbooks, failure state, credentials, and internal probe details.
+- Restricted private per-service incidents to authenticated administrators and removed internal heartbeat detail from anonymous responses.
+- Protected legacy live-status, event-log, and forced-refresh endpoints with operator authentication, and limited viewer access to internal group data by assigned dashboard grants.
+
 ## [3.7.1] — 2026-08-10
 
 ### Fixed
