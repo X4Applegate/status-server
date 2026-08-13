@@ -110,7 +110,9 @@ Badge URLs are shown directly in the server edit form for easy copying.
 - Failed verification attempts are logged with the username and reason
 
 ### Admin Panel
-- Slide-in drawer with tabbed management: Servers, Groups, Omada, Users, Webhooks, Settings
+- Unified enterprise operations overview with service-health totals, attention and incident queues, grouped maintenance windows, quick actions, and operator resources
+- Persistent resource navigation plus tabbed management for Servers, Groups, Network Controllers, Users, Webhooks, and Settings
+- Integrated service observability with uptime, heartbeat history, incident timelines, and real 24-hour response-time charts
 - **Settings tab** — configure SMTP email and Cloudflare Turnstile login protection from the web UI
 - Live system log stream with error/info filtering and badge counter
 - Per-server edit form accessible directly from the status dashboard via the **Edit Server** button
@@ -133,7 +135,7 @@ Badge URLs are shown directly in the server edit form for easy copying.
 - **Framework:** Express 5
 - **Templates:** EJS
 - **Database:** MariaDB (or MySQL)
-- **Deployment:** Docker + Docker Compose (`applegater/status-server:latest` or version tags such as `v3.7.1`)
+- **Deployment:** Docker + Docker Compose (`applegater/status-server:latest` or version tags such as `v3.8.0`)
 - **Reverse proxy:** Caddy (recommended) or any HTTPS proxy
 - **No build step** — plain HTML/CSS/JS embedded in EJS templates
 
@@ -185,6 +187,8 @@ status-server/
 ├── backend/
 │   ├── server.js           Main application — routes, polling, SSE, DB logic
 │   ├── public-status.js    Maintenance grouping and RSS generation helpers
+│   ├── public-status-serializer.js  Visitor-safe live-status serialization
+│   ├── public/             Shared enterprise CSS and browser theme controls
 │   ├── package.json
 │   ├── Dockerfile
 │   ├── test/               Node unit tests

@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<html lang="en" data-theme="<%= defaultTheme === 'light' ? 'light' : 'dark' %>">
+<html lang="en" data-theme="<%= defaultTheme === 'light' ? 'light' : 'dark' %>"<%- bgColor ? ' class="has-custom-background"' : '' %>>
 <head>
 <%- include('partials/head', { title: pageTitle }) %>
 <script>
@@ -7,9 +7,11 @@
   try {
     const savedTheme = localStorage.getItem("status-page-theme");
     const configuredTheme = <%- JSON.stringify(defaultTheme === "light" ? "light" : "dark") %>;
-    document.documentElement.dataset.theme = savedTheme === "light" || savedTheme === "dark"
-      ? savedTheme
-      : configuredTheme;
+    const hasSavedTheme = savedTheme === "light" || savedTheme === "dark";
+    document.documentElement.dataset.theme = hasSavedTheme ? savedTheme : configuredTheme;
+    // Seed the shared preference from this status page's configured theme so
+    // admin and history use the same appearance on first navigation.
+    if (!hasSavedTheme) localStorage.setItem("status-page-theme", configuredTheme);
   } catch (_) { /* use the server-configured theme */ }
 })();
 </script>
@@ -209,14 +211,6 @@ body::before{content:'';position:fixed;inset:0;pointer-events:none;background:ra
 .admin-banner-link:hover{background:rgba(255,255,255,.12);text-decoration:none}
 .admin-banner-close{flex-shrink:0;margin-left:8px;width:22px;height:22px;border:none;background:transparent;color:currentColor;opacity:.55;font-size:18px;line-height:1;cursor:pointer;border-radius:4px;transition:opacity .15s,background .15s}
 .admin-banner-close:hover{opacity:1;background:rgba(255,255,255,.08)}
-.health-banner{display:flex;align-items:center;gap:10px;padding:10px 22px;font-size:13px;font-weight:600;border-bottom:1px solid var(--border);transition:background .3s,color .3s}
-.health-banner.all-up{background:rgba(16,232,138,.07);color:#10e88a}
-.health-banner.has-down{background:rgba(255,61,90,.07);color:var(--red)}
-.health-banner.has-degraded{background:rgba(255,140,42,.07);color:var(--orange)}
-.health-banner-dot{width:8px;height:8px;border-radius:50%;flex-shrink:0;animation:blink 2s ease-in-out infinite}
-.health-banner.all-up .health-banner-dot{background:#10e88a}
-.health-banner.has-down .health-banner-dot{background:var(--red)}
-.health-banner.has-degraded .health-banner-dot{background:var(--orange)}
 /* Response time pill */
 .srv-ms{font-size:10px;font-family:var(--mono);padding:2px 6px;border-radius:3px;font-weight:600;flex-shrink:0;letter-spacing:.01em}
 .srv-ms.fast{color:#10e88a;background:rgba(16,232,138,.1)}
@@ -295,7 +289,7 @@ body::before{content:'';position:fixed;inset:0;pointer-events:none;background:ra
 .uptime-card:hover{transform:translateY(-2px);border-color:var(--border-hi);box-shadow:0 8px 24px rgba(0,0,0,0.2)}
 .uptime-card:hover::before{opacity:1}
 .uptime-label{font-size:11px;font-weight:600;letter-spacing:.06em;text-transform:uppercase;color:var(--text-2);margin-bottom:8px}
-.uptime-pct{font-size:28px;font-weight:700;letter-spacing:-.03em;line-height:1}
+.uptime-pct{font-size:28px;font-weight:700;letter-spacing:-.03em;line-height:1;color:var(--text-hi)}
 .uptime-pct.great{color:var(--green)}
 .uptime-pct.good {color:var(--blue)}
 .uptime-pct.warn {color:var(--orange)}
@@ -488,8 +482,6 @@ body::before{
 .sidebar{height:auto;min-height:calc(100vh - 72px);background:transparent;overflow:visible}
 .sidebar-scroll{height:auto;max-width:var(--page-width);margin:0 auto;padding:38px 30px 64px;overflow:visible}
 .sb-scroll-btn{display:none}
-.health-banner{display:none!important}
-
 /* Overview hero */
 .status-overview{
   position:relative;
@@ -749,6 +741,7 @@ function _shade(hex, amount) {
   const sidebar     = _shade(bgColor, shadeStep * 1.5);
   const surface     = _shade(bgColor, shadeStep * 2.0);
   const surface2    = _shade(bgColor, shadeStep * 2.8);
+  const surface3    = _shade(bgColor, shadeStep * 3.5);
   // Text + border palettes — picked by luminance, NOT by the user's default_theme
   const text        = isDarkBg ? "#c8d6e8" : "#3a4658";
   const text2       = isDarkBg ? "rgba(255,255,255,0.55)" : "rgba(20,30,45,0.55)";
@@ -758,12 +751,16 @@ function _shade(hex, amount) {
   const borderHi    = isDarkBg ? "rgba(255,255,255,0.22)" : "rgba(20,30,45,0.22)";
 %>
 <style id="custom-bg-overrides">
-:root {
+/* The class + attribute selector intentionally outranks the later
+   html[data-theme] enterprise defaults, including their !important values. */
+html.has-custom-background[data-theme] {
   --bg:        <%= bg %> !important;
   --bg2:       <%= bg2 %> !important;
   --sidebar:   <%= sidebar %> !important;
   --surface:   <%= surface %> !important;
   --surface2:  <%= surface2 %> !important;
+  --surface3:  <%= surface3 %> !important;
+  --input-bg:  <%= surface %> !important;
   --text:      <%= text %> !important;
   --text-2:    <%= text2 %> !important;
   --text-hi:   <%= textHi %> !important;
@@ -938,6 +935,40 @@ html[data-theme="light"] .theme-icon-dark,html[data-theme="dark"] .theme-icon-li
 .maintenance-summary-link{align-self:center;white-space:nowrap;color:var(--text-hi);font-size:11px;font-weight:700;text-decoration:none;padding:7px 10px;border:1px solid var(--border-hi);border-radius:7px;background:var(--surface)}
 .maintenance-summary-link:hover{border-color:var(--orange);color:var(--orange)}
 
+/* Active incident and visitor resource panels keep operational communication
+   visible without competing with the primary health summary. */
+.incident-summary{
+  display:none;
+  grid-template-columns:auto minmax(0,1fr) auto;
+  align-items:start;
+  gap:14px;
+  margin:-12px 0 30px;
+  padding:17px 18px;
+  border:1px solid color-mix(in srgb,var(--red) 34%,var(--border));
+  border-left:4px solid var(--red);
+  border-radius:10px;
+  background:color-mix(in srgb,var(--surface) 92%,var(--red) 8%);
+}
+.incident-summary.visible{display:grid}
+.incident-summary-icon{display:flex;align-items:center;justify-content:center;width:36px;height:36px;border-radius:8px;color:var(--red);background:var(--red-soft)}
+.incident-summary-kicker{font-size:10px;font-weight:750;letter-spacing:.08em;text-transform:uppercase;color:var(--red)}
+.incident-summary-title{margin-top:3px;color:var(--text-white);font-size:15px;font-weight:700;line-height:1.35}
+.incident-summary-meta{display:flex;flex-wrap:wrap;gap:6px 14px;margin-top:8px;color:var(--text-2);font-size:11px}
+.incident-summary-link{align-self:center;white-space:nowrap;color:var(--text-hi);font-size:11px;font-weight:700;text-decoration:none;padding:7px 10px;border:1px solid var(--border-hi);border-radius:7px;background:var(--surface)}
+.incident-summary-link:hover{border-color:var(--red);color:var(--red)}
+
+.public-resource-center{margin-top:30px;padding:22px;border:1px solid var(--border);border-radius:12px;background:var(--surface);box-shadow:var(--card-shadow)}
+.public-resource-head{display:flex;align-items:flex-end;justify-content:space-between;gap:16px;margin-bottom:14px}
+.public-resource-title{color:var(--text-white);font-size:16px;font-weight:700;letter-spacing:-.02em}
+.public-resource-description{margin-top:4px;color:var(--text-2);font-size:11px;line-height:1.5}
+.public-resource-grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px}
+.public-resource-link{display:flex;align-items:center;gap:10px;min-height:58px;padding:11px;border:1px solid var(--border);border-radius:8px;background:var(--surface);color:var(--text-hi);font:600 11px var(--sans);text-align:left;text-decoration:none;cursor:pointer}
+.public-resource-link:hover{background:var(--surface2);border-color:var(--border-hi)}
+.public-resource-link svg{width:17px;height:17px;flex:none;color:var(--blue)}
+.public-resource-copy{display:block;min-width:0}.public-resource-name,.public-resource-note{display:block}.public-resource-name{font-weight:700}.public-resource-note{margin-top:2px;color:var(--text-2);font-size:9px;font-weight:500;line-height:1.35}
+.enterprise-footer{max-width:1240px;margin:0 auto;padding:24px 30px 30px;border-top:1px solid var(--border);color:var(--text-2);font-size:11px}
+.enterprise-footer-inner{display:flex;align-items:center;justify-content:space-between;gap:16px;flex-wrap:wrap}.enterprise-footer-links{display:flex;align-items:center;gap:7px 16px;flex-wrap:wrap}.enterprise-footer a{color:var(--text-2);text-decoration:none}.enterprise-footer a:hover{color:var(--text-hi)}
+
 /* Directory controls use familiar enterprise form patterns. */
 .sidebar-header{padding:0 0 15px}
 .sidebar-title{font-size:19px;letter-spacing:-.02em}
@@ -1010,6 +1041,7 @@ html[data-theme="light"] .theme-icon-dark,html[data-theme="dark"] .theme-icon-li
   .overview-metric{padding:10px 14px}
   .overview-metric:nth-child(3){padding-left:0;border-left:0}
   .srv-group-body{grid-template-columns:1fr}
+  .public-resource-grid{grid-template-columns:1fr 1fr}
 }
 @media(max-width:760px){
   .topbar{min-height:60px;padding:8px 12px}
@@ -1018,6 +1050,8 @@ html[data-theme="light"] .theme-icon-dark,html[data-theme="dark"] .theme-icon-li
   .status-overview{padding:20px 17px;margin-bottom:24px;border-radius:10px}
   .maintenance-summary{grid-template-columns:auto minmax(0,1fr);margin:-8px 0 24px;padding:15px 14px}
   .maintenance-summary-link{grid-column:2;justify-self:start}
+  .incident-summary{grid-template-columns:auto minmax(0,1fr);margin:-8px 0 24px;padding:15px 14px}
+  .incident-summary-link{grid-column:2;justify-self:start}
   .overview-title{font-size:27px}
   .overview-metrics{margin-top:20px;padding-top:14px}
   .overview-metric{padding:9px 10px}
@@ -1026,6 +1060,7 @@ html[data-theme="light"] .theme-icon-dark,html[data-theme="dark"] .theme-icon-li
   .srv-group-body{padding:9px;gap:9px}
   .srv-row{min-height:0;padding:13px}
   .main{padding:20px 12px 40px}
+  .public-resource-center{padding:17px 14px}.enterprise-footer{padding:20px 16px 26px}
 }
 @media(max-width:520px){
   .topbar-right .theme-toggle{flex:1 1 100%}
@@ -1039,6 +1074,7 @@ html[data-theme="light"] .theme-icon-dark,html[data-theme="dark"] .theme-icon-li
   .srv-card-actions{align-items:flex-end;flex-direction:column}
   .srv-facts{align-items:stretch}
   .srv-fact{max-width:100%}
+  .public-resource-grid{grid-template-columns:1fr}.public-resource-head{display:block}
 }
 </style>
 </head>
@@ -1054,9 +1090,7 @@ html[data-theme="light"] .theme-icon-dark,html[data-theme="dark"] .theme-icon-li
 }) %>
 
 <!-- Operator-authored announcement banners (scheduled maintenance, ongoing issues, release notes). -->
-<!-- Rendered above healthBanner so announcements appear first when present. -->
 <div id="adminBanners" class="admin-banners"></div>
-<div id="healthBanner" class="health-banner" style="display:none"></div>
 <div class="layout">
   <!-- SIDEBAR -->
   <div class="sidebar">
@@ -1101,6 +1135,7 @@ html[data-theme="light"] .theme-icon-dark,html[data-theme="dark"] .theme-icon-li
           </div>
         </div>
       </section>
+      <section id="incidentSummary" class="incident-summary" aria-live="polite" hidden></section>
       <section id="maintenanceSummary" class="maintenance-summary" aria-live="polite" hidden></section>
       <div class="sidebar-header">
         <div>
@@ -1129,6 +1164,20 @@ html[data-theme="light"] .theme-icon-dark,html[data-theme="dark"] .theme-icon-li
       <div class="sidebar-body" id="sidebarList">
         <!-- populated by JS -->
       </div>
+      <section class="public-resource-center" id="statusResourceCenter" aria-labelledby="statusResourcesTitle">
+        <div class="public-resource-head">
+          <div><h2 class="public-resource-title" id="statusResourcesTitle">Status resources</h2><p class="public-resource-description">Follow service updates, review past events, or reach the operator tools.</p></div>
+        </div>
+        <div class="public-resource-grid">
+          <% if (typeof groupSlug !== 'undefined' && groupSlug) { %>
+          <a class="public-resource-link" href="/dashboard/<%= groupSlug %>/incidents"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M3 3v18h18"/><path d="m7 16 4-5 4 3 4-7"/></svg><span class="public-resource-copy"><span class="public-resource-name">Status history</span><span class="public-resource-note">Incidents and maintenance timeline</span></span></a>
+          <button class="public-resource-link" type="button" onclick="openSubscribeModal()"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M18 8a6 6 0 0 0-12 0c0 7-3 7-3 9h18c0-2-3-2-3-9"/><path d="M13.7 21a2 2 0 0 1-3.4 0"/></svg><span class="public-resource-copy"><span class="public-resource-name">Email alerts</span><span class="public-resource-note">Down and recovery notifications</span></span></button>
+          <a class="public-resource-link" href="/dashboard/<%= groupSlug %>/feed.rss" type="application/rss+xml"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M4 11a9 9 0 0 1 9 9"/><path d="M4 4a16 16 0 0 1 16 16"/><circle cx="5" cy="19" r="1"/></svg><span class="public-resource-copy"><span class="public-resource-name">RSS feed</span><span class="public-resource-note">Subscribe from any feed reader</span></span></a>
+          <% } %>
+          <a class="public-resource-link" href="<%- adminHref %>"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .6 2l.1.1-2.8 2.8-.1-.1a1.7 1.7 0 0 0-2-.6 1.7 1.7 0 0 0-1.2 1.6v.2h-4v-.2A1.7 1.7 0 0 0 8.8 19a1.7 1.7 0 0 0-2 .6l-.1.1-2.8-2.8.1-.1a1.7 1.7 0 0 0 .6-2A1.7 1.7 0 0 0 3 13.6H3v-4h.2A1.7 1.7 0 0 0 4.8 8a1.7 1.7 0 0 0-.6-2l-.1-.1 2.8-2.8.1.1a1.7 1.7 0 0 0 2 .6A1.7 1.7 0 0 0 10.2 2H14v.2A1.7 1.7 0 0 0 15.2 4a1.7 1.7 0 0 0 2-.6l.1-.1 2.8 2.8-.1.1a1.7 1.7 0 0 0-.6 2 1.7 1.7 0 0 0 1.6 1.2h.2v4H21a1.7 1.7 0 0 0-1.6 1.6z"/></svg><span class="public-resource-copy"><span class="public-resource-name">Operations console</span><span class="public-resource-note">Manage monitoring and communications</span></span></a>
+          <a class="public-resource-link" href="https://github.com/X4Applegate/status-server#readme" target="_blank" rel="noopener"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"/><path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"/></svg><span class="public-resource-copy"><span class="public-resource-name">Monitor documentation</span><span class="public-resource-note">Checks, badges, and integrations</span></span></a>
+        </div>
+      </section>
     </div>
     <button class="sb-scroll-btn sb-scroll-up" id="sbScrollUp" onclick="sbScrollStep(-1)" title="Scroll up">▲</button>
     <button class="sb-scroll-btn sb-scroll-dn" id="sbScrollDn" onclick="sbScrollStep(1)" title="Scroll down">▼</button>
@@ -1224,32 +1273,6 @@ async function loadDbPins() {
   } catch(e) { /* use localStorage only */ }
 }
 
-function updateHealthBanner() {
-  const el = document.getElementById("healthBanner");
-  if (!el) return;
-  if (!servers.length) {
-    el.style.display = "none";
-    updateStatusOverview();
-    return;
-  }
-  const total    = servers.length;
-  const down     = servers.filter(s => s.overall === "down").length;
-  const degraded = servers.filter(s => s.overall === "degraded").length;
-  const up       = servers.filter(s => s.overall === "up").length;
-  el.style.display = "";
-  if (down > 0) {
-    el.className = "health-banner has-down";
-    el.innerHTML = `<div class="health-banner-dot"></div><span>${down} service${down>1?"s":""} down${degraded>0?` · ${degraded} degraded`:""}${up>0?` · ${up} operational`:""}</span>`;
-  } else if (degraded > 0) {
-    el.className = "health-banner has-degraded";
-    el.innerHTML = `<div class="health-banner-dot"></div><span>${degraded} service${degraded>1?"s":""} degraded · ${up} operational</span>`;
-  } else {
-    el.className = "health-banner all-up";
-    el.innerHTML = `<div class="health-banner-dot"></div><span>All ${total} system${total>1?"s":""} operational</span>`;
-  }
-  updateStatusOverview();
-}
-
 function updateStatusOverview() {
   const overview = document.getElementById("statusOverview");
   if (!overview) return;
@@ -1259,7 +1282,10 @@ function updateStatusOverview() {
   const degraded = servers.filter(s => s.overall === "degraded").length;
   const pending = Math.max(0, total - up - down - degraded);
   const issues = down + degraded;
-  const responseTimes = servers.flatMap(s => (s.checks || []).map(c => Number(c.response_ms)).filter(ms => Number.isFinite(ms) && ms >= 0));
+  const responseTimes = servers.flatMap(s => (s.checks || [])
+    .map(c => c.response_ms)
+    .filter(value => value !== null && value !== undefined && value !== "" && Number.isFinite(Number(value)) && Number(value) >= 0)
+    .map(Number));
   const avgResponse = responseTimes.length ? Math.round(responseTimes.reduce((sum, ms) => sum + ms, 0) / responseTimes.length) : null;
   const checkedTimes = servers.map(s => s.lastChecked ? new Date(s.lastChecked).getTime() : 0).filter(Boolean);
   const latestCheck = checkedTimes.length ? new Date(Math.max(...checkedTimes)) : null;
@@ -1577,7 +1603,7 @@ async function loadDashboardGroups(){
     const s = servers.find(x => x.id === selectedId);
     if (s) {
       const cached = cacheGet("detail-" + selectedId);
-      if (cached) renderDetail(s, cached.uptime, cached.heartbeat, cached.incidents);
+      if (cached) renderDetail(s, cached.uptime, cached.heartbeat, cached.incidents, cached.responseSeries);
     }
   }
   // Check if welcome popup should show (session is now confirmed)
@@ -1817,14 +1843,6 @@ function showHbIncident(el){
   document.body.appendChild(overlay);
 }
 
-function uptimeCls(pct){
-  if (pct === null) return "";
-  if (pct >= 99)   return "great";
-  if (pct >= 95)   return "good";
-  if (pct >= 80)   return "warn";
-  return "bad";
-}
-
 function annotateServiceAreas(){
   document.querySelectorAll(".srv-group-head, .srv-subgroup-head").forEach(head => {
     const body = head.nextElementSibling;
@@ -2042,7 +2060,7 @@ function renderSidebar(){
     } else {
       el.innerHTML = _pinnedHtml + servers.map(renderRow).join("");
     }
-    updateHealthBanner();
+    updateStatusOverview();
     updateMapBtnVisibility();
     annotateServiceAreas();
     applyServerFilters();
@@ -2172,7 +2190,7 @@ function renderSidebar(){
 
   if (_pinnedHtml) sections.unshift(_pinnedHtml);
   el.innerHTML = sections.join("");
-  updateHealthBanner();
+  updateStatusOverview();
   updateMapBtnVisibility();
   annotateServiceAreas();
   applyServerFilters();
@@ -2209,7 +2227,10 @@ function normalizeDetailPayload(payload){
       d30: percentOrNull(uptime.d30)
     },
     heartbeat: Array.isArray(payload && payload.heartbeat) ? payload.heartbeat.filter(item => item && typeof item === "object") : [],
-    incidents: Array.isArray(payload && payload.incidents) ? payload.incidents.filter(item => item && typeof item === "object") : []
+    incidents: Array.isArray(payload && payload.incidents) ? payload.incidents.filter(item => item && typeof item === "object") : [],
+    responseSeries: Array.isArray(payload && payload.responseSeries)
+      ? payload.responseSeries.filter(item => item && typeof item === "object" && item.avg_ms !== null && item.avg_ms !== undefined && Number.isFinite(Number(item.avg_ms)))
+      : []
   };
 }
 
@@ -2258,7 +2279,7 @@ async function selectServer(id){
   if (cached) {
     try {
       const normalized = normalizeDetailPayload(cached);
-      renderDetail(server, normalized.uptime, normalized.heartbeat, normalized.incidents);
+      renderDetail(server, normalized.uptime, normalized.heartbeat, normalized.incidents, normalized.responseSeries);
       renderedFromCache = true;
     } catch(error) {
       cacheRemove(cacheKey);
@@ -2267,10 +2288,11 @@ async function selectServer(id){
   if (!renderedFromCache) renderDetailSkeleton(server);
 
   // 2) Fetch fresh data in parallel and update when ready
-  const [uptimeResult, heartbeatResult, incidentsResult] = await Promise.all([
+  const [uptimeResult, heartbeatResult, incidentsResult, responseResult] = await Promise.all([
     fetchDetailEndpoint(`/api/public/uptime/${id}`, "object"),
     fetchDetailEndpoint(`/api/public/heartbeat/${id}`, "array"),
     fetchDetailEndpoint(`/api/public/incidents/${id}`, "array"),
+    fetchDetailEndpoint(`/api/public/response/${id}`, "array"),
   ]);
 
   // Avoid clobbering newer selection
@@ -2278,10 +2300,11 @@ async function selectServer(id){
   const detail = normalizeDetailPayload({
     uptime: uptimeResult.data,
     heartbeat: heartbeatResult.data,
-    incidents: incidentsResult.data
+    incidents: incidentsResult.data,
+    responseSeries: responseResult.data
   });
-  const errors = [uptimeResult.error, heartbeatResult.error, incidentsResult.error].filter(Boolean);
-  renderDetail(server, detail.uptime, detail.heartbeat, detail.incidents, errors);
+  const errors = [uptimeResult.error, heartbeatResult.error, incidentsResult.error, responseResult.error].filter(Boolean);
+  renderDetail(server, detail.uptime, detail.heartbeat, detail.incidents, detail.responseSeries, errors);
   if (!errors.length) cacheSet(cacheKey, detail);
 }
 
@@ -2308,8 +2331,8 @@ function renderDetailSkeleton(s){
 }
 
 // -- Full detail render
-function renderDetail(s, uptime, heartbeat, incidents, loadErrors = []){
-  ({ uptime, heartbeat, incidents } = normalizeDetailPayload({ uptime, heartbeat, incidents }));
+function renderDetail(s, uptime, heartbeat, incidents, responseSeries, loadErrors = []){
+  ({ uptime, heartbeat, incidents, responseSeries } = normalizeDetailPayload({ uptime, heartbeat, incidents, responseSeries }));
   currentIncidents = incidents || []; // expose for heartbeat click handler
   const statusLabel = s.overall==="up"?"Online":s.overall==="down"?"Offline":s.overall==="degraded"?"Degraded":"Pending";
   const tags = (s.tags||[]).map(t=>`<span class="detail-tag">${t}</span>`).join("");
@@ -2325,8 +2348,8 @@ function renderDetail(s, uptime, heartbeat, incidents, loadErrors = []){
     return `
     <div class="uptime-card">
       <div class="uptime-label">${u.label}</div>
-      <div class="uptime-pct ${uptimeCls(value)}">${hasValue ? value+"%" : "—"}</div>
-      <div class="uptime-sub">${value >= 99 ? "Excellent" : value >= 95 ? "Good" : hasValue ? "Needs attention" : "No data yet"}</div>
+      <div class="uptime-pct">${hasValue ? value+"%" : "—"}</div>
+      <div class="uptime-sub">${hasValue ? "Observed availability" : "No data yet"}</div>
     </div>`;
   }).join("");
 
@@ -2360,7 +2383,7 @@ function renderDetail(s, uptime, heartbeat, incidents, loadErrors = []){
 
   // Current checks — cert info is inlined as a small badge on the HTTP chip itself
   const checkChips = (s.checks||[]).map(c => {
-    const lbl     = c.type==="ping"?"Ping":c.type==="tcp"?`TCP :${c.port}`:c.type==="udp"?`UDP :${c.port}`:c.type==="dns"?`DNS ${(c.record_type||"A").toUpperCase()}`:c.type==="omada_gateway"?"Omada WAN":c.type==="omada_lte"?"Omada LTE":"HTTP";
+    const lbl     = c.type==="ping"?"Ping":c.type==="tcp"?(c.port!=null?`TCP :${c.port}`:"TCP"):c.type==="udp"?(c.port!=null?`UDP :${c.port}`:"UDP"):c.type==="dns"?`DNS ${(c.record_type||"A").toUpperCase()}`:c.type==="omada_gateway"?"Omada WAN":c.type==="omada_lte"?"Omada LTE":"HTTP";
     const chipCls = c.ok ? "ok" : "fail";
     const detail  = sidebarSession.loggedIn ? (c.detail||"") : redactIPs(c.detail||"");
     // Inline cert badge: only when this HTTP check fetched a cert (HTTPS + show_cert !== false)
@@ -2476,7 +2499,7 @@ function renderDetail(s, uptime, heartbeat, incidents, loadErrors = []){
         <span style="font-size:11px;color:var(--text-2)">Last 24h (avg ms)</span>
       </div>
       <div class="section-body" style="padding:16px 20px">
-        ${heartbeat.filter(h => h.response_ms !== null && h.response_ms !== undefined).length > 0
+        ${responseSeries.length > 0
           ? `<div class="chart-wrap"><canvas id="responseChart"></canvas></div>`
           : `<div class="chart-empty">No response time data yet — check back after a few cycles</div>`
         }
@@ -2495,7 +2518,12 @@ function renderDetail(s, uptime, heartbeat, incidents, loadErrors = []){
   `;
 
   // Draw response time chart if we have data (requestAnimationFrame ensures DOM is painted first)
-  const chartData = heartbeat.filter(h => h.response_ms !== null && h.response_ms !== undefined && Number.isFinite(Number(h.response_ms)));
+  const chartData = responseSeries.map(point => ({
+    response_ms:Number(point.avg_ms),
+    checked_at:point.hour,
+    min_ms:point.min_ms,
+    max_ms:point.max_ms
+  }));
   if (chartData.length > 0) requestAnimationFrame(() => drawChart(chartData));
 
   // Detail map — only when server has coordinates
@@ -2672,7 +2700,7 @@ async function loadServers(){
     servers = fresh;
     cacheSet(CACHE_KEY_SERVERS, fresh);
     renderSidebar();
-    updateHealthBanner();
+    updateStatusOverview();
     updateMapBtnVisibility();
     if (GROUP_SLUG && servers.length === 0) {
       document.getElementById("sidebarList").innerHTML = `<div style="padding:16px;color:var(--text-2);font-size:12px">No servers in this dashboard yet</div>`;
@@ -2700,7 +2728,7 @@ async function loadServers(){
     servers = data.map(s => ({...s}));
     cacheSet(CACHE_KEY_SERVERS, servers);
     renderSidebar();
-    updateHealthBanner();
+    updateStatusOverview();
     if (_mapActive) _renderMainMarkers();
     // Refresh detail if selected server updated
     if (selectedId) {
@@ -2846,6 +2874,38 @@ function formatMaintenanceRange(event){
   return `${startText} – ${endText}`;
 }
 
+function renderIncidentSummary(incidents){
+  const host = document.getElementById("incidentSummary");
+  if (!host) return;
+  const open = Array.isArray(incidents) ? incidents.filter(item => item && !item.ended_at) : [];
+  if (!open.length) {
+    host.hidden = true;
+    host.className = "incident-summary";
+    host.innerHTML = "";
+    return;
+  }
+  const incident = open[0];
+  const title = incident.title || `${incident.server_name || "Service"} incident`;
+  const started = incident.started_at ? new Date(incident.started_at).toLocaleString(undefined, { month:"short", day:"numeric", hour:"numeric", minute:"2-digit" }) : "Recently";
+  const extra = open.length > 1 ? ` · ${open.length - 1} more active` : "";
+  const icon = `<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M10.3 2.9 1.8 17a2 2 0 0 0 1.7 3h17a2 2 0 0 0 1.7-3L13.7 2.9a2 2 0 0 0-3.4 0Z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>`;
+  host.hidden = false;
+  host.className = "incident-summary visible";
+  host.innerHTML = `<div class="incident-summary-icon">${icon}</div><div><div class="incident-summary-kicker">Active incident</div><div class="incident-summary-title">${escapeHtml(title)}</div><div class="incident-summary-meta"><span>${escapeHtml(incident.server_name || "Affected service")}</span><span>${escapeHtml(incident.status || "investigating")} · started ${escapeHtml(started)}${extra}</span></div></div><a class="incident-summary-link" href="/dashboard/${encodeURIComponent(GROUP_SLUG)}/incidents#incident-${encodeURIComponent(incident.id)}">View update</a>`;
+}
+
+async function loadPublicIncidents(){
+  if (!GROUP_SLUG) return;
+  try {
+    const response = await fetch(`/api/public/group/${encodeURIComponent(GROUP_SLUG)}/incidents`);
+    if (!response.ok) throw new Error("Incident feed unavailable");
+    const payload = await response.json();
+    renderIncidentSummary(payload && Array.isArray(payload.open) ? payload.open : []);
+  } catch (_) {
+    // Current service health remains available if the incident feed is offline.
+  }
+}
+
 function renderMaintenanceSummary(events){
   const host = document.getElementById("maintenanceSummary");
   if (!host) return;
@@ -2892,27 +2952,30 @@ async function loadPublicMaintenance(){
 }
 
 loadPublicMaintenance();
+loadPublicIncidents();
 setInterval(loadPublicMaintenance, 60 * 1000);
+setInterval(loadPublicIncidents, 60 * 1000);
 </script>
-<footer style="text-align:center;padding:28px 16px 20px;font-size:12px;color:var(--text-2)">
-  <% if (typeof groupSlug !== 'undefined' && groupSlug) { %>
-    <a href="/dashboard/<%= groupSlug %>/incidents" style="color:var(--text-2);text-decoration:none;margin:0 10px" onmouseover="this.style.color='var(--text-hi)'" onmouseout="this.style.color='var(--text-2)'">Status History</a>
-    <span style="opacity:.3">·</span>
-    <a href="/dashboard/<%= groupSlug %>/feed.rss" type="application/rss+xml" style="color:var(--text-2);text-decoration:none;margin:0 10px" onmouseover="this.style.color='var(--text-hi)'" onmouseout="this.style.color='var(--text-2)'">RSS Feed</a>
-    <span style="opacity:.3">·</span>
-  <% } %>
-  <a href="<%- privacyUrl || '/privacy' %>" style="color:var(--text-2);text-decoration:none;margin:0 10px" onmouseover="this.style.color='var(--text-hi)'" onmouseout="this.style.color='var(--text-2)'">Privacy Policy</a>
-  <span style="opacity:.3">·</span>
-  <a href="<%- termsUrl || '/terms' %>" style="color:var(--text-2);text-decoration:none;margin:0 10px" onmouseover="this.style.color='var(--text-hi)'" onmouseout="this.style.color='var(--text-2)'">Terms of Service</a>
-  <span style="opacity:.3">·</span>
-  <a href="https://github.com/X4Applegate/status-server" target="_blank" rel="noopener" style="color:var(--text-2);text-decoration:none;margin:0 10px;display:inline-flex;align-items:center;gap:5px" onmouseover="this.style.color='var(--text-hi)'" onmouseout="this.style.color='var(--text-2)'"><svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor"><path d="M12 0C5.37 0 0 5.37 0 12c0 5.3 3.438 9.8 8.205 11.385.6.113.82-.258.82-.577 0-.285-.01-1.04-.015-2.04-3.338.724-4.042-1.61-4.042-1.61-.546-1.387-1.333-1.756-1.333-1.756-1.089-.745.083-.729.083-.729 1.205.084 1.839 1.237 1.839 1.237 1.07 1.834 2.807 1.304 3.492.997.107-.775.418-1.305.762-1.604-2.665-.305-5.467-1.334-5.467-5.931 0-1.311.469-2.381 1.236-3.221-.124-.303-.535-1.524.117-3.176 0 0 1.008-.322 3.301 1.23A11.509 11.509 0 0 1 12 5.803c1.02.005 2.047.138 3.006.404 2.291-1.552 3.297-1.23 3.297-1.23.653 1.653.242 2.874.118 3.176.77.84 1.235 1.911 1.235 3.221 0 4.609-2.807 5.624-5.479 5.929.43.372.823 1.102.823 2.222 0 1.606-.015 2.896-.015 3.286 0 .315.216.694.825.576C20.565 21.795 24 17.295 24 12c0-6.63-5.37-12-12-12z"/></svg>GitHub</a>
+<footer class="enterprise-footer">
+  <div class="enterprise-footer-inner">
+    <span>Live availability and incident communication powered by Applegate Monitor.</span>
+    <nav class="enterprise-footer-links" aria-label="Status page resources">
+      <% if (typeof groupSlug !== 'undefined' && groupSlug) { %>
+        <a href="/dashboard/<%= groupSlug %>/incidents">Status history</a>
+        <a href="/dashboard/<%= groupSlug %>/feed.rss" type="application/rss+xml">RSS feed</a>
+      <% } %>
+      <a href="<%- privacyUrl || '/privacy' %>">Privacy</a>
+      <a href="<%- termsUrl || '/terms' %>">Terms</a>
+      <a href="https://github.com/X4Applegate/status-server" target="_blank" rel="noopener">GitHub</a>
+    </nav>
+  </div>
 </footer>
 
 <% if (typeof groupSlug !== 'undefined' && groupSlug) { %>
-<div id="subscribeModal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.6);z-index:900;align-items:center;justify-content:center">
+<div id="subscribeModal" role="dialog" aria-modal="true" aria-labelledby="subscribeModalTitle" aria-hidden="true" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.6);z-index:900;align-items:center;justify-content:center">
   <div style="background:var(--surface);border:1px solid var(--border-hi);border-radius:16px;padding:28px;max-width:380px;width:calc(100% - 32px);position:relative">
-    <button onclick="closeSubscribeModal()" style="position:absolute;top:12px;right:14px;background:none;border:none;color:var(--text-2);cursor:pointer;font-size:18px">&#x2715;</button>
-    <h3 style="margin:0 0 4px;color:var(--text-hi)">&#x1F514; Alert Subscriptions</h3>
+    <button onclick="closeSubscribeModal()" aria-label="Close alert subscriptions" style="position:absolute;top:12px;right:14px;background:none;border:none;color:var(--text-2);cursor:pointer;font-size:18px">&#x2715;</button>
+    <h3 id="subscribeModalTitle" style="margin:0 0 4px;color:var(--text-hi)">&#x1F514; Alert Subscriptions</h3>
     <p style="margin:0 0 16px;font-size:12px;color:var(--text-2)">Get email alerts when servers go down or recover.</p>
 
     <a href="/dashboard/<%= groupSlug %>/feed.rss" type="application/rss+xml" style="display:flex;align-items:center;justify-content:space-between;gap:12px;margin:0 0 16px;padding:10px 12px;border:1px solid var(--border);border-radius:8px;background:var(--surface2);color:var(--text-hi);font-size:12px;text-decoration:none">
@@ -2921,7 +2984,7 @@ setInterval(loadPublicMaintenance, 60 * 1000);
 
     <!-- Step 1: email entry -->
     <div id="subStepEmail">
-      <label style="font-size:11px;color:var(--text-2);display:block;margin-bottom:4px">Your email address</label>
+      <label for="subEmail" style="font-size:11px;color:var(--text-2);display:block;margin-bottom:4px">Your email address</label>
       <div style="display:flex;gap:8px">
         <input id="subEmail" type="email" placeholder="you@example.com"
           style="flex:1;background:var(--input-bg,#0d1829);border:1px solid var(--border-hi);border-radius:6px;color:var(--text-hi);font-size:13px;padding:8px 12px;outline:none;box-sizing:border-box"
@@ -2975,19 +3038,36 @@ setInterval(loadPublicMaintenance, 60 * 1000);
 </div>
 
 <script>
+let subscribeReturnFocus = null;
 function _subShowOnly(...ids) {
   ["subStepEmail","subStepNew","subStepManage","subModalSuccess","subModalUnsubSuccess","subModalUpdateSuccess"]
     .forEach(id => { const el = document.getElementById(id); if (el) el.style.display = ids.includes(id) ? "" : "none"; });
 }
 function openSubscribeModal(){
-  document.getElementById("subscribeModal").style.display = "flex";
+  subscribeReturnFocus = document.activeElement;
+  const modal = document.getElementById("subscribeModal");
+  modal.style.display = "flex";
+  modal.setAttribute("aria-hidden", "false");
+  document.body.style.overflow = "hidden";
   document.getElementById("subEmail").value = "";
   document.getElementById("subStepEmailErr").textContent = "";
   _subShowOnly("subStepEmail");
+  setTimeout(() => document.getElementById("subEmail").focus(), 0);
 }
 function closeSubscribeModal(){
-  document.getElementById("subscribeModal").style.display = "none";
+  const modal = document.getElementById("subscribeModal");
+  modal.style.display = "none";
+  modal.setAttribute("aria-hidden", "true");
+  document.body.style.overflow = "";
+  const returnTarget = subscribeReturnFocus;
+  subscribeReturnFocus = null;
+  if (returnTarget && document.contains(returnTarget)) setTimeout(() => returnTarget.focus(), 0);
 }
+document.getElementById("subscribeModal").addEventListener("click", event => { if (event.target.id === "subscribeModal") closeSubscribeModal(); });
+document.addEventListener("keydown", event => {
+  const modal = document.getElementById("subscribeModal");
+  if (event.key === "Escape" && modal.style.display !== "none") { closeSubscribeModal(); event.preventDefault(); }
+});
 async function checkSubStatus(){
   const email = document.getElementById("subEmail").value.trim();
   const errEl = document.getElementById("subStepEmailErr");
