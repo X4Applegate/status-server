@@ -318,7 +318,13 @@ body{font-family:var(--sans);background:var(--bg);color:var(--text);min-height:1
 .chip-cert.cert-ok     {color:var(--green);background:var(--green-soft);border:1px solid rgba(16,232,138,.25)}
 .chip-cert.cert-warn   {color:var(--orange);background:var(--orange-soft);border:1px solid rgba(255,140,42,.3)}
 .chip-cert.cert-expired{color:var(--red);background:var(--red-soft);border:1px solid rgba(255,61,90,.3)}
-.admin-row-actions{display:flex;gap:5px;flex-shrink:0}
+.chip-ms{display:inline-flex;align-items:center;font-size:9px;font-weight:600;padding:1px 6px;border-radius:8px;letter-spacing:.02em;white-space:nowrap}
+.chip-ms.ms-fast{color:var(--green);background:var(--green-soft);border:1px solid rgba(16,232,138,.25)}
+.chip-ms.ms-med {color:var(--orange);background:var(--orange-soft);border:1px solid rgba(255,140,42,.3)}
+.chip-ms.ms-slow{color:var(--red);background:var(--red-soft);border:1px solid rgba(255,61,90,.3)}
+.reorder-btn{padding:2px 6px!important;font-size:11px!important;line-height:1;opacity:.55}
+.reorder-btn:hover{opacity:1}
+.admin-row-actions{display:flex;gap:5px;flex-shrink:0;align-items:center}
 .admin-srv-paused{font-size:9px;font-weight:700;color:var(--text-2);background:var(--surface2);border:1px solid var(--border);border-radius:6px;padding:1px 6px;letter-spacing:.04em;text-transform:uppercase}
 .srv-select-cb{width:14px;height:14px;flex-shrink:0;cursor:pointer;accent-color:var(--blue)}
 .bulk-bar{display:none;align-items:center;gap:8px;padding:7px 14px;background:var(--blue-soft);border-bottom:1px solid rgba(42,127,255,.25);font-size:12px;flex-wrap:wrap}
@@ -2932,6 +2938,20 @@ function clearBulkSelect() {
   if (bar) bar.className = "bulk-bar";
 }
 
+async function reorderServer(id, direction) {
+  try {
+    const r = await fetch("/api/admin/servers/reorder", {
+      method: "POST",
+      headers: {"Content-Type": "application/json"},
+      body: JSON.stringify({ id, direction })
+    });
+    if (!r.ok) { const d = await r.json(); toast(d.error || "Reorder failed", "error"); return; }
+    await loadServerList();
+  } catch(e) {
+    toast("Network error — reorder failed", "error");
+  }
+}
+
 async function bulkAction(action) {
   if (!bulkSelected.size) return;
   const ids = Array.from(bulkSelected);
@@ -3455,15 +3475,18 @@ function renderAdminServerList(list){
     const isPaused  = s.enabled === false || s.enabled === 0;
     const pausedBadge = isPaused ? `<span class="admin-srv-paused">Paused</span>` : "";
     const cbChecked = bulkSelected.has(s.id) ? " checked" : "";
-    return `<div class="admin-server-item" role="button" tabindex="0" data-service-id="${serviceId}" onclick="if(!event.target.matches('.srv-select-cb')){showServerForm(findAdminServer(this.dataset.serviceId))}" onkeydown="if(event.target===event.currentTarget&&(event.key==='Enter'||event.key===' ')){event.preventDefault();showServerForm(findAdminServer(this.dataset.serviceId))}">
+    const ms = s.response_ms != null ? s.response_ms : null;
+    const msBadge = ms !== null ? `<span class="chip-ms ${ms < 150 ? 'ms-fast' : ms < 500 ? 'ms-med' : 'ms-slow'}">${ms}ms</span>` : "";
+    return `<div class="admin-server-item" role="button" tabindex="0" data-service-id="${serviceId}" onclick="if(!event.target.matches('.srv-select-cb,.reorder-btn')){showServerForm(findAdminServer(this.dataset.serviceId))}" onkeydown="if(event.target===event.currentTarget&&(event.key==='Enter'||event.key===' ')){event.preventDefault();showServerForm(findAdminServer(this.dataset.serviceId))}">
       ${isAdmin() ? `<input type="checkbox" class="srv-select-cb" data-id="${serviceId}" aria-label="Select ${_escHtml(s.name)}"${cbChecked} onclick="event.stopPropagation();toggleBulkSelect(this.dataset.id,this.checked)">` : ""}
       <div class="admin-dot ${isPaused ? 'pending' : (s.overall||'pending')}"></div>
       <div class="admin-info">
         <div class="admin-name">${_escHtml(s.name)} ${pausedBadge}</div>
         <div class="admin-host">${_escHtml(s.host)}${(s.category||s.sub_category) ? ` <span style="color:var(--text-2);opacity:.7">·</span> <span style="color:var(--blue);opacity:.8">${_escHtml([s.category,s.sub_category].filter(Boolean).join(" › "))}</span>` : ""}${s.description ? ` <span style="color:var(--text-2);opacity:.6;font-style:italic">— ${_escHtml(s.description)}</span>` : ""}</div>
-        <div class="admin-checks-label">${_escHtml(checkSummary)}${certBadges ? " " + certBadges : ""}</div>
+        <div class="admin-checks-label">${_escHtml(checkSummary)}${msBadge ? " " + msBadge : ""}${certBadges ? " " + certBadges : ""}</div>
       </div>
       <div class="admin-row-actions" onclick="event.stopPropagation()">
+        ${isAdmin() ? `<button class="btn btn-icon reorder-btn" data-id="${serviceId}" title="Move up" onclick="reorderServer(this.dataset.id,'up')">↑</button><button class="btn btn-icon reorder-btn" data-id="${serviceId}" title="Move down" onclick="reorderServer(this.dataset.id,'down')">↓</button>` : ""}
         ${isAdmin() ? `<button class="btn btn-sm" data-service-id="${serviceId}" onclick="dupServer(findAdminServer(this.dataset.serviceId))">Dup</button>` : ``}
         <button class="btn btn-sm" data-service-id="${serviceId}" onclick="showServerForm(findAdminServer(this.dataset.serviceId))">Edit</button>
         ${isAdmin() ? `<button class="btn btn-sm btn-danger" data-service-id="${serviceId}" onclick="askDel(this.dataset.serviceId, findAdminServer(this.dataset.serviceId)?.name || 'this service')">Remove</button>` : ``}
@@ -4271,12 +4294,13 @@ async function loadSettings(generation = managementLoadGeneration){
   renderSettingsDirectory();
   el.innerHTML = `<div style="padding:20px;color:var(--text-2);font-size:12px">Loading…</div>`;
   try {
-    const [smtpRes, tsRes, goRes, mbRes, wrRes] = await Promise.all([
+    const [smtpRes, tsRes, goRes, mbRes, wrRes, qhRes] = await Promise.all([
       fetch("/api/admin/settings/smtp"),
       fetch("/api/admin/settings/turnstile"),
       fetch("/api/admin/settings/google-oauth"),
       fetch("/api/admin/settings/mapbox"),
-      fetch("/api/admin/settings/weekly-report")
+      fetch("/api/admin/settings/weekly-report"),
+      fetch("/api/admin/settings/alert-quiet-hours")
     ]);
     if (!managementLoadIsCurrent("settings", generation)) return;
     if (!smtpRes.ok) { el.innerHTML = `<div class="empty-state">Admin role required.</div>`; return; }
@@ -4285,6 +4309,8 @@ async function loadSettings(generation = managementLoadGeneration){
     const go = goRes.ok ? await goRes.json() : { enabled:false, client_id:"", client_secret:"", callback_url:"" };
     const mb = mbRes.ok ? await mbRes.json() : { token:"" };
     const wr = wrRes.ok ? await wrRes.json() : { enabled:false, recipients:"", lastSentAt:null, smtpConfigured:false };
+    const qh = qhRes.ok ? await qhRes.json() : { start:-1, end:-1 };
+    const qhEnabled = qh.start >= 0 && qh.end >= 0;
     if (!managementLoadIsCurrent("settings", generation)) return;
     el.innerHTML = `
       <div style="padding:24px;max-width:640px">
@@ -4372,6 +4398,24 @@ async function loadSettings(generation = managementLoadGeneration){
 
         <div style="height:1px;background:var(--border);margin:32px 0"></div>
 
+        <div style="margin-bottom:20px">
+          <div style="font-size:14px;font-weight:600;color:var(--text-hi);margin-bottom:4px">Alert Quiet Hours</div>
+          <div style="font-size:12px;color:var(--text-2);line-height:1.6">Suppress downward alerts between these hours (server local time). Recovery alerts always fire regardless.</div>
+        </div>
+        <div class="form-grid">
+          <div class="fg full"><label class="flabel" for="setQhEnabled"><input type="checkbox" id="setQhEnabled" ${qhEnabled ? 'checked' : ''} onchange="document.getElementById('setQhFields').style.display=this.checked?'':'none'" style="vertical-align:middle;margin-right:6px">Enable quiet hours</label></div>
+          <div id="setQhFields" style="display:${qhEnabled?'contents':'none'};contents:contents">
+            <div class="fg"><label class="flabel" for="setQhStart">Quiet from (hour 0–23)</label><input class="finput" id="setQhStart" type="number" min="0" max="23" placeholder="22" value="${qhEnabled ? qh.start : 22}"></div>
+            <div class="fg"><label class="flabel" for="setQhEnd">Quiet until (hour 0–23)</label><input class="finput" id="setQhEnd" type="number" min="0" max="23" placeholder="7" value="${qhEnabled ? qh.end : 7}"></div>
+          </div>
+        </div>
+        <div style="display:flex;gap:10px;margin-top:20px">
+          <button class="btn btn-primary" onclick="saveQuietHours()">Save Quiet Hours</button>
+        </div>
+        <div id="setQhMsg" style="margin-top:14px;font-size:12px"></div>
+
+        <div style="height:1px;background:var(--border);margin:32px 0"></div>
+
         <!-- Danger Zone — destructive actions behind a typed confirmation. -->
         <div style="border:1px solid rgba(239,61,90,.35);border-radius:12px;padding:20px 22px;background:rgba(239,61,90,.04);margin-top:8px">
           <div style="display:flex;align-items:center;gap:10px;margin-bottom:12px">
@@ -4433,6 +4477,26 @@ async function sendWeeklyReportNow(){
     msg.textContent = `Sent to ${d.recipients} recipient(s) — overall uptime ${d.overallUptime == null ? "—" : d.overallUptime.toFixed(2) + "%"}, ${d.incidents} incidents`;
     msg.style.color = "var(--green)";
     toast("Weekly report sent", "success");
+  } catch(e) {
+    msg.textContent = "Error: " + e.message; msg.style.color = "var(--red)";
+  }
+}
+
+async function saveQuietHours(){
+  const msg = document.getElementById("setQhMsg");
+  const enabled = document.getElementById("setQhEnabled").checked;
+  const body = enabled
+    ? { start: parseInt(document.getElementById("setQhStart").value), end: parseInt(document.getElementById("setQhEnd").value) }
+    : { start: "", end: "" };
+  try {
+    const r = await fetch("/api/admin/settings/alert-quiet-hours", {
+      method:"POST", headers:{"Content-Type":"application/json"}, body: JSON.stringify(body)
+    });
+    const d = await r.json();
+    if (!r.ok) { msg.textContent = "Error: " + (d.error || "Failed"); msg.style.color = "var(--red)"; return; }
+    msg.textContent = enabled ? `Quiet hours active: ${d.start}:00–${d.end}:00 server local time` : "Quiet hours disabled";
+    msg.style.color = "var(--green)";
+    toast("Quiet hours saved", "success");
   } catch(e) {
     msg.textContent = "Error: " + e.message; msg.style.color = "var(--red)";
   }

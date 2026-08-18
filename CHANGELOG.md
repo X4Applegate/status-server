@@ -8,6 +8,15 @@ All notable changes to this project are documented here.
 
 ## [Unreleased]
 
+## [3.12.0] — 2026-08-18
+
+### Added
+- **Response time badges** — each poll records the fastest `response_ms` across all checks for a service. The admin server list now shows a color-coded latency badge (green <150ms, amber <500ms, red ≥500ms). The field is also exposed via the public API through the anonymous serializer.
+- **Incident auto-resolution** — when a service transitions from down → up, any open incidents linked to it are automatically resolved. A system recovery update is inserted into the incident timeline with the exact UTC timestamp, and the incident status is set to `resolved`.
+- **Alert quiet hours** — admins can configure a daily time window (start hour → end hour, 0–23 server local time, including overnight spans) during which downward alerts are suppressed for both webhook and subscriber email channels. Recovery alerts always fire regardless. Configured in the Settings panel; stored in `status_settings`.
+- **Service reorder** — ↑↓ arrow buttons on each admin server list row let admins reorder services within the global sort. `POST /api/admin/servers/reorder` swaps `sort_order` values so the change persists across restarts.
+- **20 new tests** — v312-features.test.js covers all four features. Total test count: 98 → 118.
+
 ## [3.11.1] — 2026-08-18
 
 ### Fixed

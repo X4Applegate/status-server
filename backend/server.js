@@ -209,6 +209,35 @@ const IS_PROD        = process.env.NODE_ENV === "production";
   }
 })();
 
+// -- Alert quiet hours ---------------------------------------------------------
+// When configured, downward alerts are suppressed between quietStart and quietEnd
+// (local server hours, 0–23). Recovery alerts always fire regardless.
+let alertQuietStart = -1; // -1 = disabled
+let alertQuietEnd   = -1;
+
+function isInQuietHours() {
+  if (alertQuietStart < 0 || alertQuietEnd < 0) return false;
+  const h = new Date().getHours();
+  return alertQuietStart > alertQuietEnd
+    ? (h >= alertQuietStart || h < alertQuietEnd)   // overnight span e.g. 22→7
+    : (h >= alertQuietStart && h < alertQuietEnd);  // same-day span e.g. 9→17
+}
+
+async function loadAlertQuietHoursFromDb() {
+  if (!db) return;
+  try {
+    const [rows] = await db.query(
+      "SELECT key_name, value FROM status_settings WHERE key_name IN ('alert_quiet_start','alert_quiet_end')"
+    );
+    const m = {};
+    rows.forEach(r => { m[r.key_name] = r.value; });
+    alertQuietStart = m.alert_quiet_start != null ? parseInt(m.alert_quiet_start) : -1;
+    alertQuietEnd   = m.alert_quiet_end   != null ? parseInt(m.alert_quiet_end)   : -1;
+    if (!Number.isInteger(alertQuietStart) || alertQuietStart < 0 || alertQuietStart > 23) alertQuietStart = -1;
+    if (!Number.isInteger(alertQuietEnd)   || alertQuietEnd   < 0 || alertQuietEnd   > 23) alertQuietEnd   = -1;
+  } catch(e) { /* settings table may not exist yet */ }
+}
+
 // -- SMTP config (for email webhook notifications) ----------------------------
 // Loaded from DB settings table (web UI); env vars are fallback for first-run setups.
 let smtpConfig = {
@@ -1256,6 +1285,7 @@ async function initDB() {
   await loadGoogleOAuthFromDb();
   await loadMapboxFromDb();
   await loadWeeklyReportFromDb();
+  await loadAlertQuietHoursFromDb();
 
   // No longer auto-creates admin — first user signs up via /login
 
@@ -3043,6 +3073,11 @@ async function maybeSendScheduledWeeklyReport() {
 }
 
 async function fireWebhooks(evt) {
+  // Quiet hours suppress downward alerts; recovery alerts always fire
+  if (!evt.isRecovery && !evt.isTest && isInQuietHours()) {
+    addLog({ level:"info", server:evt.server, message:`Alert suppressed — quiet hours active (${alertQuietStart}:00–${alertQuietEnd}:00)` });
+    return;
+  }
   let hooks;
   try {
     // A global webhook (group_id IS NULL) fires for any server. A group-scoped webhook
@@ -3123,7 +3158,8 @@ async function fireWebhooks(evt) {
 }
 
 async function fireSubscriberEmails(evt) {
-  if (!smtpTransport) return; // SMTP not configured — silently skip
+  if (!smtpTransport) return;
+  if (!evt.isRecovery && !evt.isTest && isInQuietHours()) return; // quiet hours
   if (!Array.isArray(evt.serverGroupIds) || !evt.serverGroupIds.length) return;
   try {
     const field = evt.isRecovery ? "notify_recovery" : "notify_down";
@@ -3180,6 +3216,26 @@ async function fireSubscriberEmails(evt) {
 }
 
 // -- Poll ----------------------------------------------------------------------
+// Auto-resolve open incidents when a service recovers.
+// Adds a system recovery update and marks the incident resolved.
+async function autoResolveIncidents(serverId, nowIso) {
+  const [open] = await db.query(
+    "SELECT id, started_at FROM status_incidents WHERE server_id=? AND status NOT IN ('resolved')",
+    [serverId]
+  );
+  for (const inc of open) {
+    const durationS = Math.round((new Date(nowIso) - new Date(inc.started_at)) / 1000);
+    await db.query(
+      "INSERT INTO status_incident_updates (incident_id, status, message, created_at) VALUES (?,?,?,?)",
+      [inc.id, "resolved", `Service recovered — automatically detected at ${new Date(nowIso).toUTCString()}.`, new Date(nowIso)]
+    );
+    await db.query(
+      "UPDATE status_incidents SET status='resolved', ended_at=?, duration_s=? WHERE id=?",
+      [new Date(nowIso), durationS, inc.id]
+    );
+  }
+}
+
 // Tracks last-polled epoch (ms) per server, so per-server intervals work.
 // `pollAll(force=true)` ignores the schedule and polls every server (used by /api/refresh).
 const _lastPolled = {};
@@ -3332,10 +3388,13 @@ async function pollAll(force = false) {
           fireWebhooks(_alertEvtRec).catch(() => {});
           fireSubscriberEmails(_alertEvtRec).catch(() => {});
         }
+        // Auto-resolve any open incidents linked to this server
+        autoResolveIncidents(def.id, now).catch(() => {});
       }
     }
 
-    serverStatus[def.id] = { id:def.id, name:def.name, host:def.host, description:def.description||"", category:def.category||"", sub_category:def.sub_category||"", runbook:def.runbook||"", group_ids:def.group_ids||[], tags:def.tags||[], checks, overall, lastChecked:now, uptimeHistory:history, failStreak, flapping, enabled:def.enabled !== false, lat:def.lat||null, lng:def.lng||null, maintenance:inMaintenance };
+    const response_ms = checks.find(c => c.response_ms != null)?.response_ms ?? null;
+    serverStatus[def.id] = { id:def.id, name:def.name, host:def.host, description:def.description||"", category:def.category||"", sub_category:def.sub_category||"", runbook:def.runbook||"", group_ids:def.group_ids||[], tags:def.tags||[], checks, overall, lastChecked:now, uptimeHistory:history, failStreak, flapping, enabled:def.enabled !== false, lat:def.lat||null, lng:def.lng||null, maintenance:inMaintenance, response_ms };
     // Record to DB (non-blocking)
     recordHistory(def, checks, overall).catch(() => {});
   }));
@@ -3829,7 +3888,8 @@ app.get("/api/admin/servers", requireAuth, async (req, res) => {
         group_ids: groupsByServer[r.id] || [],
         tags:   typeof r.tags   === "string" ? JSON.parse(r.tags)   : r.tags,
         checks: mergedChecks,
-        overall: serverStatus[r.id]?.overall || "pending"
+        overall: serverStatus[r.id]?.overall || "pending",
+        response_ms: serverStatus[r.id]?.response_ms ?? null
       };
     }));
   } catch(e) {
@@ -3989,6 +4049,30 @@ app.delete("/api/admin/servers/:id", requireAdmin, async (req, res) => {
   }
 });
 
+
+// Reorder a single server up or down within the sort_order sequence.
+app.post("/api/admin/servers/reorder", requireAdmin, async (req, res) => {
+  const { id, direction } = req.body;
+  if (!id || !["up","down"].includes(direction)) return res.status(400).json({ error:"id and direction (up|down) required" });
+  try {
+    const [rows] = await db.query("SELECT id, sort_order FROM status_servers ORDER BY sort_order, created_at");
+    const idx = rows.findIndex(r => String(r.id) === String(id));
+    if (idx < 0) return res.status(404).json({ error:"Server not found" });
+    const swapIdx = direction === "up" ? idx - 1 : idx + 1;
+    if (swapIdx < 0 || swapIdx >= rows.length) return res.json({ ok:true }); // already at edge
+    // Assign sequential sort_orders then swap the two positions
+    const orderedIds = rows.map(r => r.id);
+    orderedIds.splice(idx, 1);
+    orderedIds.splice(swapIdx, 0, id);
+    await Promise.all(orderedIds.map((sid, i) =>
+      db.query("UPDATE status_servers SET sort_order=? WHERE id=?", [i, sid])
+    ));
+    await loadConfig();
+    res.json({ ok: true });
+  } catch(e) {
+    res.status(500).json({ error: e.message });
+  }
+});
 
 // Bulk server actions — admin only. Accepts { ids, action, group_id? }
 // actions: enable | disable | delete | move (reassign to a single group)
@@ -4333,6 +4417,34 @@ app.post("/api/admin/settings/smtp/test", requireAdmin, async (req, res) => {
     res.json({ ok: true });
   } catch(e) {
     addLog({ level:"warn", server:"admin", message:`SMTP test failed: ${e.message}` });
+    res.status(500).json({ error: e.message });
+  }
+});
+
+app.get("/api/admin/settings/alert-quiet-hours", requireAdmin, (req, res) => {
+  res.json({ start: alertQuietStart, end: alertQuietEnd });
+});
+
+app.post("/api/admin/settings/alert-quiet-hours", requireAdmin, async (req, res) => {
+  const start = parseInt(req.body.start);
+  const end   = parseInt(req.body.end);
+  const disabling = req.body.start === "" || req.body.start === null || isNaN(start);
+  try {
+    if (disabling) {
+      await db.query("DELETE FROM status_settings WHERE key_name IN ('alert_quiet_start','alert_quiet_end')");
+      alertQuietStart = -1;
+      alertQuietEnd   = -1;
+    } else {
+      if (start < 0 || start > 23 || end < 0 || end > 23) return res.status(400).json({ error:"Hours must be 0–23" });
+      await db.query(
+        "INSERT INTO status_settings (key_name, value) VALUES ('alert_quiet_start',?),('alert_quiet_end',?) ON DUPLICATE KEY UPDATE value=VALUES(value)",
+        [String(start), String(end)]
+      );
+      alertQuietStart = start;
+      alertQuietEnd   = end;
+    }
+    res.json({ ok: true, start: alertQuietStart, end: alertQuietEnd });
+  } catch(e) {
     res.status(500).json({ error: e.message });
   }
 });
