@@ -319,6 +319,10 @@ body{font-family:var(--sans);background:var(--bg);color:var(--text);min-height:1
 .chip-cert.cert-warn   {color:var(--orange);background:var(--orange-soft);border:1px solid rgba(255,140,42,.3)}
 .chip-cert.cert-expired{color:var(--red);background:var(--red-soft);border:1px solid rgba(255,61,90,.3)}
 .admin-row-actions{display:flex;gap:5px;flex-shrink:0}
+.admin-srv-paused{font-size:9px;font-weight:700;color:var(--text-2);background:var(--surface2);border:1px solid var(--border);border-radius:6px;padding:1px 6px;letter-spacing:.04em;text-transform:uppercase}
+.srv-select-cb{width:14px;height:14px;flex-shrink:0;cursor:pointer;accent-color:var(--blue)}
+.bulk-bar{display:none;align-items:center;gap:8px;padding:7px 14px;background:var(--blue-soft);border-bottom:1px solid rgba(42,127,255,.25);font-size:12px;flex-wrap:wrap}
+.bulk-bar.visible{display:flex}
 .empty-state{padding:32px;text-align:center;color:var(--text-2);font-size:12px;line-height:1.7}
 .welcome-overlay{position:fixed;inset:0;background:rgba(0,0,0,.6);z-index:9999;display:flex;align-items:center;justify-content:center;animation:wFade .2s}
 .welcome-box{background:var(--surface);border:1px solid var(--border-hi);border-radius:16px;padding:40px;max-width:480px;width:90%;text-align:center;box-shadow:0 8px 40px rgba(0,0,0,.5)}
@@ -816,6 +820,13 @@ body.admin-role .admin-only-nav,body.admin-role .admin-only-action{display:flex!
           </div>
         </div>
         <div class="panel-scroll-wrap">
+          <div class="bulk-bar" id="bulkBar" role="toolbar" aria-label="Bulk actions">
+            <span id="bulkCount" style="font-weight:600;color:var(--blue)">0 selected</span>
+            <button class="btn btn-sm" onclick="bulkAction('enable')">Enable</button>
+            <button class="btn btn-sm" onclick="bulkAction('disable')">Pause</button>
+            <button class="btn btn-sm btn-danger" onclick="bulkAction('delete')">Delete</button>
+            <button class="btn btn-sm" style="margin-left:auto" onclick="clearBulkSelect()">Cancel</button>
+          </div>
           <div class="drawer-body" id="adminPanelBody" aria-live="polite"></div>
           <button class="panel-scroll-btn panel-scroll-up" id="panelScrollUp" onclick="panelScrollStep(-1)" title="Scroll up" aria-label="Scroll records up">▲</button>
           <button class="panel-scroll-btn panel-scroll-dn" id="panelScrollDn" onclick="panelScrollStep(1)" title="Scroll down" aria-label="Scroll records down">▼</button>
@@ -876,6 +887,7 @@ body.admin-role .admin-only-nav,body.admin-role .admin-only-action{display:flex!
             </select>
           </div>
           <div class="fg"><label class="flabel">SLA Target <span style="font-weight:400;text-transform:none;letter-spacing:0;color:var(--text-2)">(% uptime goal — used in the SLA dashboard)</span></label><input class="finput" id="fSlaTarget" type="number" min="0" max="100" step="0.01" placeholder="e.g. 99.9"></div>
+          <div class="fg" id="fEnabledWrap" style="display:none"><label class="flabel">Monitoring</label><label style="display:flex;align-items:center;gap:8px;cursor:pointer;font-size:13px;font-weight:400"><input type="checkbox" id="fEnabled" checked> Active — uncheck to pause monitoring without deleting the service</label></div>
           <div class="fg full"><label class="flabel">Dashboards <span style="font-weight:400;text-transform:none;letter-spacing:0;color:var(--text-2)" id="fGroupsHint">(pick one or more — this server appears in each)</span></label>
             <div id="fGroupsPicker" style="background:var(--input-bg);border:1px solid var(--border-hi);border-radius:var(--r-sm);max-height:220px;overflow-y:auto;padding:8px"></div>
           </div>
@@ -2903,6 +2915,45 @@ async function triggerRefresh(){
 // ── Admin Panel ───────────────────────────────────────────────────────────────
 let currentTab    = "servers";
 let adminServers  = [];
+let bulkSelected  = new Set();
+
+function toggleBulkSelect(id, checked) {
+  if (checked) bulkSelected.add(id); else bulkSelected.delete(id);
+  const bar = document.getElementById("bulkBar");
+  const cnt = document.getElementById("bulkCount");
+  if (bar) bar.className = bulkSelected.size ? "bulk-bar visible" : "bulk-bar";
+  if (cnt) cnt.textContent = `${bulkSelected.size} selected`;
+}
+
+function clearBulkSelect() {
+  bulkSelected.clear();
+  document.querySelectorAll(".srv-select-cb").forEach(cb => { cb.checked = false; });
+  const bar = document.getElementById("bulkBar");
+  if (bar) bar.className = "bulk-bar";
+}
+
+async function bulkAction(action) {
+  if (!bulkSelected.size) return;
+  const ids = Array.from(bulkSelected);
+  if (action === "delete") {
+    const noun = ids.length === 1 ? "1 server" : `${ids.length} servers`;
+    if (!confirm(`Permanently delete ${noun}? This cannot be undone.`)) return;
+  }
+  try {
+    const r = await fetch("/api/admin/servers/bulk", {
+      method: "POST",
+      headers: {"Content-Type": "application/json"},
+      body: JSON.stringify({ ids, action })
+    });
+    const d = await r.json();
+    if (!r.ok) { toast(d.error || "Bulk action failed", "error"); return; }
+    toast(`${action === "enable" ? "Enabled" : action === "disable" ? "Paused" : "Deleted"} ${d.affected} server${d.affected === 1 ? "" : "s"}`, "success");
+    clearBulkSelect();
+    await loadServerList();
+  } catch(e) {
+    toast("Network error — bulk action failed", "error");
+  }
+}
 let currentChecks = [];
 let pendDel       = null;
 let _userStore    = {};
@@ -3014,6 +3065,7 @@ async function switchTab(tab, managementGeneration = managementLoadGeneration){
   const previousTab = currentTab;
   currentTab = tab;
   if (previousTab !== tab) {
+    clearBulkSelect();
     const search = document.getElementById("serverSearchInput");
     if (search) search.value = "";
     document.getElementById("serverSearchClear")?.classList.remove("visible");
@@ -3400,10 +3452,14 @@ function renderAdminServerList(list){
         return `<span class="chip-cert ${ccls}" title="${_escHtml(tt)}">${_escHtml(txt)}</span>`;
       }).join("");
     const serviceId = _escHtml(s.id);
-    return `<div class="admin-server-item" role="button" tabindex="0" data-service-id="${serviceId}" onclick="showServerForm(findAdminServer(this.dataset.serviceId))" onkeydown="if(event.target===event.currentTarget&&(event.key==='Enter'||event.key===' ')){event.preventDefault();showServerForm(findAdminServer(this.dataset.serviceId))}">
-      <div class="admin-dot ${s.overall||'pending'}"></div>
+    const isPaused  = s.enabled === false || s.enabled === 0;
+    const pausedBadge = isPaused ? `<span class="admin-srv-paused">Paused</span>` : "";
+    const cbChecked = bulkSelected.has(s.id) ? " checked" : "";
+    return `<div class="admin-server-item" role="button" tabindex="0" data-service-id="${serviceId}" onclick="if(!event.target.matches('.srv-select-cb')){showServerForm(findAdminServer(this.dataset.serviceId))}" onkeydown="if(event.target===event.currentTarget&&(event.key==='Enter'||event.key===' ')){event.preventDefault();showServerForm(findAdminServer(this.dataset.serviceId))}">
+      ${isAdmin() ? `<input type="checkbox" class="srv-select-cb" data-id="${serviceId}" aria-label="Select ${_escHtml(s.name)}"${cbChecked} onclick="event.stopPropagation();toggleBulkSelect(this.dataset.id,this.checked)">` : ""}
+      <div class="admin-dot ${isPaused ? 'pending' : (s.overall||'pending')}"></div>
       <div class="admin-info">
-        <div class="admin-name">${_escHtml(s.name)}</div>
+        <div class="admin-name">${_escHtml(s.name)} ${pausedBadge}</div>
         <div class="admin-host">${_escHtml(s.host)}${(s.category||s.sub_category) ? ` <span style="color:var(--text-2);opacity:.7">·</span> <span style="color:var(--blue);opacity:.8">${_escHtml([s.category,s.sub_category].filter(Boolean).join(" › "))}</span>` : ""}${s.description ? ` <span style="color:var(--text-2);opacity:.6;font-style:italic">— ${_escHtml(s.description)}</span>` : ""}</div>
         <div class="admin-checks-label">${_escHtml(checkSummary)}${certBadges ? " " + certBadges : ""}</div>
       </div>
@@ -3503,6 +3559,9 @@ async function showServerForm(s){
   document.getElementById("fTags").value  = (s?.tags||[]).join(", ");
   document.getElementById("fRunbook").value = s?.runbook || "";
   document.getElementById("fSlaTarget").value = s?.sla_target != null ? String(s.sla_target) : "";
+  const _fEnabledWrap = document.getElementById("fEnabledWrap");
+  if (_fEnabledWrap) _fEnabledWrap.style.display = isAdmin() ? "" : "none";
+  document.getElementById("fEnabled").checked = s ? (s.enabled !== false && s.enabled !== 0) : true;
   document.getElementById("fInterval").value = String(s?.poll_interval_sec || 30);
   document.getElementById("fThreshold").value = String(s?.failure_threshold || 1);
   document.getElementById("fErr").textContent = "";
@@ -3924,6 +3983,7 @@ async function submitForm(){
     location_address: document.getElementById("fAddress").value.trim() || null,
     runbook:          document.getElementById("fRunbook").value,
     sla_target:       document.getElementById("fSlaTarget").value !== "" ? parseFloat(document.getElementById("fSlaTarget").value) : null,
+    enabled:          isAdmin() ? (document.getElementById("fEnabled").checked ? 1 : 0) : undefined,
   };
   try {
     const r = await fetch(id ? `/api/admin/servers/${id}` : "/api/admin/servers", {

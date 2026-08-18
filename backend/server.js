@@ -858,6 +858,9 @@ async function initDB() {
   try {
     await db.query("ALTER TABLE status_servers ADD COLUMN sla_target DECIMAL(5,2) DEFAULT NULL");
   } catch(e) { /* column already exists */ }
+  try {
+    await db.query("ALTER TABLE status_servers ADD COLUMN enabled TINYINT(1) NOT NULL DEFAULT 1");
+  } catch(e) { /* column already exists */ }
 
   await db.query(`
     CREATE TABLE IF NOT EXISTS status_history (
@@ -1322,17 +1325,19 @@ async function loadConfig() {
       group_ids:         groupsByServer[r.id] || [],
       tags:              typeof r.tags   === "string" ? JSON.parse(r.tags)   : (r.tags   || []),
       checks:            typeof r.checks === "string" ? JSON.parse(r.checks) : (r.checks || []),
-      lat: r.lat != null ? parseFloat(r.lat) : null,
-      lng: r.lng != null ? parseFloat(r.lng) : null,
+      lat:     r.lat != null ? parseFloat(r.lat) : null,
+      lng:     r.lng != null ? parseFloat(r.lng) : null,
+      enabled: r.enabled !== 0,
     }));
 
     serverConfig.forEach(s => {
       if (!serverStatus[s.id]) {
-        serverStatus[s.id] = { id:s.id, name:s.name, host:s.host, description:s.description, category:s.category, sub_category:s.sub_category, runbook:s.runbook||"", group_ids:s.group_ids, tags:s.tags, checks:[], overall:"pending", lastChecked:null, uptimeHistory:[], lat:s.lat||null, lng:s.lng||null };
+        serverStatus[s.id] = { id:s.id, name:s.name, host:s.host, description:s.description, category:s.category, sub_category:s.sub_category, runbook:s.runbook||"", group_ids:s.group_ids, tags:s.tags, checks:[], overall:"pending", lastChecked:null, uptimeHistory:[], flapping:false, enabled:s.enabled, lat:s.lat||null, lng:s.lng||null };
       } else {
-        // Keep group_ids + runbook in sync on existing entries
+        // Keep group_ids + runbook + enabled in sync on existing entries
         serverStatus[s.id].group_ids = s.group_ids;
         serverStatus[s.id].runbook   = s.runbook || "";
+        serverStatus[s.id].enabled   = s.enabled;
       }
     });
 
@@ -1351,7 +1356,7 @@ async function loadConfig() {
           const [histRows] = await db.query(
             `SELECT server_id, MIN(ok) AS ok, checked_at
              FROM status_history
-             WHERE checked_at >= DATE_SUB(NOW(), INTERVAL 1 HOUR)
+             WHERE checked_at >= DATE_SUB(NOW(), INTERVAL 2 DAY)
                AND server_id IN (?)
              GROUP BY server_id, checked_at
              ORDER BY checked_at DESC`,
@@ -1362,7 +1367,7 @@ async function loadConfig() {
             (histByServer[r.server_id] ||= []).push(!!r.ok);
           }
           for (const sid of Object.keys(histByServer)) {
-            histByServer[sid] = histByServer[sid].reverse().slice(-20);
+            histByServer[sid] = histByServer[sid].reverse().slice(-90);
           }
           for (const sid of serverIds) {
             if (serverStatus[sid] && histByServer[sid]) {
@@ -1439,6 +1444,15 @@ function tcpCheck(host, port, timeout=3000) {
 }
 
 // HTTPS agent that disables session caching + keep-alive. Without this, Node reuses
+// Counts up↔down alternations in the tail of a boolean history array.
+// Used by pollAll() to detect rapid flapping before triggering alerts.
+function countFlips(history, window) {
+  const w = history.slice(-window);
+  let n = 0;
+  for (let i = 1; i < w.length; i++) if (w[i] !== w[i - 1]) n++;
+  return n;
+}
+
 // the TLS session on subsequent polls and getPeerCertificate() returns an empty {} —
 // so cert expiry info only shows up on the very first poll and never again.
 const httpsNoCacheAgent = new https.Agent({ maxCachedSessions: 0, keepAlive: false });
@@ -3174,20 +3188,23 @@ async function pollAll(force = false) {
   const nowMs = Date.now();
   // Pick only servers that are DUE for polling based on their poll_interval_sec.
   // Default interval is 30s; servers can override to be faster (e.g. 20s) or slower.
-  const due = force
-    ? serverConfig
-    : serverConfig.filter(def => {
-        const interval = Math.max(5, def.poll_interval_sec || 30) * 1000;
-        const last = _lastPolled[def.id] || 0;
-        return (nowMs - last) >= interval;
-      });
+  const due = (force ? serverConfig : serverConfig.filter(def => {
+    const interval = Math.max(5, def.poll_interval_sec || 30) * 1000;
+    const last = _lastPolled[def.id] || 0;
+    return (nowMs - last) >= interval;
+  })).filter(def => def.enabled !== false);
   if (!due.length) return;
   due.forEach(def => { _lastPolled[def.id] = nowMs; });
   await Promise.all(due.map(async def => {
     const checks     = await runChecks(def);
     const rawOverall = checks.every(c=>c.ok) ? "up" : checks.some(c=>c.ok) ? "degraded" : "down";
     const prev       = serverStatus[def.id] || {};
-    const history    = [...(prev.uptimeHistory||[]), rawOverall==="up"].slice(-20);
+    const history    = [...(prev.uptimeHistory||[]), rawOverall==="up"].slice(-90);
+
+    // Flap detection: if status alternates ≥4 times in the last 10 checks, the
+    // service is flapping. Downward alerts are suppressed while flapping to prevent
+    // alert spam; recovery alerts still fire so operators know when it stabilises.
+    const flapping = history.length >= 6 && countFlips(history, 10) >= 4;
 
     // Sticky status: suppress transitions to down/degraded until rawOverall has
     // stayed non-up for `failure_threshold` consecutive polls. Recovery is immediate.
@@ -3229,6 +3246,9 @@ async function pollAll(force = false) {
         // Server is in a planned maintenance window — skip all webhook/email alerts.
         // The status change is still logged above and still appears in SSE/dashboard;
         // we just don't page anyone about it.
+      } else if (flapping) {
+        // Service is flapping (rapidly alternating up/down). Suppress downward alerts
+        // to avoid alert spam; recovery alerts still fire (handled below).
       } else if (isDownward) {
         if (isSquare) {
           // Square POS: hold alert for 5 min — cancel if it recovers first
@@ -3315,7 +3335,7 @@ async function pollAll(force = false) {
       }
     }
 
-    serverStatus[def.id] = { id:def.id, name:def.name, host:def.host, description:def.description||"", category:def.category||"", sub_category:def.sub_category||"", runbook:def.runbook||"", group_ids:def.group_ids||[], tags:def.tags||[], checks, overall, lastChecked:now, uptimeHistory:history, failStreak, lat:def.lat||null, lng:def.lng||null, maintenance:inMaintenance };
+    serverStatus[def.id] = { id:def.id, name:def.name, host:def.host, description:def.description||"", category:def.category||"", sub_category:def.sub_category||"", runbook:def.runbook||"", group_ids:def.group_ids||[], tags:def.tags||[], checks, overall, lastChecked:now, uptimeHistory:history, failStreak, flapping, enabled:def.enabled !== false, lat:def.lat||null, lng:def.lng||null, maintenance:inMaintenance };
     // Record to DB (non-blocking)
     recordHistory(def, checks, overall).catch(() => {});
   }));
@@ -3845,8 +3865,8 @@ app.post("/api/admin/servers", requireAuth, async (req, res) => {
   const id = name.toLowerCase().replace(/[^a-z0-9]+/g,"-").replace(/^-|-$/g,"") + "-" + Date.now();
   try {
     await db.query(
-      "INSERT INTO status_servers (id, name, host, description, category, sub_category, tags, checks, poll_interval_sec, failure_threshold, lat, lng, location_address, runbook, sla_target) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
-      [id, name, host, description||"", (category||"").trim() || null, (sub_category||"").trim() || null, JSON.stringify(tags||[]), JSON.stringify(checks||[{type:"ping"}]), interval, threshold, lat, lng, req.body.location_address||null, runbook || null, slaTarget]
+      "INSERT INTO status_servers (id, name, host, description, category, sub_category, tags, checks, poll_interval_sec, failure_threshold, lat, lng, location_address, runbook, sla_target, enabled) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+      [id, name, host, description||"", (category||"").trim() || null, (sub_category||"").trim() || null, JSON.stringify(tags||[]), JSON.stringify(checks||[{type:"ping"}]), interval, threshold, lat, lng, req.body.location_address||null, runbook || null, slaTarget, req.session.role === "admin" && req.body.enabled === 0 ? 0 : 1]
     );
     await setServerGroupIds(id, wantGroups);
     await loadConfig();
@@ -3904,8 +3924,8 @@ app.put("/api/admin/servers/:id", requireAuth, async (req, res) => {
       }
     }
     const [result] = await db.query(
-      "UPDATE status_servers SET name=?, host=?, description=?, category=?, sub_category=?, tags=?, checks=?, poll_interval_sec=?, failure_threshold=?, lat=?, lng=?, location_address=?, runbook=?, sla_target=?, updated_at=NOW() WHERE id=?",
-      [name, host, description||"", (category||"").trim() || null, (sub_category||"").trim() || null, JSON.stringify(tags||[]), JSON.stringify(checks||[]), interval, threshold, lat, lng, location_address||null, runbook || null, slaTarget, req.params.id]
+      "UPDATE status_servers SET name=?, host=?, description=?, category=?, sub_category=?, tags=?, checks=?, poll_interval_sec=?, failure_threshold=?, lat=?, lng=?, location_address=?, runbook=?, sla_target=?, enabled=?, updated_at=NOW() WHERE id=?",
+      [name, host, description||"", (category||"").trim() || null, (sub_category||"").trim() || null, JSON.stringify(tags||[]), JSON.stringify(checks||[]), interval, threshold, lat, lng, location_address||null, runbook || null, slaTarget, req.session.role === "admin" && req.body.enabled === 0 ? 0 : 1, req.params.id]
     );
     if (result.affectedRows === 0) return res.status(404).json({ error:"Server not found" });
     // Admins with undefined group_ids leave groups alone; otherwise replace the full set.
@@ -3969,6 +3989,48 @@ app.delete("/api/admin/servers/:id", requireAdmin, async (req, res) => {
   }
 });
 
+
+// Bulk server actions — admin only. Accepts { ids, action, group_id? }
+// actions: enable | disable | delete | move (reassign to a single group)
+app.post("/api/admin/servers/bulk", requireAdmin, async (req, res) => {
+  const { ids, action, group_id } = req.body;
+  if (!Array.isArray(ids) || !ids.length) return res.status(400).json({ error: "ids required" });
+  const ACTIONS = ["enable", "disable", "delete", "move"];
+  if (!ACTIONS.includes(action)) return res.status(400).json({ error: `action must be one of: ${ACTIONS.join(", ")}` });
+  const safeIds = ids.filter(id => typeof id === "string" && id.length <= 200);
+  if (!safeIds.length) return res.status(400).json({ error: "No valid ids" });
+  try {
+    if (action === "enable") {
+      await db.query("UPDATE status_servers SET enabled=1 WHERE id IN (?)", [safeIds]);
+      safeIds.forEach(id => { if (serverStatus[id]) serverStatus[id].enabled = true; });
+    } else if (action === "disable") {
+      await db.query("UPDATE status_servers SET enabled=0 WHERE id IN (?)", [safeIds]);
+      safeIds.forEach(id => {
+        if (serverStatus[id]) { serverStatus[id].enabled = false; serverStatus[id].overall = "pending"; serverStatus[id].flapping = false; }
+      });
+    } else if (action === "delete") {
+      for (const id of safeIds) {
+        const [rows] = await db.query("SELECT name FROM status_servers WHERE id=?", [id]);
+        if (!rows.length) continue;
+        await db.query("DELETE FROM status_server_group_map WHERE server_id=?", [id]);
+        await db.query("DELETE FROM status_servers WHERE id=?", [id]);
+        delete serverStatus[id];
+        addAuditLog({ userId: req.session.userId, username: req.session.username, action:"server.delete", resourceType:"server", resourceId: id, resourceName: rows[0].name, ip: req.ip });
+      }
+    } else if (action === "move") {
+      const gid = parseInt(group_id);
+      if (!Number.isFinite(gid)) return res.status(400).json({ error: "group_id required for move" });
+      const [groupRows] = await db.query("SELECT id FROM status_groups WHERE id=?", [gid]);
+      if (!groupRows.length) return res.status(404).json({ error: "Group not found" });
+      for (const id of safeIds) await setServerGroupIds(id, [gid]);
+    }
+    await loadConfig();
+    addLog({ level:"info", server:"admin", message:`Bulk ${action}: ${safeIds.length} server(s) by ${req.session.username}` });
+    res.json({ ok: true, affected: safeIds.length });
+  } catch(err) {
+    res.status(500).json({ error: err.message });
+  }
+});
 
 // -- User Management (admin only) ----------------------------------------------
 // Helper: get the set of group IDs a user is allowed to view.
@@ -5910,7 +5972,7 @@ app.post("/api/admin/clear-history", requireAdmin, async (req, res) => {
 app.get("/api/public/servers", requireAuth, async (req, res) => {
   try {
     const allowed = await getUserAllowedGroupIds(req.session.userId, req.session.role);
-    let list = Object.values(serverStatus);
+    let list = Object.values(serverStatus).filter(s => s.enabled !== false);
     if (allowed !== null) {
       const allowedSet = new Set(allowed);
       list = list.filter(s => Array.isArray(s.group_ids) && s.group_ids.some(gid => allowedSet.has(gid)));
@@ -5921,6 +5983,7 @@ app.get("/api/public/servers", requireAuth, async (req, res) => {
       checks: s.checks || [],                  // includes cert info for HTTPS checks
       overall: s.overall, lastChecked: s.lastChecked,
       uptimeHistory: s.uptimeHistory,
+      flapping: s.flapping || false,
       lat: s.lat != null ? s.lat : null,
       lng: s.lng != null ? s.lng : null,
       // Runbook: on-call playbook shown on the detail panel. Authenticated viewers only —
@@ -5949,7 +6012,7 @@ app.get("/api/public/group/:slug", async (req, res) => {
       canViewInternal = Array.isArray(allowed) && allowed.map(Number).includes(Number(g.id));
     }
     const matchingServers = Object.values(serverStatus)
-      .filter(s => Array.isArray(s.group_ids) && s.group_ids.includes(g.id));
+      .filter(s => s.enabled !== false && Array.isArray(s.group_ids) && s.group_ids.includes(g.id));
     const servers = canViewInternal
       ? matchingServers.map(s => ({
         id: s.id, name: s.name, host: s.host,
@@ -5957,6 +6020,7 @@ app.get("/api/public/group/:slug", async (req, res) => {
         checks: s.checks || [],              // includes cert info for HTTPS checks
         overall: s.overall, lastChecked: s.lastChecked,
         uptimeHistory: s.uptimeHistory,
+        flapping: s.flapping || false,
         // Coords are shown on the topbar map button (logged-in users only) — anonymous
         // visitors on a public dashboard don't need them and shouldn't see locations.
         lat: s.lat != null ? s.lat : null,

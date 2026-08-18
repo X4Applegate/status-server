@@ -84,6 +84,7 @@ test("anonymous server serialization omits infrastructure and internal polling s
     lastChecked: "2026-08-13T17:00:00.000Z",
     uptimeHistory: [true, false, true, false],
     maintenance: false,
+    flapping: false,
   });
   for (const forbidden of ["host", "lat", "lng", "runbook", "failStreak", "failure_threshold", "location_address"]) {
     assert.equal(Object.hasOwn(result, forbidden), false, `${forbidden} must not cross the public boundary`);

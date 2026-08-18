@@ -79,6 +79,7 @@ function serializePublicServer(server) {
     lastChecked: publicTimestamp(source.lastChecked),
     uptimeHistory,
     maintenance: source.maintenance === true || source.maintenance === 1,
+    flapping: source.flapping === true || source.flapping === 1,
   };
 }
 

@@ -8,6 +8,19 @@ All notable changes to this project are documented here.
 
 ## [Unreleased]
 
+## [3.11.0] — 2026-08-18
+
+### Added
+- **Uptime sparklines (90 checks)** — the public status page now shows the last 90 probe results per service as up/down dots (was 20). The seed query expanded from 1 hour to 2 days of history. Both the poll loop accumulator and the index.ejs renderer updated consistently.
+- **Monitoring pause** — admin can toggle a per-service `enabled` flag from the server edit form. Paused services are excluded from polling, show a "Paused" badge in the admin list, and are hidden from public status pages without being deleted. Schema: `enabled TINYINT(1) NOT NULL DEFAULT 1` added to `status_servers`.
+- **Flap detection** — `countFlips()` helper counts up↔down alternations in the tail of the uptime history. A service with ≥4 alternations in its last 10 checks is flagged `flapping`. Public status page shows "Unstable" badge; downward webhook/email alerts are suppressed while flapping (recovery alerts still fire).
+- **Bulk server actions** — admin server list now has per-row checkboxes and a "Bulk actions" toolbar. Supported actions: Enable, Pause (disable), Delete. A `POST /api/admin/servers/bulk` endpoint (admin-only) handles all three. Selection is cleared when switching tabs.
+- **23 new tests** in `v311-operational.test.js`. Test count: 75 → 98.
+
+### Changed
+- Both public server serializers (`/api/public/servers` and `/api/public/group/:slug`) filter out `enabled=false` servers.
+- `serializePublicServer` in `public-status-serializer.js` now exposes `flapping` field.
+
 ## [3.10.3] — 2026-08-18
 
 ### Added

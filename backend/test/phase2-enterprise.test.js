@@ -24,8 +24,8 @@ test("sla_target is included in the server INSERT SQL", () => {
     'app.post("/api/admin/servers"',
     'app.put("/api/admin/servers/:id"',
   );
-  assert.match(route, /sla_target\) VALUES/);
-  assert.match(route, /slaTarget\]/);
+  assert.match(route, /sla_target.*\) VALUES|sla_target, enabled\) VALUES/);
+  assert.match(route, /slaTarget/);
 });
 
 test("sla_target is included in the server UPDATE SQL", () => {

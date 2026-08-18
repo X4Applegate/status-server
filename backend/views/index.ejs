@@ -1923,7 +1923,7 @@ function renderSidebar(){
   // Helper that renders one server card
   const renderRow = (s) => {
     const hb = (s.uptimeHistory || []);
-    const pad = Math.max(0, 20 - hb.length);
+    const pad = Math.max(0, 90 - hb.length);
     const dots = [...Array(pad).fill(null).map(() => `<div class="srv-hb-dot pending"></div>`),
       ...hb.map(ok => `<div class="srv-hb-dot ${ok ? "up" : "down"}"></div>`)
     ].join("");
@@ -1941,14 +1941,14 @@ function renderSidebar(){
     const msHtml   = latestMs !== null
       ? `<span class="srv-fact response ${latestMs<150?"fast":latestMs<400?"ok":"slow"}"><span class="srv-fact-label">Response</span><span class="srv-fact-value">${latestMs}ms</span></span>`
       : "";
-    const badgeCls  = s.maintenance ? "pending" : (s.overall || "pending");
+    const badgeCls  = s.maintenance ? "pending" : s.flapping ? "degraded" : (s.overall || "pending");
     const statusLabels = { up:"Operational", down:"Outage", degraded:"Degraded", pending:"Checking" };
-    const badgeText = s.maintenance ? "Maintenance" : (statusLabels[s.overall] || "Checking");
+    const badgeText = s.maintenance ? "Maintenance" : s.flapping ? "Unstable" : (statusLabels[s.overall] || "Checking");
     const maintTag  = s.maintenance ? ` <span title="Scheduled maintenance — alerts suppressed" aria-label="Scheduled maintenance">🔧</span>` : "";
     const hostHtml = sidebarSession.loggedIn && s.host
       ? `<span class="srv-fact"><span class="srv-fact-label">Host</span><span class="srv-fact-value">${s.host}</span></span>`
       : "";
-    const recentCount = Math.min(20, hb.length);
+    const recentCount = Math.min(90, hb.length);
     return `
     <div class="srv-row ${s.id===selectedId?"active":""}" data-server-id="${s.id}" data-status="${s.maintenance?'maintenance':(s.overall||'pending')}" role="button" tabindex="0" onclick="selectServer('${s.id}')" onkeydown="if(event.target===this&&(event.key==='Enter'||event.key===' ')){event.preventDefault();selectServer('${s.id}')}" aria-label="View ${escapeHtml(s.name)} status details">
       <div class="srv-card-top">
@@ -1970,7 +1970,7 @@ function renderSidebar(){
         <canvas class="srv-sparkline" id="spark-${s.id}" width="200" height="20" title="24-hour response-time trend"></canvas>
       </div>
       <div class="srv-card-section">
-        <div class="srv-card-section-head"><span>Recent checks</span><span>${recentCount} of 20 probes</span></div>
+        <div class="srv-card-section-head"><span>Recent checks</span><span>${recentCount} of 90 probes</span></div>
         <div class="srv-hb-bar" aria-hidden="true">${dots}</div>
       </div>
     </div>`;

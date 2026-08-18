@@ -185,7 +185,7 @@ test("admin isolates authenticated caches and escapes service management values"
   assert.match(admin, /sessionStorage\.getItem\(prefix \+ key\)/);
   assert.match(admin, /function cacheClearLegacyPersistentCaches\(\)/);
 
-  assert.match(admin, /<div class="admin-name">\$\{_escHtml\(s\.name\)\}<\/div>/);
+  assert.match(admin, /<div class="admin-name">\$\{_escHtml\(s\.name\)\}/);
   assert.match(admin, /<div class="admin-host">\$\{_escHtml\(s\.host\)\}/);
   assert.match(admin, /data-service-id="\$\{serviceId\}" onclick="showServerForm\(findAdminServer\(this\.dataset\.serviceId\)\)"/);
   assert.match(admin, /event\.target===event\.currentTarget&&\(event\.key==='Enter'/);
