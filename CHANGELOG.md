@@ -8,6 +8,18 @@ All notable changes to this project are documented here.
 
 ## [Unreleased]
 
+## [3.10.1] — 2026-08-18
+
+### Added
+- Expanded enterprise design system (`enterprise.css`) with 20+ new reusable components: data table, form group/label/select/textarea/toggle, tab strip (filled and underline variants), chip/tag, avatar, divider with optional label, page header, timeline, empty state, skeleton loader, toast notification, progress bar, uptime bar, sidebar nav, status summary bar, data-fact grid, and custom scrollbar styles.
+- Added `enterprise-page-header`, `enterprise-page-title`, `enterprise-page-kicker`, `enterprise-page-description`, and `enterprise-page-actions` layout helpers for consistent admin and public-page headings.
+- Added `enterprise-timeline` for incident update timelines and `enterprise-uptime-bar` for heartbeat sparklines.
+- Added `enterprise-toast-stack` and `enterprise-toast` for in-page success, warning, danger, and info notifications.
+
+### Improved
+- Redesigned the login page to use Inter (matching the rest of the app), enterprise blue (`#2563eb`) as the accent colour (replacing the unrelated indigo), and unified CSS custom-property tokens for consistent light and dark theming.
+- Unified the dark-mode `:root` fallback palette in the public status dashboard (`index.ejs`) and admin workspace (`admin.ejs`) with the enterprise design system values — removes the legacy neon-blue and neon-green raw hex values used as pre-theme-script fallbacks.
+
 ## [3.10.0] — 2026-08-13
 
 ### Added
