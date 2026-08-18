@@ -3899,10 +3899,22 @@ function validateViewerGroupIds(allowedIds, groupIds) {
 app.get("/api/admin/servers", requireAuth, async (req, res) => {
   try {
     const [rows] = await db.query("SELECT * FROM status_servers ORDER BY sort_order, created_at");
-    // Load all group memberships once and bucket by server id
     const [mapRows] = await db.query("SELECT server_id, group_id FROM status_server_group_map");
     const groupsByServer = {};
     mapRows.forEach(m => { (groupsByServer[m.server_id] ||= []).push(m.group_id); });
+    // Batch 30-day uptime % per server — single query, no N+1
+    const [uptimeRows] = await db.query(
+      `SELECT server_id,
+         COUNT(*) AS total,
+         SUM(CASE WHEN ok=1 THEN 1 ELSE 0 END) AS up_count
+       FROM status_history
+       WHERE checked_at >= DATE_SUB(NOW(), INTERVAL 30 DAY)
+       GROUP BY server_id`
+    );
+    const uptimeMap = {};
+    for (const u of uptimeRows) {
+      uptimeMap[u.server_id] = u.total > 0 ? Math.round((u.up_count / u.total) * 1000) / 10 : null;
+    }
     const allowed = await getUserAllowedGroupIds(req.session.userId, req.session.role);
     const filtered = (allowed === null)
       ? rows
@@ -3927,7 +3939,8 @@ app.get("/api/admin/servers", requireAuth, async (req, res) => {
         tags:   typeof r.tags   === "string" ? JSON.parse(r.tags)   : r.tags,
         checks: mergedChecks,
         overall: serverStatus[r.id]?.overall || "pending",
-        response_ms: serverStatus[r.id]?.response_ms ?? null
+        response_ms: serverStatus[r.id]?.response_ms ?? null,
+        uptime_30d: uptimeMap[r.id] ?? null
       };
     }));
   } catch(e) {
@@ -5991,6 +6004,55 @@ app.get("/api/public/group/:slug/maintenance", async (req, res) => {
 // ── Admin incident management ───────────────────────────────────────────────
 // List all incidents (open + recent) across every server the caller can see.
 // Viewers are filtered by allowed_group_ids; admins see everything.
+// Manually create an incident for any monitored server.
+app.post("/api/admin/incidents", requireAdmin, async (req, res) => {
+  const { server_id, title, status = "investigating", impact = "minor", message, is_public = 1 } = req.body;
+  if (!server_id) return res.status(400).json({ error: "server_id required" });
+  const def = serverConfig.find(s => s.id === server_id);
+  if (!def) return res.status(404).json({ error: "Server not found" });
+  if (!["investigating","identified","monitoring"].includes(status)) return res.status(400).json({ error: "status must be investigating|identified|monitoring" });
+  if (!["minor","major","critical"].includes(impact)) return res.status(400).json({ error: "impact must be minor|major|critical" });
+  const cleanTitle   = String(title   || "").slice(0, 200) || null;
+  const cleanMessage = String(message || "Incident opened by operator").slice(0, 1000);
+  try {
+    const [result] = await db.query(
+      "INSERT INTO status_incidents (server_id, server_name, started_at, cause, title, status, impact, public) VALUES (?,?,NOW(),?,?,?,?,?)",
+      [server_id, def.name, "manually opened by operator", cleanTitle, status, impact, is_public ? 1 : 0]
+    );
+    const incidentId = result.insertId;
+    await db.query(
+      "INSERT INTO status_incident_updates (incident_id, status, message) VALUES (?,?,?)",
+      [incidentId, status, cleanMessage]
+    );
+    addAuditLog({ userId: req.session.userId, username: req.session.username, action:"incident.create", resourceType:"incident", resourceId: String(incidentId), resourceName: def.name, ip: req.ip });
+    res.json({ ok: true, id: incidentId });
+  } catch(e) { res.status(500).json({ error: e.message }); }
+});
+
+// Bulk-resolve all open incidents in one action.
+app.post("/api/admin/incidents/resolve-all", requireAdmin, async (req, res) => {
+  try {
+    const [open] = await db.query(
+      "SELECT id, server_id, started_at FROM status_incidents WHERE ended_at IS NULL"
+    );
+    if (!open.length) return res.json({ ok: true, resolved: 0 });
+    const now = new Date();
+    for (const inc of open) {
+      const durS = Math.max(0, Math.round((now - new Date(inc.started_at)) / 1000));
+      await db.query(
+        "UPDATE status_incidents SET ended_at=NOW(), duration_s=?, status='resolved' WHERE id=?",
+        [durS, inc.id]
+      );
+      await db.query(
+        "INSERT INTO status_incident_updates (incident_id, status, message) VALUES (?,?,?)",
+        [inc.id, "resolved", "Resolved by operator via bulk resolve"]
+      );
+    }
+    addAuditLog({ userId: req.session.userId, username: req.session.username, action:"incident.resolve-all", resourceType:"incident", resourceId:"bulk", resourceName: `${open.length} incidents`, ip: req.ip });
+    res.json({ ok: true, resolved: open.length });
+  } catch(e) { res.status(500).json({ error: e.message }); }
+});
+
 app.get("/api/admin/incidents", requireAuth, async (req, res) => {
   try {
     let sql = `SELECT i.* FROM status_incidents i`;

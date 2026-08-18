@@ -8,6 +8,22 @@ All notable changes to this project are documented here.
 
 ## [Unreleased]
 
+## [3.16.0] — 2026-08-18
+
+### Added
+- **Manual incident creation** — "New incident" button in the Incident operations toolbar opens a modal to create an incident for any monitored service. Supports title, status (Investigating / Identified / Monitoring), impact (Minor / Major / Critical), an initial message, and a public/private toggle. Powered by a new `POST /api/admin/incidents` endpoint (admin only) that inserts the incident record, posts the first update, and writes an audit log entry.
+- **Resolve all open incidents** — "Resolve all" button bulk-closes every open incident in one action after a confirmation prompt. Powered by a new `POST /api/admin/incidents/resolve-all` endpoint (admin only) that sets `ended_at`, records `duration_s`, inserts a "Resolved by operator" update on each, and logs the action.
+- **Tag filter pills** — after a server list loads, a scrollable row of tag pills appears above the service sidebar. Clicking a pill filters the sidebar to only show services with that tag; clicking again clears the filter. Works in combination with the text search.
+- **30-day uptime badge on sidebar rows** — each service row in the admin sidebar now shows a small `XX% 30d` badge below the hostname. Color-coded: green ≥ 99%, neutral 95–98.9%, orange 90–94.9%, red < 90%. Value comes from the same batch query already added for the SLA dashboard; no extra requests needed.
+- **Open incidents KPI tile** — a fifth tile added to the admin overview KPI row showing the current count of open (unresolved) incidents. Updates in real time whenever the incident list is refreshed. The "Resolve all" button hides itself automatically when the count reaches zero.
+- **Animated all-up banner** — the public status page `::before` glow layer now breathes (opacity 10–20%) when all services are operational via `@keyframes allUpGlow`. The live-dot indicator also pulses continuously with a ring-expand animation, stopping on degraded/outage states so the animation conveys genuine health only.
+- **Service card status accent border** — each service card on the public page now carries a 3 px left border colored by its current status (green = up, orange = degraded, red = down, gray = maintenance), giving operators an instant at-a-glance status read across a dense grid.
+- **39 new tests** — v316-design-features.test.js covers backend uptime query, incident create/resolve-all endpoints and audit logs, admin CSS/HTML/JS additions (tag pills, KPI tile, modal, toolbar buttons), and index.ejs animation/card changes. Total test count: 189 → 228.
+
+### Changed
+- `GET /api/admin/servers` response now includes a `uptime_30d` field (float or null) per server — computed in a single batch SQL query, not N+1 requests.
+- `renderSidebarList` in admin.ejs now applies tag filter state and renders an uptime badge. Tag search is also included in the text-search filter so typing a tag name in the search box surfaces matching services.
+
 ## [3.15.0] — 2026-08-18
 
 ### Added

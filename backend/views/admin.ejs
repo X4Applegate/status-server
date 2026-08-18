@@ -793,6 +793,31 @@ body.admin-role .admin-only-nav,body.admin-role .admin-only-action{display:flex!
 .bulk-status-menu.open{display:flex}
 .bulk-status-menu button{display:flex;align-items:center;gap:7px;padding:6px 10px;font-size:12px;font-weight:500;border:none;border-radius:5px;background:none;color:var(--text-hi);cursor:pointer;text-align:left;font-family:var(--sans);white-space:nowrap;transition:background .1s}
 .bulk-status-menu button:hover{background:var(--surface3)}
+
+/* ── v3.16.0 additions ── */
+/* KPI grid — 5 tiles */
+.admin-kpi-grid{grid-template-columns:repeat(5,minmax(0,1fr))}
+/* Tag filter pill bar */
+.tag-filter-bar{display:flex;gap:6px;flex-wrap:wrap;padding:8px 0 4px;min-height:0}
+.tag-filter-bar:empty{display:none}
+.tag-pill{font-size:10px;font-weight:600;letter-spacing:.05em;padding:3px 10px;border-radius:20px;border:1px solid var(--border);background:var(--surface2);color:var(--text-2);cursor:pointer;transition:background .12s,color .12s,border-color .12s;text-transform:uppercase;white-space:nowrap;line-height:1.6}
+.tag-pill:hover{background:var(--surface3);color:var(--text-hi)}
+.tag-pill.active{background:var(--blue);color:#fff;border-color:var(--blue)}
+/* Uptime badge on sidebar rows */
+.srv-uptime{font-size:9px;font-weight:600;letter-spacing:.03em;color:var(--text-2);margin-top:1px}
+.srv-uptime.great{color:var(--green)}.srv-uptime.warn{color:var(--orange)}.srv-uptime.bad{color:var(--red)}
+/* New incident modal */
+.ni-overlay{position:fixed;inset:0;z-index:11000;background:rgba(0,0,0,.65);display:flex;align-items:center;justify-content:center;padding:16px}
+.ni-modal{background:var(--surface);border:1px solid var(--border-hi);border-radius:14px;width:100%;max-width:480px;max-height:90vh;overflow-y:auto;box-shadow:0 12px 48px rgba(0,0,0,.6);padding:24px 24px 20px}
+.ni-title{font-size:15px;font-weight:750;color:var(--text-white);margin-bottom:18px}
+.ni-row{margin-bottom:14px}
+.ni-label{font-size:10px;font-weight:700;letter-spacing:.07em;text-transform:uppercase;color:var(--text-2);margin-bottom:5px}
+.ni-input,.ni-select,.ni-textarea{width:100%;background:var(--surface2);border:1px solid var(--border);border-radius:7px;color:var(--text-hi);font-family:var(--sans);font-size:13px;padding:8px 10px;outline:none;box-sizing:border-box;transition:border-color .15s}
+.ni-input:focus,.ni-select:focus,.ni-textarea:focus{border-color:var(--blue)}
+.ni-select option{background:var(--surface2)}
+.ni-textarea{resize:vertical;min-height:70px}
+.ni-footer{display:flex;gap:8px;justify-content:flex-end;margin-top:20px;flex-wrap:wrap}
+@media(max-width:800px){.admin-kpi-grid{grid-template-columns:1fr 1fr}.admin-kpi:nth-child(5){margin-top:12px}}
 </style>
 </head>
 <body>
@@ -835,6 +860,51 @@ body.admin-role .admin-only-nav,body.admin-role .admin-only-action{display:flex!
 <div class="toast-stack" id="toasts"></div>
 
 <!-- Spotlight search (⌘K / Ctrl+K) -->
+<!-- New incident modal -->
+<div class="ni-overlay" id="newIncidentOverlay" hidden onclick="if(event.target===this)closeNewIncidentModal()">
+  <div class="ni-modal" role="dialog" aria-modal="true" aria-labelledby="niTitle">
+    <div class="ni-title" id="niTitle">Create incident</div>
+    <div class="ni-row">
+      <div class="ni-label">Service</div>
+      <select class="ni-select" id="niServerId"></select>
+    </div>
+    <div class="ni-row">
+      <div class="ni-label">Title <span style="font-weight:400;text-transform:none;letter-spacing:0;color:var(--text-2)">(optional)</span></div>
+      <input class="ni-input" id="niTitle" type="text" placeholder="Short description of the issue" maxlength="200">
+    </div>
+    <div class="ni-row" style="display:grid;grid-template-columns:1fr 1fr;gap:10px">
+      <div>
+        <div class="ni-label">Status</div>
+        <select class="ni-select" id="niStatus">
+          <option value="investigating">Investigating</option>
+          <option value="identified">Identified</option>
+          <option value="monitoring">Monitoring</option>
+        </select>
+      </div>
+      <div>
+        <div class="ni-label">Impact</div>
+        <select class="ni-select" id="niImpact">
+          <option value="minor">Minor</option>
+          <option value="major">Major</option>
+          <option value="critical">Critical</option>
+        </select>
+      </div>
+    </div>
+    <div class="ni-row">
+      <div class="ni-label">Initial message</div>
+      <textarea class="ni-textarea" id="niMessage" placeholder="What's happening? This appears on the public status page if the incident is public." maxlength="1000"></textarea>
+    </div>
+    <div class="ni-row" style="display:flex;align-items:center;gap:8px">
+      <input type="checkbox" id="niPublic" checked style="accent-color:var(--blue);width:14px;height:14px">
+      <label for="niPublic" style="font-size:12px;color:var(--text-hi);cursor:pointer">Visible on public status page</label>
+    </div>
+    <div class="ni-footer">
+      <button class="btn" type="button" onclick="closeNewIncidentModal()">Cancel</button>
+      <button class="btn btn-primary" type="button" onclick="submitNewIncident()">Create incident</button>
+    </div>
+  </div>
+</div>
+
 <div class="spotlight-overlay" id="spotlightOverlay" role="dialog" aria-modal="true" aria-label="Global search" onclick="if(event.target===this)closeSpotlight()">
   <div class="spotlight-modal">
     <div class="spotlight-bar">
@@ -1510,6 +1580,7 @@ body.admin-role .admin-only-nav,body.admin-role .admin-only-action{display:flex!
             <div class="admin-kpi"><div class="admin-kpi-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="20 6 9 17 4 12"/></svg></div><div><div class="admin-kpi-value" id="adminMetricUp">—</div><div class="admin-kpi-label">Operational</div></div></div>
             <div class="admin-kpi"><div class="admin-kpi-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M10.3 2.9 1.8 17a2 2 0 0 0 1.7 3h17a2 2 0 0 0 1.7-3L13.7 2.9a2 2 0 0 0-3.4 0Z"/></svg></div><div><div class="admin-kpi-value" id="adminMetricIssues">—</div><div class="admin-kpi-label">Needs attention</div></div></div>
             <div class="admin-kpi"><div class="admin-kpi-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 12h4l3-8 4 16 3-8h4"/></svg></div><div><div class="admin-kpi-value" id="adminMetricResponse">—</div><div class="admin-kpi-label">Avg response</div></div></div>
+            <div class="admin-kpi"><div class="admin-kpi-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg></div><div><div class="admin-kpi-value" id="adminMetricOpenIncidents">—</div><div class="admin-kpi-label">Open incidents</div></div></div>
           </div>
         </section>
 
@@ -1585,6 +1656,7 @@ body.admin-role .admin-only-nav,body.admin-role .admin-only-action{display:flex!
               <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" id="sidebarSearchIcon" aria-hidden="true"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
               <button class="sidebar-search-clear" id="sidebarSearchClear" type="button" onclick="clearSidebarSearch()" title="Clear service filter" aria-label="Clear service filter">&#x2715;</button>
             </div>
+            <div class="tag-filter-bar" id="tagFilterBar" aria-label="Filter by tag" role="group"></div>
             <div class="sidebar-body" id="sidebarList" aria-label="Monitored services"></div>
           </aside>
           <div class="service-detail-panel">
@@ -1603,7 +1675,11 @@ body.admin-role .admin-only-nav,body.admin-role .admin-only-action{display:flex!
             <div class="admin-service-toolbar-title" id="adminIncidentWorkspaceTitle" tabindex="-1">Incident operations</div>
             <div class="admin-service-toolbar-subtitle">Review incident history, customer visibility, impact, and operator updates.</div>
           </div>
-          <button class="btn" type="button" onclick="showAdminOverview()">Back to overview</button>
+          <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
+            <button class="btn" type="button" onclick="showAdminOverview()">Back to overview</button>
+            <button class="btn btn-danger" type="button" id="resolveAllBtn" onclick="resolveAllIncidents()">Resolve all</button>
+            <button class="btn btn-primary" type="button" onclick="openNewIncidentModal()"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>New incident</button>
+          </div>
         </div>
         <div class="admin-record-layout" id="adminIncidentLayout">
           <aside class="record-directory" aria-labelledby="incidentDirectoryTitle">
@@ -1979,6 +2055,8 @@ function renderAdminOverview(servers = liveServers){
   setText("adminMetricUp", up);
   setText("adminMetricIssues", issueCount);
   setText("adminMetricResponse", averageResponse === null ? "—" : `${averageResponse}ms`);
+  const openIncCount = (adminIncidents || []).filter(i => !i.ended_at).length;
+  setText("adminMetricOpenIncidents", openIncCount);
   setText("navServiceCount", list.length);
   setText("navIssueCount", issueCount);
 
@@ -2682,48 +2760,71 @@ function renderServers(servers){
   }
 }
 
+// ── Tag filter helpers ────────────────────────────────────────────────────────
+let _activeTagFilter = null;
+function buildTagFilterBar() {
+  const bar = document.getElementById(“tagFilterBar”);
+  if (!bar) return;
+  const allTags = [...new Set((adminServers || []).flatMap(s => s.tags || []))].sort();
+  if (!allTags.length) { bar.innerHTML = “”; return; }
+  bar.innerHTML = allTags.map(t =>
+    `<button class=”tag-pill${_activeTagFilter === t ? “ active” : “”}” type=”button” onclick=”filterTagToggle(${JSON.stringify(t)})”>${_escHtml(t)}</button>`
+  ).join(“”);
+}
+function filterTagToggle(tag) {
+  _activeTagFilter = _activeTagFilter === tag ? null : tag;
+  buildTagFilterBar();
+  renderSidebarList(liveServers);
+}
+
+// ── Sidebar list renderer ─────────────────────────────────────────────────────
 function renderSidebarList(servers){
-  const focusedServiceId = document.activeElement?.matches?.("#sidebarList .srv-row")
+  const focusedServiceId = document.activeElement?.matches?.(“#sidebarList .srv-row”)
     ? document.activeElement.dataset.serviceId
     : null;
-  const q = (document.getElementById("sidebarSearchInput")?.value || "").trim().toLowerCase();
-  const list = q ? servers.filter(s =>
-    (s.name        || "").toLowerCase().includes(q) ||
-    (s.host        || "").toLowerCase().includes(q) ||
-    (s.category    || "").toLowerCase().includes(q) ||
-    (s.sub_category|| "").toLowerCase().includes(q) ||
-    (s.description || "").toLowerCase().includes(q)
+  const q = (document.getElementById(“sidebarSearchInput”)?.value || “”).trim().toLowerCase();
+  let list = q ? servers.filter(s =>
+    (s.name        || “”).toLowerCase().includes(q) ||
+    (s.host        || “”).toLowerCase().includes(q) ||
+    (s.category    || “”).toLowerCase().includes(q) ||
+    (s.sub_category|| “”).toLowerCase().includes(q) ||
+    (s.description || “”).toLowerCase().includes(q) ||
+    (s.tags        || []).some(t => t.toLowerCase().includes(q))
   ) : servers;
-  const sidebar = document.getElementById("sidebarList");
+  if (_activeTagFilter) list = list.filter(s => (s.tags || []).includes(_activeTagFilter));
+  const sidebar = document.getElementById(“sidebarList”);
   if (!sidebar) return;
-  const count = document.getElementById("serviceDirectoryCount");
+  const count = document.getElementById(“serviceDirectoryCount”);
   if (count) {
-    const nextCount = q
+    const nextCount = (q || _activeTagFilter)
       ? `${list.length} of ${servers.length} services shown`
-      : `${servers.length} monitored service${servers.length === 1 ? "" : "s"}`;
+      : `${servers.length} monitored service${servers.length === 1 ? “” : “s”}`;
     if (count.textContent !== nextCount) count.textContent = nextCount;
   }
   if (!list.length) {
-    sidebar.innerHTML = `<div class="service-directory-empty">${servers.length ? `No services match “${_escHtml(q)}”.` : "No services configured yet."}</div>`;
+    sidebar.innerHTML = `<div class=”service-directory-empty”>${servers.length ? `No services match the current filter.` : “No services configured yet.”}</div>`;
     return;
   }
   sidebar.innerHTML = list.map(s => {
-    const lbl    = s.maintenance ? "MAINT" : (s.overall==="up"?"UP":s.overall==="down"?"DOWN":s.overall==="degraded"?"DEG":"PEND");
-    const badgeCls = s.maintenance ? "pending" : (s.overall||"pending");
+    const lbl    = s.maintenance ? “MAINT” : (s.overall===”up”?”UP”:s.overall===”down”?”DOWN”:s.overall===”degraded”?”DEG”:”PEND”);
+    const badgeCls = s.maintenance ? “pending” : (s.overall||”pending”);
     const active = String(s.id) === String(selectedServerId);
-    const maintTag = s.maintenance ? ` <span title="Under scheduled maintenance — alerts suppressed" style="font-size:10px">🔧</span>` : "";
-    return `<button class="srv-row${active ? " active" : ""}" type="button" data-service-id="${_escHtml(s.id)}" onclick="selectServer(this.dataset.serviceId)"${active ? ` aria-current="true"` : ""}>
-      <div class="srv-dot ${s.overall||'pending'}"></div>
-      <div class="srv-row-info">
-        <div class="srv-row-name">${_escHtml(s.name)}${maintTag}</div>
-        <div class="srv-row-host">${_escHtml(s.host)}</div>
-        ${s.description ? `<div class="srv-row-desc">${_escHtml(s.description)}</div>` : ""}
+    const maintTag = s.maintenance ? ` <span title=”Under scheduled maintenance — alerts suppressed” style=”font-size:10px”>🔧</span>` : “”;
+    const uptime = s.uptime_30d;
+    const uptimeCls = uptime == null ? “” : uptime >= 99 ? “great” : uptime >= 95 ? “” : uptime >= 90 ? “warn” : “bad”;
+    const uptimeHtml = uptime != null ? `<div class=”srv-uptime ${uptimeCls}”>${uptime}% 30d</div>` : “”;
+    return `<button class=”srv-row${active ? “ active” : “”}” type=”button” data-service-id=”${_escHtml(s.id)}” onclick=”selectServer(this.dataset.serviceId)”${active ? ` aria-current=”true”` : “”}>
+      <div class=”srv-dot ${s.overall||'pending'}”></div>
+      <div class=”srv-row-info”>
+        <div class=”srv-row-name”>${_escHtml(s.name)}${maintTag}</div>
+        <div class=”srv-row-host”>${_escHtml(s.host)}</div>
+        ${uptimeHtml}
       </div>
-      <div class="srv-badge ${badgeCls}">${lbl}</div>
+      <div class=”srv-badge ${badgeCls}”>${lbl}</div>
     </button>`;
-  }).join("");
+  }).join(“”);
   if (focusedServiceId !== null && focusedServiceId !== undefined) {
-    const focusedRow = [...sidebar.querySelectorAll(".srv-row")]
+    const focusedRow = [...sidebar.querySelectorAll(“.srv-row”)]
       .find(row => String(row.dataset.serviceId) === String(focusedServiceId));
     focusedRow?.focus({ preventScroll:true });
   }
@@ -3844,6 +3945,7 @@ async function loadServerList(){
     cacheSet("admin-servers", adminServers);
     renderAdminServerList(adminServers);
     updateDrawerStats(adminServers);
+    buildTagFilterBar();
     if (serverListScrollTop != null) {
       const target = serverListScrollTop;
       serverListScrollTop = null;
@@ -6773,6 +6875,9 @@ function renderIncidentWorkspaceDirectory(){
   setTextIfPresent("incidentCountOpen", openCount);
   setTextIfPresent("incidentCountResolved", adminIncidents.length - openCount);
   setTextIfPresent("navIncidentCount", openCount);
+  setTextIfPresent("adminMetricOpenIncidents", openCount || "0");
+  const rab = document.getElementById("resolveAllBtn");
+  if (rab) rab.hidden = openCount === 0;
   setTextIfPresent("incidentDirectoryCount", query || filter !== "all" ? `${filtered.length} of ${adminIncidents.length} incidents shown` : `${adminIncidents.length} incident${adminIncidents.length === 1 ? "" : "s"}`);
   if (!filtered.length) {
     host.innerHTML = `<div class="record-empty">${adminIncidents.length ? "No incidents match this filter." : "No incidents have been recorded yet."}</div>`;
@@ -6994,6 +7099,64 @@ async function askDelIncident(id){
     invalidateIncidentServiceCache(id);
     selectedIncidentId = null;
     cacheDel("selected-incident-id");
+    await loadIncidentWorkspace();
+  } catch(e) { toast(e.message, "error"); }
+}
+
+// ── New incident modal ────────────────────────────────────────────────────────
+function openNewIncidentModal() {
+  const overlay = document.getElementById("newIncidentOverlay");
+  if (!overlay) return;
+  // Populate server dropdown
+  const sel = document.getElementById("niServerId");
+  sel.innerHTML = (adminServers || []).map(s =>
+    `<option value="${_escHtml(s.id)}">${_escHtml(s.name)}</option>`
+  ).join("");
+  document.getElementById("niTitle").value = "";
+  document.getElementById("niMessage").value = "";
+  document.getElementById("niStatus").value = "investigating";
+  document.getElementById("niImpact").value = "minor";
+  document.getElementById("niPublic").checked = true;
+  overlay.hidden = false;
+  setTimeout(() => sel.focus(), 50);
+}
+function closeNewIncidentModal() {
+  const overlay = document.getElementById("newIncidentOverlay");
+  if (overlay) overlay.hidden = true;
+}
+async function submitNewIncident() {
+  const server_id = document.getElementById("niServerId").value;
+  const title     = document.getElementById("niTitle").value.trim();
+  const status    = document.getElementById("niStatus").value;
+  const impact    = document.getElementById("niImpact").value;
+  const message   = document.getElementById("niMessage").value.trim();
+  const is_public = document.getElementById("niPublic").checked ? 1 : 0;
+  if (!server_id) { toast("Choose a service", "error"); return; }
+  try {
+    const r = await fetch("/api/admin/incidents", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ server_id, title: title || undefined, status, impact, message: message || undefined, is_public })
+    });
+    const d = await r.json();
+    if (!r.ok) { toast(d.error || "Failed to create incident", "error"); return; }
+    toast("Incident created", "success");
+    closeNewIncidentModal();
+    cacheDel("admin-incidents");
+    await loadIncidentWorkspace();
+  } catch(e) { toast(e.message, "error"); }
+}
+
+async function resolveAllIncidents() {
+  const open = (adminIncidents || []).filter(i => !i.ended_at).length;
+  if (!open) { toast("No open incidents to resolve", "success"); return; }
+  if (!confirm(`Resolve all ${open} open incident${open === 1 ? "" : "s"} now?`)) return;
+  try {
+    const r = await fetch("/api/admin/incidents/resolve-all", { method: "POST" });
+    const d = await r.json();
+    if (!r.ok) { toast(d.error || "Failed to resolve incidents", "error"); return; }
+    toast(`${d.resolved} incident${d.resolved === 1 ? "" : "s"} resolved`, "success");
+    cacheDel("admin-incidents");
     await loadIncidentWorkspace();
   } catch(e) { toast(e.message, "error"); }
 }
