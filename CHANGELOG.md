@@ -8,6 +8,14 @@ All notable changes to this project are documented here.
 
 ## [Unreleased]
 
+## [3.10.3] — 2026-08-18
+
+### Added
+- **Phase 2 test coverage** — 15 new static-analysis tests in `phase2-enterprise.test.js` covering SLA Target (INSERT/UPDATE SQL, 0–100 clamping), SLA Dashboard endpoint (requireAdmin guard, conditional aggregation SQL), Custom CSS (sanitization, INSERT/UPDATE SQL, public-page render pass-through), delete-from-form navigation, and the new CSP configuration.
+
+### Changed
+- **Content Security Policy enabled** — `helmet` now enforces a real CSP (previously `contentSecurityPolicy: false`). `default-src 'self'`; `object-src 'none'`; `frame-ancestors 'none'`; `base-uri 'self'`; all known external origins explicitly allowlisted (Turnstile, MapLibre, Google Fonts, Mapbox, Carto). Inline scripts/styles retained via `'unsafe-inline'` to avoid a major template refactor.
+
 ## [3.10.2] — 2026-08-18
 
 ### Added

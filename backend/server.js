@@ -63,12 +63,40 @@ app.use(pinoHttp({
   }
 }));
 
-// Security headers. CSP is disabled intentionally: the EJS templates rely
-// on inline scripts/styles that would break without a major refactor. All
-// other helmet defaults (X-Content-Type-Options, Referrer-Policy,
-// Strict-Transport-Security, X-Frame-Options, etc.) are kept on.
+// Security headers — all Helmet defaults active plus an explicit CSP.
+// 'unsafe-inline' is required for script/style because the EJS templates
+// embed large inline blocks; a nonce-based refactor is tracked for a future
+// release. The policy still blocks the most impactful attack vectors:
+//   • default-src 'self'  — unexplained external resource loads blocked
+//   • object-src 'none'   — no Flash/plugin execution
+//   • base-uri 'self'     — base-tag injection prevented
+//   • frame-ancestors 'none' — clickjacking prevented (stronger than X-Frame-Options)
+//   • form-action 'self' + Turnstile — forms can't exfiltrate to third parties
+// External origins are explicitly listed so any new CDN dependency is visible.
 app.use(helmet({
-  contentSecurityPolicy:    false, // codeql[js/insecure-helmet-configuration] - intentionally disabled; EJS inline scripts/styles require a full CSP refactor
+  contentSecurityPolicy: {
+    directives: {
+      defaultSrc:      ["'self'"],
+      scriptSrc:       ["'self'", "'unsafe-inline'",
+                        "https://challenges.cloudflare.com",  // Turnstile CAPTCHA
+                        "https://unpkg.com"],                  // MapLibre GL JS
+      styleSrc:        ["'self'", "'unsafe-inline'",
+                        "https://fonts.googleapis.com",        // Google Fonts CSS
+                        "https://unpkg.com"],                  // MapLibre GL CSS
+      fontSrc:         ["'self'", "https://fonts.gstatic.com"],
+      imgSrc:          ["'self'", "data:", "blob:", "https:"], // logo data URIs, map tiles
+      connectSrc:      ["'self'",
+                        "https://basemaps.cartocdn.com",       // MapLibre tile server
+                        "https://api.mapbox.com",              // Mapbox token validation
+                        "https://events.mapbox.com"],          // Mapbox telemetry
+      workerSrc:       ["blob:"],                              // MapLibre GL web worker
+      frameSrc:        ["https://challenges.cloudflare.com"], // Turnstile iframe
+      objectSrc:       ["'none'"],
+      baseUri:         ["'self'"],
+      formAction:      ["'self'", "https://challenges.cloudflare.com"],
+      frameAncestors:  ["'none'"],
+    },
+  },
   crossOriginEmbedderPolicy: false,  // would block Cloudflare Turnstile script
   crossOriginResourcePolicy: { policy: "cross-origin" }  // allow badge SVGs to be embedded
 }));
