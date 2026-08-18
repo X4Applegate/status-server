@@ -8,6 +8,11 @@ All notable changes to this project are documented here.
 
 ## [Unreleased]
 
+## [3.11.1] — 2026-08-18
+
+### Fixed
+- Removed non-functional **Manage** button from the admin top bar. The button called `showAdminOverview()` on a page that is already the admin overview, making it appear to do nothing. The button element and its show-on-login logic have been removed.
+
 ## [3.11.0] — 2026-08-18
 
 ### Added
