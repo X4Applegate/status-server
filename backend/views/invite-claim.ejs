@@ -1,0 +1,107 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="dark">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Accept Invite — Applegate Monitor</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:ital,wght@0,400;0,500;0,600;0,700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+<style>
+*,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+:root{
+  --bg:#080b12;--surface:#0d1117;--surface2:#161b22;
+  --border:rgba(255,255,255,0.07);--border-hi:rgba(255,255,255,0.12);
+  --text:#8b949e;--text-hi:#c9d1d9;--text-white:#f0f6fc;
+  --input-bg:#0d1117;--accent:#2563eb;--accent-hover:#1d4ed8;
+  --accent-soft:rgba(37,99,235,0.10);--accent-border:rgba(37,99,235,0.28);
+  --danger:#ef4444;--green:#10b981;--green-soft:rgba(16,185,129,0.10);
+  --sans:'Inter',system-ui,-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;
+  --r:10px;--r-sm:7px;
+}
+body{font-family:var(--sans);background:var(--bg);color:var(--text);min-height:100vh;display:flex;flex-direction:column;align-items:center;justify-content:center;padding:24px;-webkit-font-smoothing:antialiased}
+.card{width:100%;max-width:400px;background:var(--surface);border:1px solid var(--border-hi);border-radius:var(--r);padding:32px;box-shadow:0 8px 32px rgba(0,0,0,.28),0 1px 2px rgba(0,0,0,.18)}
+.brand{display:flex;align-items:center;gap:11px;margin-bottom:26px}
+.brand-icon{width:36px;height:36px;border-radius:9px;background:var(--accent-soft);border:1px solid var(--accent-border);display:flex;align-items:center;justify-content:center;flex-shrink:0}
+.brand-name{font-size:16px;font-weight:700;color:var(--text-white);letter-spacing:-.02em}
+.brand-name em{font-style:normal;color:var(--accent)}
+.invite-badge{display:inline-flex;align-items:center;gap:6px;background:var(--green-soft);border:1px solid rgba(16,185,129,.25);border-radius:20px;padding:4px 12px;font-size:11px;font-weight:600;color:var(--green);letter-spacing:.04em;text-transform:uppercase;margin-bottom:16px}
+.heading{font-size:17px;font-weight:700;color:var(--text-white);margin-bottom:4px;letter-spacing:-.015em}
+.subhead{font-size:13px;color:var(--text);margin-bottom:22px;line-height:1.5}
+.form-group{display:flex;flex-direction:column;gap:6px;margin-bottom:14px}
+.label{font-size:11px;font-weight:600;letter-spacing:.04em;text-transform:uppercase;color:var(--text)}
+.input{width:100%;padding:9px 12px;background:var(--input-bg);border:1px solid var(--border-hi);border-radius:var(--r-sm);color:var(--text-white);font:400 13px/1.4 var(--sans);outline:none;transition:border-color .15s,box-shadow .15s}
+.input:focus{border-color:var(--accent);box-shadow:0 0 0 3px rgba(37,99,235,.18)}
+.input::placeholder{color:var(--text)}
+.btn{width:100%;min-height:38px;padding:9px;background:var(--accent);border:1px solid var(--accent);border-radius:var(--r-sm);color:#fff;font:600 13px var(--sans);cursor:pointer;margin-top:6px;transition:background .15s,border-color .15s,transform .1s}
+.btn:hover{background:var(--accent-hover);border-color:var(--accent-hover)}
+.btn:active{transform:scale(.98)}
+.btn:disabled{opacity:.6;cursor:not-allowed;transform:none}
+.error{background:rgba(239,68,68,.08);border:1px solid rgba(239,68,68,.22);border-radius:var(--r-sm);color:#f87171;font-size:12px;padding:9px 12px;margin-bottom:14px;display:none}
+.success{background:var(--green-soft);border:1px solid rgba(16,185,129,.25);border-radius:var(--r-sm);color:var(--green);font-size:12px;padding:9px 12px;margin-bottom:14px;display:none}
+</style>
+</head>
+<body>
+<div class="card">
+  <div class="brand">
+    <div class="brand-icon"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#2563eb" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/></svg></div>
+    <span class="brand-name">Applegate <em>Monitor</em></span>
+  </div>
+  <div class="invite-badge">
+    <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>
+    You're invited — <%= role %>
+  </div>
+  <div class="heading">Create your account</div>
+  <div class="subhead">
+    <% if (note) { %><%- note %><br><% } %>
+    Choose a username and password to access Applegate Monitor.
+  </div>
+  <div class="error" id="errMsg"></div>
+  <div class="success" id="okMsg"></div>
+  <form id="claimForm" onsubmit="submit(event)" autocomplete="off">
+    <div class="form-group">
+      <label class="label">Username</label>
+      <input class="input" id="username" name="username" type="text" autocomplete="username" placeholder="your_username" required maxlength="50">
+    </div>
+    <div class="form-group">
+      <label class="label">Password</label>
+      <input class="input" id="password" name="password" type="password" autocomplete="new-password" placeholder="At least 8 characters" required minlength="8">
+    </div>
+    <div class="form-group">
+      <label class="label">Confirm password</label>
+      <input class="input" id="confirm" name="confirm" type="password" autocomplete="new-password" placeholder="Repeat password" required>
+    </div>
+    <button class="btn" type="submit" id="submitBtn">Create account</button>
+  </form>
+</div>
+<script>
+async function submit(e) {
+  e.preventDefault();
+  const err = document.getElementById("errMsg");
+  const ok  = document.getElementById("okMsg");
+  const btn = document.getElementById("submitBtn");
+  err.style.display = ok.style.display = "none";
+  const username = document.getElementById("username").value.trim();
+  const password = document.getElementById("password").value;
+  const confirm  = document.getElementById("confirm").value;
+  if (password !== confirm) { err.textContent = "Passwords do not match."; err.style.display = ""; return; }
+  btn.disabled = true; btn.textContent = "Creating account…";
+  try {
+    const r = await fetch("/api/invite/<%= token %>/claim", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ username, password })
+    });
+    const d = await r.json();
+    if (!r.ok) { err.textContent = d.error || "Failed to create account."; err.style.display = ""; btn.disabled = false; btn.textContent = "Create account"; return; }
+    ok.textContent = "Account created! Redirecting to login…";
+    ok.style.display = "";
+    document.getElementById("claimForm").style.display = "none";
+    setTimeout(() => window.location.href = "/login", 1800);
+  } catch(ex) {
+    err.textContent = "Network error — please try again."; err.style.display = "";
+    btn.disabled = false; btn.textContent = "Create account";
+  }
+}
+</script>
+</body>
+</html>

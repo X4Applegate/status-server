@@ -753,7 +753,17 @@ function requireAuthPage(req, res, next) {
 // Admin-only middleware
 function requireAdmin(req, res, next) {
   if (req.session && req.session.userId && req.session.role === "admin") return next();
-  if (req.session && req.session.userId) return res.status(403).json({ error: "Forbidden � admin only" });
+  if (req.session && req.session.userId) return res.status(403).json({ error: "Forbidden — admin only" });
+  res.status(401).json({ error: "Unauthorized" });
+}
+
+// Manager-or-admin — elevated write access without full admin privileges.
+// Managers can manage servers, groups, webhooks, incidents, and maintenance,
+// but cannot access users, settings, audit log, or API keys.
+function requireManager(req, res, next) {
+  const role = req.session && req.session.role;
+  if (req.session && req.session.userId && (role === "admin" || role === "manager")) return next();
+  if (req.session && req.session.userId) return res.status(403).json({ error: "Forbidden — manager or admin only" });
   res.status(401).json({ error: "Unauthorized" });
 }
 
@@ -820,7 +830,7 @@ async function initDB() {
       id            INT AUTO_INCREMENT PRIMARY KEY,
       username      VARCHAR(100) UNIQUE NOT NULL,
       password_hash VARCHAR(255) DEFAULT NULL,
-      role          ENUM('admin','viewer') NOT NULL DEFAULT 'viewer',
+      role          ENUM('admin','manager','viewer') NOT NULL DEFAULT 'viewer',
       first_name    VARCHAR(100) DEFAULT NULL,
       last_name     VARCHAR(100) DEFAULT NULL,
       email         VARCHAR(255) DEFAULT NULL,
@@ -829,10 +839,13 @@ async function initDB() {
     )
   `);
 
-  // Add role column if upgrading from older version
+  // Add/upgrade role column for upgrading from older versions
   try {
-    await db.query("ALTER TABLE status_users ADD COLUMN role ENUM('admin','viewer') NOT NULL DEFAULT 'viewer'");
-  } catch(e) { /* column already exists, ignore */ }
+    await db.query("ALTER TABLE status_users ADD COLUMN role ENUM('admin','manager','viewer') NOT NULL DEFAULT 'viewer'");
+  } catch(e) { /* column already exists — modify in-place to include manager */ }
+  try {
+    await db.query("ALTER TABLE status_users MODIFY COLUMN role ENUM('admin','manager','viewer') NOT NULL DEFAULT 'viewer'");
+  } catch(e) { /* ignore */ }
   try {
     await db.query("ALTER TABLE status_users ADD COLUMN first_name VARCHAR(100) DEFAULT NULL");
   } catch(e) { /* column already exists */ }
@@ -1265,6 +1278,22 @@ async function initDB() {
       last_used_at TIMESTAMP    NULL DEFAULT NULL,
       created_by   INT          NOT NULL,
       created_at   TIMESTAMP    DEFAULT CURRENT_TIMESTAMP
+    )
+  `);
+
+  await db.query(`
+    CREATE TABLE IF NOT EXISTS status_invite_tokens (
+      id         INT AUTO_INCREMENT PRIMARY KEY,
+      token      VARCHAR(64) NOT NULL UNIQUE,
+      role       ENUM('manager','viewer') NOT NULL DEFAULT 'viewer',
+      note       VARCHAR(200) DEFAULT NULL,
+      created_by INT NOT NULL,
+      created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+      expires_at TIMESTAMP NOT NULL,
+      used_at    TIMESTAMP NULL DEFAULT NULL,
+      used_by    INT NULL DEFAULT NULL,
+      INDEX idx_token (token),
+      INDEX idx_expires (expires_at)
     )
   `);
 
@@ -4051,7 +4080,7 @@ app.delete("/api/admin/servers/:id", requireAdmin, async (req, res) => {
 
 
 // Reorder a single server up or down within the sort_order sequence.
-app.post("/api/admin/servers/reorder", requireAdmin, async (req, res) => {
+app.post("/api/admin/servers/reorder", requireManager, async (req, res) => {
   const { id, direction } = req.body;
   if (!id || !["up","down"].includes(direction)) return res.status(400).json({ error:"id and direction (up|down) required" });
   try {
@@ -4076,7 +4105,7 @@ app.post("/api/admin/servers/reorder", requireAdmin, async (req, res) => {
 
 // Bulk server actions — admin only. Accepts { ids, action, group_id? }
 // actions: enable | disable | delete | move (reassign to a single group)
-app.post("/api/admin/servers/bulk", requireAdmin, async (req, res) => {
+app.post("/api/admin/servers/bulk", requireManager, async (req, res) => {
   const { ids, action, group_id } = req.body;
   if (!Array.isArray(ids) || !ids.length) return res.status(400).json({ error: "ids required" });
   const ACTIONS = ["enable", "disable", "delete", "move"];
@@ -4551,6 +4580,101 @@ app.delete("/api/admin/users/:id", requireAdmin, async (req, res) => {
   }
 });
 
+// -- User Invite Tokens (admin only) -------------------------------------------
+// Admin generates a one-time link; recipient fills in username + password to claim it.
+
+const { randomBytes } = require("node:crypto");
+
+function generateInviteToken() { return randomBytes(32).toString("hex"); }
+
+app.get("/api/admin/invites", requireAdmin, async (req, res) => {
+  try {
+    const [rows] = await db.query(
+      `SELECT i.id, i.token, i.role, i.note, i.created_at, i.expires_at, i.used_at,
+              u.username AS created_by_name, uu.username AS used_by_name
+       FROM status_invite_tokens i
+       LEFT JOIN status_users u  ON u.id = i.created_by
+       LEFT JOIN status_users uu ON uu.id = i.used_by
+       ORDER BY i.created_at DESC LIMIT 100`
+    );
+    res.json(rows.map(r => ({
+      id: r.id, role: r.role, note: r.note || "",
+      created_at: r.created_at, expires_at: r.expires_at,
+      used_at: r.used_at || null, used_by: r.used_by_name || null,
+      created_by: r.created_by_name || "System",
+      expired: new Date(r.expires_at) < new Date(),
+      token_prefix: r.token.slice(0, 8) + "…"
+    })));
+  } catch(e) { res.status(500).json({ error: e.message }); }
+});
+
+app.post("/api/admin/invites", requireAdmin, async (req, res) => {
+  const role = req.body.role === "manager" ? "manager" : "viewer";
+  const note = String(req.body.note || "").slice(0, 200).trim();
+  const ttlH = Math.max(1, Math.min(168, parseInt(req.body.ttl_hours) || 24));
+  const token = generateInviteToken();
+  try {
+    await db.query(
+      "INSERT INTO status_invite_tokens (token, role, note, created_by, expires_at) VALUES (?,?,?,?,DATE_ADD(NOW(), INTERVAL ? HOUR))",
+      [token, role, note || null, req.session.userId, ttlH]
+    );
+    addAuditLog({ userId: req.session.userId, username: req.session.username, action:"invite.create", resourceType:"invite", detail: role, ip: req.ip });
+    const baseUrl = process.env.EXTERNAL_URL || `http://localhost:${PORT}`;
+    res.json({ ok: true, url: `${baseUrl}/invite/${token}`, token_prefix: token.slice(0, 8) + "…", role, ttl_hours: ttlH });
+  } catch(e) { res.status(500).json({ error: e.message }); }
+});
+
+app.delete("/api/admin/invites/:id", requireAdmin, async (req, res) => {
+  try {
+    await db.query("DELETE FROM status_invite_tokens WHERE id=? AND used_at IS NULL", [req.params.id]);
+    res.json({ ok: true });
+  } catch(e) { res.status(500).json({ error: e.message }); }
+});
+
+// Public invite claim endpoints
+app.get("/api/invite/:token", async (req, res) => {
+  try {
+    const [rows] = await db.query(
+      "SELECT role, note, expires_at, used_at FROM status_invite_tokens WHERE token=?",
+      [req.params.token]
+    );
+    if (!rows.length) return res.status(404).json({ error: "Invite not found or already used" });
+    const inv = rows[0];
+    if (inv.used_at) return res.status(410).json({ error: "This invite has already been used" });
+    if (new Date(inv.expires_at) < new Date()) return res.status(410).json({ error: "This invite has expired" });
+    res.json({ role: inv.role, note: inv.note || "" });
+  } catch(e) { res.status(500).json({ error: e.message }); }
+});
+
+app.post("/api/invite/:token/claim", async (req, res) => {
+  const { username, password } = req.body;
+  if (!username || !password) return res.status(400).json({ error: "Username and password are required" });
+  if (password.length < 8) return res.status(400).json({ error: "Password must be at least 8 characters" });
+  if (!/^[a-zA-Z0-9_.\-@]{3,50}$/.test(username)) return res.status(400).json({ error: "Username: 3–50 chars, letters/digits/._-@ only" });
+  try {
+    const [rows] = await db.query(
+      "SELECT id, role, expires_at, used_at FROM status_invite_tokens WHERE token=?",
+      [req.params.token]
+    );
+    if (!rows.length || rows[0].used_at) return res.status(410).json({ error: "Invite not found or already used" });
+    if (new Date(rows[0].expires_at) < new Date()) return res.status(410).json({ error: "Invite has expired" });
+    const inv = rows[0];
+    const [existing] = await db.query("SELECT id FROM status_users WHERE username=?", [username]);
+    if (existing.length) return res.status(409).json({ error: "Username already taken" });
+    const hash = await bcrypt.hash(password, 10);
+    const [result] = await db.query(
+      "INSERT INTO status_users (username, password_hash, role) VALUES (?,?,?)",
+      [username, hash, inv.role]
+    );
+    await db.query(
+      "UPDATE status_invite_tokens SET used_at=NOW(), used_by=? WHERE id=?",
+      [result.insertId, inv.id]
+    );
+    addAuditLog({ action:"user.create", resourceType:"user", resourceId: result.insertId, resourceName: username, detail: `via invite / ${inv.role}`, ip: req.ip });
+    res.json({ ok: true, role: inv.role });
+  } catch(e) { res.status(500).json({ error: e.message }); }
+});
+
 // -- Webhook Management (admin only) -------------------------------------------
 // Helper: viewer can manage a webhook iff its group_id is in their allowed list.
 async function userCanManageWebhook(req, hookGroupId) {
@@ -4756,7 +4880,7 @@ function cleanCustomDomain(s) {
   return v;
 }
 
-app.post("/api/admin/groups", requireAdmin, async (req, res) => {
+app.post("/api/admin/groups", requireManager, async (req, res) => {
   const { name, slug, description, logo_text, logo_image, logo_size, accent_color, bg_color, default_theme, custom_domain, server_ids, privacy_text, terms_text } = req.body;
   const public_enabled = req.body.public_enabled ? 1 : 0;
   const cleanCustomCss = req.body.custom_css ? String(req.body.custom_css).replace(/<\/style>/gi, "").slice(0, 65535) : null;
@@ -5970,7 +6094,7 @@ app.get("/api/admin/banners", requireAdmin, async (req, res) => {
 });
 
 // Admin — create banner.
-app.post("/api/admin/banners", requireAdmin, async (req, res) => {
+app.post("/api/admin/banners", requireManager, async (req, res) => {
   const { group_id, title, message, severity = "info", link_url, link_text,
           active = 1, dismissible = 1, starts_at, ends_at } = req.body;
   if (!message || !String(message).trim()) return res.status(400).json({ error: "Message is required" });
@@ -6003,7 +6127,7 @@ app.post("/api/admin/banners", requireAdmin, async (req, res) => {
 });
 
 // Admin — update banner.
-app.put("/api/admin/banners/:id", requireAdmin, async (req, res) => {
+app.put("/api/admin/banners/:id", requireManager, async (req, res) => {
   const { group_id, title, message, severity, link_url, link_text,
           active, dismissible, starts_at, ends_at } = req.body;
   try {
@@ -6662,6 +6786,20 @@ app.get("/",       requireAuthPage, (req, res) => res.render("index", { adminHre
 app.get("/status", requireAuthPage, (req, res) => res.render("index", { adminHref: "/", ...DEFAULT_BRANDING }));
 app.get("/admin",  requireAuthPage, (req, res) => res.render("admin"));
 app.get("/login",   (req, res) => res.render("login", { googleEnabled: !!googleOAuth }));
+app.get("/invite/:token", async (req, res) => {
+  try {
+    const [rows] = await db.query(
+      "SELECT role, note, expires_at, used_at FROM status_invite_tokens WHERE token=?",
+      [req.params.token]
+    );
+    if (!rows.length || rows[0].used_at || new Date(rows[0].expires_at) < new Date()) {
+      return res.render("login", { googleEnabled: !!googleOAuth, inviteError: "This invite is invalid, expired, or already used." });
+    }
+    res.render("invite-claim", { role: rows[0].role, note: rows[0].note || "", token: req.params.token });
+  } catch(e) {
+    res.render("login", { googleEnabled: !!googleOAuth, inviteError: "Failed to load invite." });
+  }
+});
 app.get("/privacy", (req, res) => res.render("privacy"));
 app.get("/terms",   (req, res) => res.render("terms"));
 

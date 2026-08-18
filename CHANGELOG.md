@@ -8,6 +8,21 @@ All notable changes to this project are documented here.
 
 ## [Unreleased]
 
+## [3.13.0] — 2026-08-18
+
+### Added
+- **Manager role** — new `manager` role sits between `viewer` and `admin`. Managers can create, edit, and reorder services; manage incidents, banners, and status page groups; and use bulk service actions. User/account management, settings, audit log, and API keys remain admin-only. Schema: `status_users.role` ENUM extended to `admin | manager | viewer`.
+- **User invite system** — admins can generate time-limited, one-use invite links (`POST /api/admin/invites`). Recipients open the link (`/invite/:token`) and create their own account without admin involvement. Invite links carry a role (`manager` or `viewer`), an optional note, and an expiry (24 h / 3 days / 7 days). After the account is created the token is permanently consumed. Active invites are listed and revocable in the Users tab.
+- **Invite claim view** — standalone `/invite/:token` page (`invite-claim.ejs`) with username, password, and confirm-password fields. Validates token validity, sets role from token, redirects to login on success.
+- **Invite management UI** — the Users tab right panel now shows an Invite Links section when no user is selected: generate a new invite (role + note + expiry), copy the link to clipboard, and revoke unused invites. Invite panel restores automatically when user selection is cleared.
+- **Manager tab access** — manager sessions can access Servers, Groups, Banners, Incidents, Webhooks, and SLA tabs. Admin-only tabs (Users, Settings, Audit, API Keys) stay hidden for managers.
+- **29 new tests** — v313-enterprise.test.js covers requireManager middleware, role schema, invite token table, all invite API endpoints, invite-claim view, and admin UI. Total test count: 118 → 147.
+
+### Changed
+- Reorder and bulk server action endpoints now accept `manager` role (previously admin-only).
+- Group create and banner create/update endpoints now accept `manager` role.
+- `body.classList.toggle("admin-role")` now triggers on manager OR admin (was admin-only), enabling operational nav items for both roles.
+
 ## [3.12.0] — 2026-08-18
 
 ### Added

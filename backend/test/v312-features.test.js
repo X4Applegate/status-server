@@ -112,8 +112,8 @@ test("quiet hours UI section is rendered in admin settings", () => {
 
 // -- Service reorder --
 
-test("POST /api/admin/servers/reorder endpoint exists and requires admin", () => {
-  assert.match(serverSource, /app\.post\("\/api\/admin\/servers\/reorder",\s*requireAdmin/);
+test("POST /api/admin/servers/reorder endpoint exists and requires manager or admin", () => {
+  assert.match(serverSource, /app\.post\("\/api\/admin\/servers\/reorder",\s*requireManager/);
 });
 
 test("reorder endpoint validates direction and swaps sort_order values", () => {

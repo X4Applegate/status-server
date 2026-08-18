@@ -61,8 +61,8 @@ test("submitForm sends enabled value", () => {
 
 // -- Bulk server actions --
 
-test("POST /api/admin/servers/bulk exists and requires admin", () => {
-  assert.match(serverSource, /app\.post\("\/api\/admin\/servers\/bulk",\s*requireAdmin/);
+test("POST /api/admin/servers/bulk exists and requires manager or admin", () => {
+  assert.match(serverSource, /app\.post\("\/api\/admin\/servers\/bulk",\s*requireManager/);
 });
 
 test("bulk endpoint supports enable, disable, delete, and move actions", () => {

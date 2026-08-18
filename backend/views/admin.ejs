@@ -324,6 +324,17 @@ body{font-family:var(--sans);background:var(--bg);color:var(--text);min-height:1
 .chip-ms.ms-slow{color:var(--red);background:var(--red-soft);border:1px solid rgba(255,61,90,.3)}
 .reorder-btn{padding:2px 6px!important;font-size:11px!important;line-height:1;opacity:.55}
 .reorder-btn:hover{opacity:1}
+.invite-panel{padding:22px;display:flex;flex-direction:column;gap:18px}
+.invite-panel-heading{font-size:14px;font-weight:700;color:var(--text-hi);letter-spacing:-.01em;margin-bottom:2px}
+.invite-panel-sub{font-size:11px;color:var(--text-2)}
+.invite-gen-row{display:flex;gap:8px;align-items:flex-end;flex-wrap:wrap}
+.invite-gen-row .fselect,.invite-gen-row .finput{flex:1;min-width:0;font-size:12px;padding:6px 10px}
+.invite-list{display:flex;flex-direction:column;gap:6px;margin-top:2px}
+.invite-row{display:flex;align-items:center;gap:8px;padding:9px 11px;background:var(--surface2);border:1px solid var(--border);border-radius:8px;font-size:11px}
+.invite-row-info{flex:1;min-width:0}
+.invite-row-url{font-family:monospace;font-size:10px;color:var(--text-2);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;margin-top:2px}
+.invite-row-meta{color:var(--text-2);font-size:10px;margin-top:1px}
+.invite-empty{padding:18px;text-align:center;color:var(--text-2);font-size:12px}
 .admin-row-actions{display:flex;gap:5px;flex-shrink:0;align-items:center}
 .admin-srv-paused{font-size:9px;font-weight:700;color:var(--text-2);background:var(--surface2);border:1px solid var(--border);border-radius:6px;padding:1px 6px;letter-spacing:.04em;text-transform:uppercase}
 .srv-select-cb{width:14px;height:14px;flex-shrink:0;cursor:pointer;accent-color:var(--blue)}
@@ -349,8 +360,9 @@ body{font-family:var(--sans);background:var(--bg);color:var(--text);min-height:1
 .user-dash-pill.user-dash-all{background:var(--blue-soft);border-color:rgba(42,127,255,.35);color:var(--blue)}
 .user-dash-pill.user-dash-none{background:var(--surface2);border-color:var(--border);color:var(--text-2);text-transform:none}
 .role-badge{font-size:9px;font-weight:700;letter-spacing:.05em;padding:2px 7px;border-radius:8px;text-transform:uppercase}
-.role-badge.admin {color:var(--blue);background:var(--blue-soft);border:1px solid rgba(42,127,255,.25)}
-.role-badge.viewer{color:var(--text-2);background:var(--surface2);border:1px solid var(--border)}
+.role-badge.admin  {color:var(--blue);background:var(--blue-soft);border:1px solid rgba(42,127,255,.25)}
+.role-badge.manager{color:var(--orange);background:rgba(249,115,22,.08);border:1px solid rgba(249,115,22,.22)}
+.role-badge.viewer {color:var(--text-2);background:var(--surface2);border:1px solid var(--border)}
 
 /* FORM */
 .form-wrap{padding:18px}
@@ -917,7 +929,7 @@ body.admin-role .admin-only-nav,body.admin-role .admin-only-action{display:flex!
         <input type="hidden" id="uId">
         <div class="form-grid">
           <div class="fg full"><label class="flabel" for="uName">Username *</label><input class="finput" id="uName" placeholder="e.g. richard"></div>
-          <div class="fg full"><label class="flabel" for="uRole">Role *</label><select class="fselect" id="uRole" onchange="onUserRoleChange()"><option value="viewer">Viewer — restricted to allowed dashboards</option><option value="admin">Admin — full access to everything</option></select></div>
+          <div class="fg full"><label class="flabel" for="uRole">Role *</label><select class="fselect" id="uRole" onchange="onUserRoleChange()"><option value="viewer">Viewer — restricted to allowed dashboards</option><option value="manager">Manager — can manage services, incidents &amp; banners</option><option value="admin">Admin — full access to everything</option></select></div>
           <div class="fg"><label class="flabel" for="uFirstName">First Name</label><input class="finput" id="uFirstName" placeholder="First name" autocomplete="off"></div>
           <div class="fg"><label class="flabel" for="uLastName">Last Name</label><input class="finput" id="uLastName" placeholder="Last name" autocomplete="off"></div>
           <div class="fg full"><label class="flabel" for="uEmail">Email <span style="font-weight:400;text-transform:none;letter-spacing:0;color:var(--text-2)">(for password reset)</span></label><input class="finput" id="uEmail" type="email" placeholder="user@example.com" autocomplete="off"></div>
@@ -1698,7 +1710,13 @@ function closeManagementAux(){
 function resetManagementDetail(message = "Select a record to view its details."){
   hideManagementAux();
   const detail = document.getElementById("adminManagementDetailContent");
-  if (detail) detail.innerHTML = `<div class="record-empty">${_escHtml(message)}</div>`;
+  if (!detail) return;
+  // Restore invite panel when deselecting on the Users tab
+  if (currentTab === "users" && isAdmin()) {
+    detail.innerHTML = `<div class="invite-panel" id="invitePanelRoot">${_renderInvitePanel(_inviteStore)}</div>`;
+    return;
+  }
+  detail.innerHTML = `<div class="record-empty">${_escHtml(message)}</div>`;
 }
 
 function setManagementWorkspaceHeader(tab){
@@ -1986,8 +2004,9 @@ setInterval(() => {
 let sessionRole = "";
 let sessionAllowedGroupIds = null;   // null = unrestricted (admin), array = viewer's allowed groups
 let cacheScope = "";                // populated only after /api/me authorizes this tab
-function isAdmin(){ return sessionRole === "admin"; }
-function isViewer(){ return sessionRole === "viewer"; }
+function isAdmin()  { return sessionRole === "admin"; }
+function isManager(){ return sessionRole === "admin" || sessionRole === "manager"; }
+function isViewer() { return sessionRole === "viewer"; }
 function sessionCacheFingerprint(session){
   const groups = Array.isArray(session.allowed_group_ids)
     ? session.allowed_group_ids.map(String).sort().join(",")
@@ -2083,17 +2102,21 @@ function sessionCacheFingerprint(session){
   }
 })();
 
-// Hide admin-only tabs from viewers. Called once when session is established.
-// Viewers can use Servers, Omada, Webhooks, and Groups (scoped to their own dashboards).
-// Users tab stays admin-only.
+// Hide admin-only tabs from viewers and managers.
+// Managers can access Servers, Groups, Banners, Incidents, Webhooks, SLA, and Maintenance.
+// Users, Settings, Audit, and API Keys stay admin-only.
 function applyRoleVisibility(){
-  document.body.classList.toggle("admin-role", isAdmin());
+  document.body.classList.toggle("admin-role", isManager());
   if (isAdmin()) return;  // admins see everything; nothing to hide
+  // Both viewers and managers hide these tabs
   ["tabUsers", "tabSettings", "tabAudit", "tabApiKeys"].forEach(id => {
     const el = document.getElementById(id);
     if (el) el.style.display = "none";
   });
-  document.querySelectorAll(".admin-only-nav,.admin-only-action").forEach(el => { el.style.display = "none"; });
+  if (!isManager()) {
+    // Viewers also hide operational tabs
+    document.querySelectorAll(".admin-only-nav,.admin-only-action").forEach(el => { el.style.display = "none"; });
+  }
 }
 
 // Fetch the user's accessible dashboards and render them as clickable buttons in the topbar.
@@ -3078,7 +3101,9 @@ document.querySelector(".admin-tabs").addEventListener("scroll", positionNetCtrl
 
 async function switchTab(tab, managementGeneration = managementLoadGeneration){
   // Viewers can access only resources scoped to one of their allowed status pages.
-  if (!isAdmin() && !["servers","omada","unifi","square","maint","incidents","webhooks","groups"].includes(tab)) {
+  // Managers additionally get banners and SLA tabs.
+  const extraManagerTabs = isManager() ? ["banners","sla"] : [];
+  if (!isAdmin() && !["servers","omada","unifi","square","maint","incidents","webhooks","groups",...extraManagerTabs].includes(tab)) {
     toast("Admin role required", "error");
     return;
   }
@@ -3400,7 +3425,7 @@ function renderManagementRecordDetail(tab, record){
     detail.innerHTML = managementDetailCard({
       kicker:"User account", title:[record.first_name,record.last_name].filter(Boolean).join(" ") || record.username, meta:`@${record.username}${record.email ? ` · ${record.email}` : ""}`,
       actions:`<button class="btn btn-primary" type="button" data-record-id="${id}" onclick="showUserForm(findManagementRecord('users',this.dataset.recordId))">Edit</button><button class="btn btn-danger" type="button" data-record-id="${id}" onclick="askDelUser(Number(this.dataset.recordId))">Remove</button>`,
-      facts:managementFact("Role", record.role)+managementFact("Status pages", record.role === "admin" ? "All" : groupNames.join(", ") || "None")+managementFact("Created", record.created_at ? new Date(record.created_at).toLocaleDateString() : "Unknown")
+      facts:managementFact("Role", record.role)+managementFact("Status pages", record.role === "admin" ? "All" : groupNames.join(", ") || "None assigned")+managementFact("Created", record.created_at ? new Date(record.created_at).toLocaleDateString() : "Unknown")
     });
   } else if (tab === "apikeys") {
     detail.innerHTML = managementDetailCard({
@@ -4090,8 +4115,9 @@ function renderAdminUserList(users){
   syncManagementSelection("users", filtered);
   el.innerHTML = filtered.map(user => {
     const fullName = [user.first_name,user.last_name].filter(Boolean).join(" ") || user.username;
-    const pages = user.role === "admin" ? "All status pages" : `${(user.allowed_group_ids || []).length} assigned`;
-    return managementRowMarkup({ tab:"users", id:user.id, title:fullName, meta:`@${user.username}${user.email ? ` · ${user.email}` : ""}`, detail:pages, badge:user.role, dot:user.role === "admin" ? "up" : "pending" });
+    const pages = user.role === "admin" ? "All status pages" : user.role === "manager" ? `Manager · ${(user.allowed_group_ids || []).length} assigned` : `${(user.allowed_group_ids || []).length} assigned`;
+    const dot = user.role === "admin" ? "up" : user.role === "manager" ? "degraded" : "pending";
+    return managementRowMarkup({ tab:"users", id:user.id, title:fullName, meta:`@${user.username}${user.email ? ` · ${user.email}` : ""}`, detail:pages, badge:user.role, dot });
   }).join("");
 }
 
@@ -4128,6 +4154,7 @@ async function loadUserList(generation = managementLoadGeneration){
   } catch(e){
     if (managementLoadIsCurrent("users", generation) && !cached) el.innerHTML = `<div class="empty-state">Failed: ${e.message}</div>`;
   }
+  loadInvitePanel();
 }
 
 // ── User form ─────────────────────────────────────────────────────────────────
@@ -4163,6 +4190,10 @@ async function showUserForm(u){
 function onUserRoleChange(){
   const role = document.getElementById("uRole").value;
   document.getElementById("uGroupsRow").style.display = role === "admin" ? "none" : "block";
+  const hint = document.getElementById("uGroupsHint");
+  if (hint) hint.textContent = role === "manager"
+    ? "(manager can only manage services in these groups)"
+    : "(viewer can only see servers in these groups)";
 }
 
 function renderUserGroupsPicker(){
@@ -4199,8 +4230,8 @@ async function submitUserForm(){
     email:      document.getElementById("uEmail").value.trim()
   };
   if (password) body.password = password;
-  // Only attach allowed_group_ids when role=viewer (admins are always unrestricted)
-  if (role === "viewer") body.allowed_group_ids = Array.from(userPickedGroups);
+  // Only attach allowed_group_ids for non-admin roles (admins are always unrestricted)
+  if (role !== "admin") body.allowed_group_ids = Array.from(userPickedGroups);
   try {
     const r = await fetch(id ? `/api/admin/users/${id}` : "/api/admin/users", {
       method: id ? "PUT" : "POST",
@@ -4232,6 +4263,105 @@ async function doDeleteUser(){
   } catch(e){ toast("Error: "+e.message, "error"); }
   closeConfirm();
   loadUserList();
+}
+
+// ── Invite management ─────────────────────────────────────────────────────────
+let _inviteStore = [];
+
+async function loadInvitePanel(){
+  if (currentTab !== "users") return;
+  const detail = document.getElementById("adminManagementDetailContent");
+  if (!detail) return;
+  // Only show invite panel if nothing else is selected (default empty state)
+  if (!detail.querySelector(".invite-panel")) {
+    detail.innerHTML = `<div class="invite-panel" id="invitePanelRoot">${_renderInvitePanel([])}</div>`;
+  }
+  try {
+    const r = await fetch("/api/admin/invites");
+    if (!r.ok) return;
+    _inviteStore = await r.json();
+    const root = document.getElementById("invitePanelRoot");
+    if (root) root.innerHTML = _renderInvitePanel(_inviteStore);
+  } catch(e) { /* silent */ }
+}
+
+function _renderInvitePanel(invites){
+  const origin = window.location.origin;
+  const rows = invites.length ? invites.map(inv => {
+    const url = `${origin}/invite/${_escHtml(inv.token)}`;
+    const expiry = inv.expires_at ? new Date(inv.expires_at).toLocaleString() : "—";
+    return `<div class="invite-row">
+      <div class="invite-row-info">
+        <div style="font-weight:600;color:var(--text-hi)">${_escHtml(inv.role)} invite${inv.note ? ` — ${_escHtml(inv.note)}` : ""}</div>
+        <div class="invite-row-url" title="${url}">${url}</div>
+        <div class="invite-row-meta">Expires ${expiry} · Created by ${_escHtml(inv.created_by_username || "admin")}</div>
+      </div>
+      <button class="btn btn-icon" title="Copy link" onclick="copyInviteUrl('${_escHtml(inv.token)}')">⎘</button>
+      <button class="btn btn-sm btn-danger" data-inv-id="${inv.id}" onclick="revokeInvite(Number(this.dataset.invId))">Revoke</button>
+    </div>`;
+  }).join("") : `<div class="invite-empty">No active invite links. Generate one above.</div>`;
+
+  return `
+    <div style="padding:20px 22px 8px;border-bottom:1px solid var(--border)">
+      <div class="invite-panel-heading">Invite Links</div>
+      <div class="invite-panel-sub">Send a one-time link to let someone create their own account.</div>
+    </div>
+    <div style="padding:16px 22px;border-bottom:1px solid var(--border)">
+      <div class="invite-gen-row">
+        <select class="fselect" id="invNewRole" style="flex:0 0 auto;width:auto;font-size:12px;padding:6px 10px">
+          <option value="viewer">Viewer</option>
+          <option value="manager">Manager</option>
+        </select>
+        <input class="finput" id="invNewNote" type="text" placeholder="Optional note (e.g. John from support)" maxlength="200" style="flex:1;min-width:0;font-size:12px;padding:6px 10px">
+        <select class="fselect" id="invNewExpiry" style="flex:0 0 auto;width:auto;font-size:12px;padding:6px 10px">
+          <option value="24">24 hours</option>
+          <option value="72">3 days</option>
+          <option value="168">7 days</option>
+        </select>
+        <button class="btn btn-primary" onclick="generateInvite()" style="white-space:nowrap;font-size:12px">Generate Link</button>
+      </div>
+    </div>
+    <div class="invite-list" style="padding:12px 22px 18px" id="inviteListBody">${rows}</div>`;
+}
+
+async function generateInvite(){
+  const role   = document.getElementById("invNewRole")?.value || "viewer";
+  const note   = document.getElementById("invNewNote")?.value.trim() || "";
+  const hours  = Number(document.getElementById("invNewExpiry")?.value || 24);
+  try {
+    const r = await fetch("/api/admin/invites", {
+      method:"POST", headers:{"Content-Type":"application/json"},
+      body: JSON.stringify({ role, note, expires_hours: hours })
+    });
+    const d = await r.json();
+    if (!r.ok){ toast(d.error || "Failed to generate invite", "error"); return; }
+    toast("Invite link generated", "success");
+    await copyText(`${window.location.origin}/invite/${d.token}`);
+    loadInvitePanel();
+  } catch(e){ toast("Error: "+e.message, "error"); }
+}
+
+async function revokeInvite(id){
+  try {
+    const r = await fetch(`/api/admin/invites/${id}`, { method:"DELETE" });
+    const d = await r.json();
+    toast(r.ok ? "Invite revoked" : (d.error||"Failed"), r.ok ? "info" : "error");
+    if (r.ok) loadInvitePanel();
+  } catch(e){ toast("Error: "+e.message, "error"); }
+}
+
+function copyInviteUrl(token){
+  copyText(`${window.location.origin}/invite/${token}`);
+  toast("Link copied to clipboard", "success");
+}
+
+async function copyText(text){
+  try { await navigator.clipboard.writeText(text); } catch(e) {
+    const ta = document.createElement("textarea");
+    ta.value = text; ta.style.position = "fixed"; ta.style.opacity = "0";
+    document.body.appendChild(ta); ta.select(); document.execCommand("copy");
+    document.body.removeChild(ta);
+  }
 }
 
 // ── Webhook list ──────────────────────────────────────────────────────────────
