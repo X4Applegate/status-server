@@ -8,6 +8,20 @@ All notable changes to this project are documented here.
 
 ## [Unreleased]
 
+## [3.10.2] — 2026-08-18
+
+### Added
+- **SLA Dashboard** — new admin-only tab shows per-service uptime % across rolling 24 h, 7 d, and 30 d windows. Left panel summarises breach/meeting/no-target counts with quick breach cards; right panel shows a full sortable table with colour-coded cells (green = meeting target, red = breaching).
+- **SLA Target per service** — each service now has an optional SLA Target (%) field (e.g. `99.9`). Set it from the Servers tab edit form; it appears as the comparison baseline in the SLA Dashboard.
+- **Delete button in service edit form** — when editing an existing service in the admin drawer the form footer now shows a red Delete button (admin-only) that triggers the existing confirmation dialog before removal.
+- **Per-group Custom CSS** — status-page groups now support a Custom CSS textarea in the group edit form. CSS is injected into that group's public dashboard as a `<style id="group-custom-css">` block after the enterprise theme, allowing full visual overrides per client/brand. `</style>` tags are stripped server-side before storage.
+
+### Changed
+- `POST /api/admin/groups` and `PUT /api/admin/groups/:id` include `custom_css` in INSERT/UPDATE.
+- `POST /api/admin/servers` and `PUT /api/admin/servers/:id` include `sla_target` in INSERT/UPDATE.
+- `GET /api/admin/sla` new endpoint returns uptime stats for all services across three time windows.
+- Schema: `status_servers.sla_target DECIMAL(5,2)` and `status_groups.custom_css MEDIUMTEXT` added via safe `ALTER TABLE … IF NOT EXISTS` migrations on startup.
+
 ## [3.10.1] — 2026-08-18
 
 ### Added

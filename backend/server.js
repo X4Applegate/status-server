@@ -827,6 +827,9 @@ async function initDB() {
   try {
     await db.query("ALTER TABLE status_servers ADD COLUMN runbook TEXT DEFAULT NULL");
   } catch(e) { /* column already exists */ }
+  try {
+    await db.query("ALTER TABLE status_servers ADD COLUMN sla_target DECIMAL(5,2) DEFAULT NULL");
+  } catch(e) { /* column already exists */ }
 
   await db.query(`
     CREATE TABLE IF NOT EXISTS status_history (
@@ -1106,6 +1109,9 @@ async function initDB() {
   // Beta: public status page toggle per group
   try {
     await db.query("ALTER TABLE status_groups ADD COLUMN public_enabled TINYINT(1) NOT NULL DEFAULT 0");
+  } catch(e) { /* column already exists */ }
+  try {
+    await db.query("ALTER TABLE status_groups ADD COLUMN custom_css MEDIUMTEXT DEFAULT NULL");
   } catch(e) { /* column already exists */ }
 
   // Beta: email subscriptions — allow public visitors to opt in to down/recovery alerts
@@ -3799,6 +3805,7 @@ app.post("/api/admin/servers", requireAuth, async (req, res) => {
   const wantGroups = Array.isArray(group_ids) ? group_ids.map(g => parseInt(g)).filter(Number.isFinite) : [];
   const interval = Math.max(10, Math.min(3600, parseInt(poll_interval_sec) || 30));
   const threshold = Math.max(1, Math.min(10, parseInt(failure_threshold) || 1));
+  const slaTarget = req.body.sla_target != null && req.body.sla_target !== "" ? Math.max(0, Math.min(100, parseFloat(req.body.sla_target))) : null;
   const lat = req.body.lat != null && req.body.lat !== "" ? parseFloat(req.body.lat) : null;
   const lng = req.body.lng != null && req.body.lng !== "" ? parseFloat(req.body.lng) : null;
   // Viewers must put new servers into at least one of their allowed groups
@@ -3810,8 +3817,8 @@ app.post("/api/admin/servers", requireAuth, async (req, res) => {
   const id = name.toLowerCase().replace(/[^a-z0-9]+/g,"-").replace(/^-|-$/g,"") + "-" + Date.now();
   try {
     await db.query(
-      "INSERT INTO status_servers (id, name, host, description, category, sub_category, tags, checks, poll_interval_sec, failure_threshold, lat, lng, location_address, runbook) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
-      [id, name, host, description||"", (category||"").trim() || null, (sub_category||"").trim() || null, JSON.stringify(tags||[]), JSON.stringify(checks||[{type:"ping"}]), interval, threshold, lat, lng, req.body.location_address||null, runbook || null]
+      "INSERT INTO status_servers (id, name, host, description, category, sub_category, tags, checks, poll_interval_sec, failure_threshold, lat, lng, location_address, runbook, sla_target) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+      [id, name, host, description||"", (category||"").trim() || null, (sub_category||"").trim() || null, JSON.stringify(tags||[]), JSON.stringify(checks||[{type:"ping"}]), interval, threshold, lat, lng, req.body.location_address||null, runbook || null, slaTarget]
     );
     await setServerGroupIds(id, wantGroups);
     await loadConfig();
@@ -3838,6 +3845,7 @@ app.put("/api/admin/servers/:id", requireAuth, async (req, res) => {
   const wantGroups = Array.isArray(group_ids) ? group_ids.map(g => parseInt(g)).filter(Number.isFinite) : [];
   const interval = Math.max(10, Math.min(3600, parseInt(poll_interval_sec) || 30));
   const threshold = Math.max(1, Math.min(10, parseInt(failure_threshold) || 1));
+  const slaTarget = req.body.sla_target != null && req.body.sla_target !== "" ? Math.max(0, Math.min(100, parseFloat(req.body.sla_target))) : null;
   const lat = req.body.lat != null && req.body.lat !== "" ? parseFloat(req.body.lat) : null;
   const lng = req.body.lng != null && req.body.lng !== "" ? parseFloat(req.body.lng) : null;
   try {
@@ -3868,8 +3876,8 @@ app.put("/api/admin/servers/:id", requireAuth, async (req, res) => {
       }
     }
     const [result] = await db.query(
-      "UPDATE status_servers SET name=?, host=?, description=?, category=?, sub_category=?, tags=?, checks=?, poll_interval_sec=?, failure_threshold=?, lat=?, lng=?, location_address=?, runbook=?, updated_at=NOW() WHERE id=?",
-      [name, host, description||"", (category||"").trim() || null, (sub_category||"").trim() || null, JSON.stringify(tags||[]), JSON.stringify(checks||[]), interval, threshold, lat, lng, location_address||null, runbook || null, req.params.id]
+      "UPDATE status_servers SET name=?, host=?, description=?, category=?, sub_category=?, tags=?, checks=?, poll_interval_sec=?, failure_threshold=?, lat=?, lng=?, location_address=?, runbook=?, sla_target=?, updated_at=NOW() WHERE id=?",
+      [name, host, description||"", (category||"").trim() || null, (sub_category||"").trim() || null, JSON.stringify(tags||[]), JSON.stringify(checks||[]), interval, threshold, lat, lng, location_address||null, runbook || null, slaTarget, req.params.id]
     );
     if (result.affectedRows === 0) return res.status(404).json({ error:"Server not found" });
     // Admins with undefined group_ids leave groups alone; otherwise replace the full set.
@@ -3883,6 +3891,33 @@ app.put("/api/admin/servers/:id", requireAuth, async (req, res) => {
   } catch(err) {
     res.status(500).json({ error:err.message });
   }
+});
+
+app.get("/api/admin/sla", requireAdmin, async (req, res) => {
+  try {
+    const [rows] = await db.query(`
+      SELECT s.id, s.name, s.sla_target,
+        SUM(CASE WHEN h.checked_at >= DATE_SUB(NOW(), INTERVAL 24 HOUR) THEN 1 ELSE 0 END) AS total_24,
+        SUM(CASE WHEN h.checked_at >= DATE_SUB(NOW(), INTERVAL 24 HOUR) AND h.ok=1 THEN 1 ELSE 0 END) AS up_24,
+        SUM(CASE WHEN h.checked_at >= DATE_SUB(NOW(), INTERVAL 7  DAY)  THEN 1 ELSE 0 END) AS total_7,
+        SUM(CASE WHEN h.checked_at >= DATE_SUB(NOW(), INTERVAL 7  DAY)  AND h.ok=1 THEN 1 ELSE 0 END) AS up_7,
+        COUNT(h.id) AS total_30,
+        SUM(CASE WHEN h.ok=1 THEN 1 ELSE 0 END) AS up_30
+      FROM status_servers s
+      LEFT JOIN status_history h ON h.server_id = s.id
+        AND h.checked_at >= DATE_SUB(NOW(), INTERVAL 30 DAY)
+      GROUP BY s.id, s.name, s.sla_target
+      ORDER BY s.sort_order, s.created_at`);
+    const pct = (t, u) => Number(t) > 0 ? Math.round((Number(u) / Number(t)) * 10000) / 100 : null;
+    res.json(rows.map(r => ({
+      id:         r.id,
+      name:       r.name,
+      sla_target: r.sla_target != null ? parseFloat(r.sla_target) : null,
+      uptime_24h: pct(r.total_24, r.up_24), checks_24h: Number(r.total_24),
+      uptime_7d:  pct(r.total_7,  r.up_7),  checks_7d:  Number(r.total_7),
+      uptime_30d: pct(r.total_30, r.up_30), checks_30d: Number(r.total_30),
+    })));
+  } catch(e) { res.status(500).json({ error: e.message }); }
 });
 
 app.delete("/api/admin/servers/:id", requireAdmin, async (req, res) => {
@@ -4522,6 +4557,7 @@ function cleanCustomDomain(s) {
 app.post("/api/admin/groups", requireAdmin, async (req, res) => {
   const { name, slug, description, logo_text, logo_image, logo_size, accent_color, bg_color, default_theme, custom_domain, server_ids, privacy_text, terms_text } = req.body;
   const public_enabled = req.body.public_enabled ? 1 : 0;
+  const cleanCustomCss = req.body.custom_css ? String(req.body.custom_css).replace(/<\/style>/gi, "").slice(0, 65535) : null;
   if (!name) return res.status(400).json({ error: "Name is required" });
   const finalSlug = slugify(slug || name);
   if (!finalSlug) return res.status(400).json({ error: "Slug is required" });
@@ -4537,8 +4573,8 @@ app.post("/api/admin/groups", requireAdmin, async (req, res) => {
   const cleanLogoSize = Math.max(20, Math.min(120, parseInt(logo_size) || 42));
   try {
     const [result] = await db.query(
-      "INSERT INTO status_groups (slug, name, description, logo_text, logo_image, logo_size, accent_color, bg_color, default_theme, custom_domain, privacy_text, terms_text, public_enabled) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)",
-      [finalSlug, name, description || "", logo_text || "", cleanLogo, cleanLogoSize, accent_color || "#2a7fff", cleanBg, cleanTheme, cleanDomain, privacy_text || null, terms_text || null, public_enabled]
+      "INSERT INTO status_groups (slug, name, description, logo_text, logo_image, logo_size, accent_color, bg_color, default_theme, custom_domain, privacy_text, terms_text, public_enabled, custom_css) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+      [finalSlug, name, description || "", logo_text || "", cleanLogo, cleanLogoSize, accent_color || "#2a7fff", cleanBg, cleanTheme, cleanDomain, privacy_text || null, terms_text || null, public_enabled, cleanCustomCss]
     );
     const newId = result.insertId;
     if (Array.isArray(server_ids) && server_ids.length) {
@@ -4566,6 +4602,7 @@ app.put("/api/admin/groups/:id", requireAuth, async (req, res) => {
   }
   const { name, slug, description, logo_text, logo_image, logo_size, accent_color, bg_color, default_theme, custom_domain, privacy_text, terms_text } = req.body;
   const public_enabled = req.body.public_enabled ? 1 : 0;
+  const cleanCustomCss = req.body.custom_css ? String(req.body.custom_css).replace(/<\/style>/gi, "").slice(0, 65535) : null;
   // Only admins may change server assignments
   const server_ids = req.session.role === "admin" ? req.body.server_ids : undefined;
   if (!name) return res.status(400).json({ error: "Name is required" });
@@ -4587,8 +4624,8 @@ app.put("/api/admin/groups/:id", requireAuth, async (req, res) => {
   const cleanLogoSize = Math.max(20, Math.min(120, parseInt(logo_size) || 42));
   try {
     const [result] = await db.query(
-      "UPDATE status_groups SET slug=?, name=?, description=?, logo_text=?, logo_image=?, logo_size=?, accent_color=?, bg_color=?, default_theme=?, custom_domain=?, privacy_text=?, terms_text=?, public_enabled=? WHERE id=?",
-      [finalSlug, name, description || "", logo_text || "", cleanLogo, cleanLogoSize, accent_color || "#2a7fff", cleanBg, cleanTheme, cleanDomain, privacy_text || null, terms_text || null, public_enabled, gid]
+      "UPDATE status_groups SET slug=?, name=?, description=?, logo_text=?, logo_image=?, logo_size=?, accent_color=?, bg_color=?, default_theme=?, custom_domain=?, privacy_text=?, terms_text=?, public_enabled=?, custom_css=? WHERE id=?",
+      [finalSlug, name, description || "", logo_text || "", cleanLogo, cleanLogoSize, accent_color || "#2a7fff", cleanBg, cleanTheme, cleanDomain, privacy_text || null, terms_text || null, public_enabled, cleanCustomCss, gid]
     );
     if (result.affectedRows === 0) return res.status(404).json({ error: "Group not found" });
     if (Array.isArray(server_ids)) {
@@ -6409,6 +6446,7 @@ app.use(async (req, res, next) => {
         pageTitle:    `${g.name} — Status`,
         privacyUrl:   g.privacy_text ? "/privacy" : null,
         termsUrl:     g.terms_text   ? "/terms"   : null,
+        customCss:    g.custom_css   || null,
       });
     }
   } catch(e) { /* silent — fall through to normal routing */ }
@@ -6455,6 +6493,7 @@ app.get("/status/:slug", pageLimiter, async (req, res) => {
       privacyUrl:    g.privacy_text ? `/dashboard/${g.slug}/privacy` : "/privacy",
       termsUrl:      g.terms_text   ? `/dashboard/${g.slug}/terms`   : "/terms",
       isPublicPage:  true,
+      customCss:     g.custom_css || null,
     });
   } catch(e) {
     res.status(500).send("Server error");
@@ -6482,6 +6521,7 @@ app.get("/dashboard/:slug", pageLimiter, async (req, res) => {
       pageTitle:    `${g.name} — Status`,
       privacyUrl:   g.privacy_text ? `/dashboard/${g.slug}/privacy` : "/privacy",
       termsUrl:     g.terms_text   ? `/dashboard/${g.slug}/terms`   : "/terms",
+      customCss:    g.custom_css   || null,
     });
   } catch(e) {
     res.status(500).send("Server error");

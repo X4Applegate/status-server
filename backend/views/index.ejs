@@ -1077,6 +1077,7 @@ html[data-theme="light"] .theme-icon-dark,html[data-theme="dark"] .theme-icon-li
   .public-resource-grid{grid-template-columns:1fr}.public-resource-head{display:block}
 }
 </style>
+<% if (typeof customCss !== 'undefined' && customCss) { %><style id="group-custom-css"><%- customCss %></style><% } %>
 </head>
 <body>
 

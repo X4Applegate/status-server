@@ -787,7 +787,7 @@ body.admin-role .admin-only-nav,body.admin-role .admin-only-action{display:flex!
   </div>
   <div id="aListView" class="admin-section">
     <div class="drawer-toolbar">
-      <div class="admin-tabs"><button class="admin-tab active" id="tabServers" onclick="switchTab('servers')">Servers</button><button class="admin-tab" id="tabGroups" onclick="switchTab('groups')">Groups</button><div class="admin-tab-group" id="tabNetCtrl"><button type="button" class="admin-tab" id="tabNetCtrlBtn" aria-haspopup="menu" aria-expanded="false" aria-controls="tabNetCtrlMenu" onclick="toggleNetCtrl(event)">Network Controller &#9662;</button><div class="admin-tab-submenu" id="tabNetCtrlMenu" role="menu"><button type="button" role="menuitem" id="tabOmadaSub" onclick="switchTab('omada');closeNetCtrl()">Omada</button><button type="button" role="menuitem" id="tabUnifiSub" onclick="switchTab('unifi');closeNetCtrl()">UniFi</button></div></div><button id="tabOmada" style="display:none"></button><button id="tabUnifi" style="display:none"></button><button class="admin-tab" id="tabSquare" onclick="switchTab('square')">Square</button><button class="admin-tab" id="tabMaint" onclick="closeAdminToWorkspace('maintenance')">Maintenance</button><button class="admin-tab" id="tabIncidents" onclick="closeAdminToWorkspace('incidents')">Incidents</button><button class="admin-tab" id="tabBanners" onclick="switchTab('banners')">Banners</button><button class="admin-tab" id="tabApiKeys" onclick="switchTab('apikeys')">API Keys</button><button class="admin-tab" id="tabUsers" onclick="switchTab('users')">Users</button><button class="admin-tab" id="tabWebhooks" onclick="switchTab('webhooks')">Webhooks</button><button class="admin-tab" id="tabSettings" onclick="switchTab('settings')">Settings</button><button class="admin-tab" id="tabAudit" onclick="switchTab('audit')">Audit</button></div>
+      <div class="admin-tabs"><button class="admin-tab active" id="tabServers" onclick="switchTab('servers')">Servers</button><button class="admin-tab" id="tabGroups" onclick="switchTab('groups')">Groups</button><div class="admin-tab-group" id="tabNetCtrl"><button type="button" class="admin-tab" id="tabNetCtrlBtn" aria-haspopup="menu" aria-expanded="false" aria-controls="tabNetCtrlMenu" onclick="toggleNetCtrl(event)">Network Controller &#9662;</button><div class="admin-tab-submenu" id="tabNetCtrlMenu" role="menu"><button type="button" role="menuitem" id="tabOmadaSub" onclick="switchTab('omada');closeNetCtrl()">Omada</button><button type="button" role="menuitem" id="tabUnifiSub" onclick="switchTab('unifi');closeNetCtrl()">UniFi</button></div></div><button id="tabOmada" style="display:none"></button><button id="tabUnifi" style="display:none"></button><button class="admin-tab" id="tabSquare" onclick="switchTab('square')">Square</button><button class="admin-tab" id="tabMaint" onclick="closeAdminToWorkspace('maintenance')">Maintenance</button><button class="admin-tab" id="tabIncidents" onclick="closeAdminToWorkspace('incidents')">Incidents</button><button class="admin-tab" id="tabBanners" onclick="switchTab('banners')">Banners</button><button class="admin-tab" id="tabApiKeys" onclick="switchTab('apikeys')">API Keys</button><button class="admin-tab" id="tabUsers" onclick="switchTab('users')">Users</button><button class="admin-tab" id="tabWebhooks" onclick="switchTab('webhooks')">Webhooks</button><button class="admin-tab" id="tabSettings" onclick="switchTab('settings')">Settings</button><button class="admin-tab" id="tabAudit" onclick="switchTab('audit')">Audit</button><button class="admin-tab" id="tabSla" onclick="switchTab('sla')">SLA</button></div>
       <span style="font-size:11px;color:var(--text-2)" id="aCount"></span>
       <div class="drawer-spacer"></div>
       <button class="btn" id="importBtn" onclick="triggerImport()" style="font-size:11px;padding:5px 11px;display:none" title="Import servers from JSON">⬆ Import</button>
@@ -875,6 +875,7 @@ body.admin-role .admin-only-nav,body.admin-role .admin-only-action{display:flex!
               <option value="10">10 failures</option>
             </select>
           </div>
+          <div class="fg"><label class="flabel">SLA Target <span style="font-weight:400;text-transform:none;letter-spacing:0;color:var(--text-2)">(% uptime goal — used in the SLA dashboard)</span></label><input class="finput" id="fSlaTarget" type="number" min="0" max="100" step="0.01" placeholder="e.g. 99.9"></div>
           <div class="fg full"><label class="flabel">Dashboards <span style="font-weight:400;text-transform:none;letter-spacing:0;color:var(--text-2)" id="fGroupsHint">(pick one or more — this server appears in each)</span></label>
             <div id="fGroupsPicker" style="background:var(--input-bg);border:1px solid var(--border-hi);border-radius:var(--r-sm);max-height:220px;overflow-y:auto;padding:8px"></div>
           </div>
@@ -887,7 +888,7 @@ body.admin-role .admin-only-nav,body.admin-role .admin-only-action{display:flex!
             <div style="background:var(--input-bg);border:1px solid var(--border-hi);border-radius:var(--r-sm);padding:12px;display:flex;flex-direction:column;gap:8px" id="fBadgeList"></div>
           </div>
         </div>
-        <div class="form-footer"><span class="form-err" id="fErr"></span><button class="btn" onclick="showList()">Cancel</button><button class="btn btn-primary" onclick="submitForm()">Save Server</button></div>
+        <div class="form-footer"><span class="form-err" id="fErr"></span><button class="btn btn-danger" id="fDeleteBtn" style="display:none;margin-right:auto" onclick="askDelFromForm()">Delete</button><button class="btn" onclick="showList()">Cancel</button><button class="btn btn-primary" onclick="submitForm()">Save Server</button></div>
       </div>
     </div>
   </div>
@@ -1181,6 +1182,11 @@ body.admin-role .admin-only-nav,body.admin-role .admin-only-action{display:flex!
                 <label class="flabel" for="gTermsText">Terms of Service</label>
                 <textarea class="finput" id="gTermsText" rows="6" placeholder="Paste or write your Terms of Service here. Plain text or basic markdown (# headings, **bold**, - lists) is supported." style="resize:vertical;font-family:var(--mono);font-size:12px;line-height:1.6"></textarea>
                 <div style="font-size:11px;color:var(--text-2);margin-top:4px">Leave blank to use the default Applegate Monitor terms page</div>
+              </div>
+              <div>
+                <label class="flabel" for="gCustomCss">Custom CSS <span style="font-weight:400;text-transform:none;letter-spacing:0;color:var(--text-2)">(injected into this status page only — override any style)</span></label>
+                <textarea class="finput" id="gCustomCss" rows="8" placeholder=".topbar { background: #1a1a2e; }&#10;.srv-card { border-radius: 12px; }&#10;:root { --blue: #7c3aed; }" style="resize:vertical;font-family:var(--mono);font-size:12px;line-height:1.6"></textarea>
+                <div style="font-size:11px;color:var(--text-2);margin-top:4px">Plain CSS only — no &lt;script&gt; tags. Changes are live immediately on the public dashboard.</div>
               </div>
             </div>
           </div>
@@ -3030,11 +3036,12 @@ async function switchTab(tab, managementGeneration = managementLoadGeneration){
   document.getElementById("tabWebhooks").classList.toggle("active", tab === "webhooks");
   document.getElementById("tabSettings").classList.toggle("active", tab === "settings");
   document.getElementById("tabAudit").classList.toggle("active",    tab === "audit");
-  const labels = { servers:"Add Service", groups:"Add Status Page", omada:"Add Controller", unifi:"Add Controller", square:"Add Account", maint:"Schedule Window", incidents:"", banners:"Add Announcement", apikeys:"Generate Key", users:"Add User", webhooks:"Add Alert Channel", settings:"", audit:"" };
+  document.getElementById("tabSla").classList.toggle("active",      tab === "sla");
+  const labels = { servers:"Add Service", groups:"Add Status Page", omada:"Add Controller", unifi:"Add Controller", square:"Add Account", maint:"Schedule Window", incidents:"", banners:"Add Announcement", apikeys:"Generate Key", users:"Add User", webhooks:"Add Alert Channel", settings:"", audit:"", sla:"" };
   document.getElementById("addBtnLabel").textContent = labels[tab] || "";
   // Incidents are created automatically from failed checks or via the Post Update button
   // on each row — there's no "add incident" flow, so hide the Add button for that tab.
-  const hideAdd = (!isAdmin() && (tab==="groups"||tab==="users"||tab==="banners")) || tab==="settings" || tab==="audit" || tab==="incidents";
+  const hideAdd = (!isAdmin() && (tab==="groups"||tab==="users"||tab==="banners")) || tab==="settings" || tab==="audit" || tab==="incidents" || tab==="sla";
   document.getElementById("addBtn").style.display = hideAdd ? "none" : "";
   document.getElementById("addBtn").onclick =
     tab === "servers"  ? () => showServerForm(null) :
@@ -3049,6 +3056,7 @@ async function switchTab(tab, managementGeneration = managementLoadGeneration){
     tab === "settings" ? () => {}                   :
     tab === "audit"    ? () => {}                   :
     tab === "incidents"? () => {}                   :
+    tab === "sla"      ? () => {}                   :
                          () => showWebhookForm(null);
   // Show/hide import+export buttons (servers tab only, admin only)
   const showIE = tab === "servers" && isAdmin();
@@ -3072,7 +3080,7 @@ async function switchTab(tab, managementGeneration = managementLoadGeneration){
   const apiKeyFormView = document.getElementById("aApiKeyFormView");
   if (apiKeyFormView) apiKeyFormView.style.display = "none";
   hideManagementAux();
-  document.getElementById("adminManagementDetailContent")?.classList.toggle("management-settings-content", tab === "settings");
+  document.getElementById("adminManagementDetailContent")?.classList.toggle("management-settings-content", tab === "settings" || tab === "sla");
   resetManagementDetail();
   const searchBar = document.getElementById("serverSearchBar");
   const statBar   = document.getElementById("drawerStatBar");
@@ -3080,7 +3088,7 @@ async function switchTab(tab, managementGeneration = managementLoadGeneration){
     searchBar.classList.add("visible");
     statBar.classList.add("visible");
   } else {
-    searchBar.classList.toggle("visible", tab !== "settings");
+    searchBar.classList.toggle("visible", tab !== "settings" && tab !== "sla");
     statBar.classList.remove("visible");
   }
   if (["omada","unifi","square","users","webhooks"].includes(tab)) {
@@ -3099,6 +3107,7 @@ async function switchTab(tab, managementGeneration = managementLoadGeneration){
   else if (tab === "users")     await loadUserList(managementGeneration);
   else if (tab === "settings")  await loadSettings(managementGeneration);
   else if (tab === "audit")     await loadAuditLog(false, managementGeneration);
+  else if (tab === "sla")       await loadSlaDashboard(managementGeneration);
   else                           await loadWebhookList(managementGeneration);
   if (MANAGEMENT_TABS[tab] && !managementLoadIsCurrent(tab, managementGeneration)) return;
   requestAnimationFrame(() => requestAnimationFrame(updatePanelScrollBtns));
@@ -3469,6 +3478,8 @@ async function showServerForm(s){
   document.getElementById("aOmadaSitesView").style.display = "none";
   document.getElementById("fHeading").textContent = s ? "Edit Server" : "Add Server";
   document.getElementById("fId").value    = s?.id || "";
+  const _fDelBtn = document.getElementById("fDeleteBtn");
+  if (_fDelBtn) _fDelBtn.style.display = s?.id ? "" : "none";
   document.getElementById("fName").value  = s?.name || "";
   document.getElementById("fHost").value  = s?.host || "";
   document.getElementById("fDesc").value  = s?.description || "";
@@ -3491,6 +3502,7 @@ async function showServerForm(s){
   document.getElementById("fGeoList").style.display = "none";
   document.getElementById("fTags").value  = (s?.tags||[]).join(", ");
   document.getElementById("fRunbook").value = s?.runbook || "";
+  document.getElementById("fSlaTarget").value = s?.sla_target != null ? String(s.sla_target) : "";
   document.getElementById("fInterval").value = String(s?.poll_interval_sec || 30);
   document.getElementById("fThreshold").value = String(s?.failure_threshold || 1);
   document.getElementById("fErr").textContent = "";
@@ -3911,6 +3923,7 @@ async function submitForm(){
     lng: parseFloat(document.getElementById("fLng").value) || null,
     location_address: document.getElementById("fAddress").value.trim() || null,
     runbook:          document.getElementById("fRunbook").value,
+    sla_target:       document.getElementById("fSlaTarget").value !== "" ? parseFloat(document.getElementById("fSlaTarget").value) : null,
   };
   try {
     const r = await fetch(id ? `/api/admin/servers/${id}` : "/api/admin/servers", {
@@ -3951,6 +3964,13 @@ async function submitForm(){
     toast(id ? "Server updated" : "Server added", "success");
     await showList();
   } catch(e){ document.getElementById("fErr").textContent = "Error: "+e.message; }
+}
+
+function askDelFromForm(){
+  const id = document.getElementById("fId").value;
+  const name = document.getElementById("fName").value || "this service";
+  if (!id) return;
+  askDel(id, name);
 }
 
 function askDel(id, name){
@@ -4786,6 +4806,7 @@ async function showGroupForm(g){
   document.getElementById("gCustomDomain").value = g?.custom_domain || "";
   document.getElementById("gPrivacyText").value = g?.privacy_text || "";
   document.getElementById("gTermsText").value   = g?.terms_text   || "";
+  document.getElementById("gCustomCss").value   = g?.custom_css   || "";
   // Background color: if the group has one set, enable the toggle and pre-fill; else show default
   const hasBg = !!g?.bg_color;
   document.getElementById("gBgColorEnabled").checked = hasBg;
@@ -4891,6 +4912,7 @@ async function submitGroupForm(){
     custom_domain:  document.getElementById("gCustomDomain").value.trim(),
     privacy_text:   document.getElementById("gPrivacyText").value.trim() || null,
     terms_text:     document.getElementById("gTermsText").value.trim()   || null,
+    custom_css:     document.getElementById("gCustomCss").value.trim()   || null,
     public_enabled: document.getElementById("gPublicEnabled").checked ? 1 : 0,
     server_ids:     Array.from(pickedServers)
   };
@@ -6790,6 +6812,90 @@ async function loadAuditLog(append = false, generation = managementLoadGeneratio
       el.innerHTML = `<div class="empty-state">Failed to load audit log: ${_escHtml(err.message)}</div>`;
       resetManagementDetail("Audit activity could not be loaded.");
     } else toast(err.message, "error");
+  }
+}
+
+// ── SLA Dashboard ─────────────────────────────────────────────────────────────
+async function loadSlaDashboard(generation = managementLoadGeneration){
+  const dir = document.getElementById("adminPanelBody");
+  const el  = document.getElementById("adminManagementDetailContent");
+  dir.innerHTML = `<div style="padding:16px;font-size:12px;color:var(--text-2)">Loading…</div>`;
+  el.innerHTML  = `<div style="padding:24px;font-size:12px;color:var(--text-2)">Loading…</div>`;
+  try {
+    const r = await fetch("/api/admin/sla");
+    if (!managementLoadIsCurrent("sla", generation)) return;
+    if (!r.ok) { el.innerHTML = `<div class="empty-state">Admin role required.</div>`; return; }
+    const rows = await r.json();
+    if (!managementLoadIsCurrent("sla", generation)) return;
+
+    const fmt = v => v == null ? `<span style="color:var(--text-2)">—</span>` : `${v.toFixed(2)}%`;
+    const badge = (uptime, target) => {
+      if (uptime == null) return `<span style="color:var(--text-2)">—</span>`;
+      const ok = target == null || uptime >= target;
+      const color = ok ? "var(--green)" : "var(--red)";
+      return `<span style="color:${color};font-weight:600">${uptime.toFixed(2)}%</span>`;
+    };
+    const breaches = rows.filter(r => r.sla_target != null && r.uptime_30d != null && r.uptime_30d < r.sla_target);
+    const ok30     = rows.filter(r => r.sla_target != null && r.uptime_30d != null && r.uptime_30d >= r.sla_target);
+    const noTarget = rows.filter(r => r.sla_target == null);
+
+    dir.innerHTML = `
+      <div style="padding:12px 14px;display:flex;flex-direction:column;gap:8px">
+        <div style="font-size:11px;font-weight:600;color:var(--text-2);text-transform:uppercase;letter-spacing:.06em;margin-bottom:4px">30-Day Summary</div>
+        <div style="display:flex;align-items:center;gap:8px;padding:10px 12px;background:var(--surface2);border-radius:8px">
+          <span style="font-size:20px;font-weight:700;color:var(--green)">${ok30.length}</span>
+          <span style="font-size:12px;color:var(--text-2)">meeting target</span>
+        </div>
+        <div style="display:flex;align-items:center;gap:8px;padding:10px 12px;background:var(--surface2);border-radius:8px">
+          <span style="font-size:20px;font-weight:700;color:${breaches.length ? "var(--red)" : "var(--text-2)"}">${breaches.length}</span>
+          <span style="font-size:12px;color:var(--text-2)">breaching target</span>
+        </div>
+        <div style="display:flex;align-items:center;gap:8px;padding:10px 12px;background:var(--surface2);border-radius:8px">
+          <span style="font-size:20px;font-weight:700;color:var(--text-2)">${noTarget.length}</span>
+          <span style="font-size:12px;color:var(--text-2)">no target set</span>
+        </div>
+        ${breaches.length ? `<div style="font-size:11px;font-weight:600;color:var(--red);margin-top:8px;text-transform:uppercase;letter-spacing:.06em">Breaching</div>${breaches.map(b=>`<div style="padding:8px 12px;background:rgba(249,112,102,.08);border:1px solid rgba(249,112,102,.25);border-radius:8px;font-size:12px"><div style="font-weight:600;color:var(--text-hi)">${_escHtml(b.name)}</div><div style="color:var(--text-2)">${b.uptime_30d != null ? b.uptime_30d.toFixed(2)+"% vs "+b.sla_target+"%t" : "no data"}</div></div>`).join("")}` : ""}
+      </div>`;
+
+    el.innerHTML = `<div style="padding:24px;max-width:900px">
+      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:20px">
+        <div>
+          <div style="font-size:16px;font-weight:700;color:var(--text-hi)">SLA Dashboard</div>
+          <div style="font-size:12px;color:var(--text-2);margin-top:2px">Uptime vs. target — rolling 24h / 7d / 30d</div>
+        </div>
+        <button class="btn" style="font-size:11px;padding:5px 11px" onclick="loadSlaDashboard()">↻ Refresh</button>
+      </div>
+      <table style="width:100%;border-collapse:collapse;font-size:13px">
+        <thead>
+          <tr style="text-align:left;border-bottom:1px solid var(--border)">
+            <th style="padding:8px 12px 10px;color:var(--text-2);font-weight:500;font-size:11px;text-transform:uppercase;letter-spacing:.06em">Service</th>
+            <th style="padding:8px 12px 10px;color:var(--text-2);font-weight:500;font-size:11px;text-transform:uppercase;letter-spacing:.06em;text-align:right">Target</th>
+            <th style="padding:8px 12px 10px;color:var(--text-2);font-weight:500;font-size:11px;text-transform:uppercase;letter-spacing:.06em;text-align:right">24 h</th>
+            <th style="padding:8px 12px 10px;color:var(--text-2);font-weight:500;font-size:11px;text-transform:uppercase;letter-spacing:.06em;text-align:right">7 d</th>
+            <th style="padding:8px 12px 10px;color:var(--text-2);font-weight:500;font-size:11px;text-transform:uppercase;letter-spacing:.06em;text-align:right">30 d</th>
+            <th style="padding:8px 12px 10px;color:var(--text-2);font-weight:500;font-size:11px;text-transform:uppercase;letter-spacing:.06em;text-align:right">Checks (30d)</th>
+          </tr>
+        </thead>
+        <tbody>
+          ${rows.map(row => `
+            <tr style="border-bottom:1px solid var(--border);transition:background .12s" onmouseover="this.style.background='var(--surface2)'" onmouseout="this.style.background=''">
+              <td style="padding:10px 12px">
+                <div style="font-weight:500;color:var(--text-hi)">${_escHtml(row.name)}</div>
+                <div style="font-size:11px;color:var(--text-2)">${_escHtml(row.id)}</div>
+              </td>
+              <td style="padding:10px 12px;text-align:right;color:var(--text-2)">${row.sla_target != null ? row.sla_target.toFixed(2)+"%" : "—"}</td>
+              <td style="padding:10px 12px;text-align:right">${badge(row.uptime_24h, row.sla_target)}</td>
+              <td style="padding:10px 12px;text-align:right">${badge(row.uptime_7d,  row.sla_target)}</td>
+              <td style="padding:10px 12px;text-align:right">${badge(row.uptime_30d, row.sla_target)}</td>
+              <td style="padding:10px 12px;text-align:right;color:var(--text-2)">${row.checks_30d.toLocaleString()}</td>
+            </tr>`).join("")}
+        </tbody>
+      </table>
+      ${!rows.length ? `<div class="empty-state">No services found.</div>` : ""}
+      <div style="margin-top:16px;font-size:11px;color:var(--text-2)">Set a SLA Target % on each service via the Servers tab → Edit. Red = breaching target; green = meeting target.</div>
+    </div>`;
+  } catch(e) {
+    el.innerHTML = `<div class="empty-state">Failed to load SLA data: ${_escHtml(e.message)}</div>`;
   }
 }
 
