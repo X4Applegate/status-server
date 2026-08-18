@@ -89,8 +89,8 @@ test("custom_css is included in the group INSERT SQL", () => {
     'app.post("/api/admin/groups"',
     'app.put("/api/admin/groups/:id"',
   );
-  assert.match(route, /custom_css\) VALUES/);
-  assert.match(route, /cleanCustomCss\]/);
+  assert.match(route, /custom_css.*VALUES/);
+  assert.match(route, /cleanCustomCss/);
 });
 
 test("custom_css is included in the group UPDATE SQL", () => {

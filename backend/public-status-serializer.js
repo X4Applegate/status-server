@@ -100,6 +100,9 @@ function serializePublicGroup(group) {
     accent_color: publicString(source.accent_color, "#2a7fff"),
     bg_color: publicString(source.bg_color) || null,
     default_theme: source.default_theme === "light" ? "light" : "dark",
+    hero_title: publicString(source.hero_title) || null,
+    kicker_text: publicString(source.kicker_text) || null,
+    layout: ["minimal","grid"].includes(source.layout) ? source.layout : "default",
   };
 }
 

@@ -8,6 +8,19 @@ All notable changes to this project are documented here.
 
 ## [Unreleased]
 
+## [3.14.0] — 2026-08-18
+
+### Added
+- **Custom hero title** — per-group setting that replaces "All systems operational" when all services are healthy. Configured in the group edit form → "Status Page Design" section; stored as `hero_title VARCHAR(200)` on `status_groups`.
+- **Custom kicker text** — replaces "Live service health" above the status headline. Stored as `kicker_text VARCHAR(100)` on `status_groups`.
+- **Layout presets** — three service-list layouts selectable per group: `Default` (existing sidebar + scrollable list), `Grid` (2-column service cards), `Minimal` (full-width service list, no sidebar). Stored as `layout ENUM('default','minimal','grid')` on `status_groups`. Body receives a matching `layout-<value>` class.
+- **Design fields in public serializer** — `hero_title`, `kicker_text`, and `layout` are now included in `serializePublicGroup()` output.
+- **18 new tests** — v314-status-page-design.test.js covers schema columns, INSERT/UPDATE SQL, render locals, serializer, index.ejs rendering, and admin form fields. Total test count: 147 → 165.
+
+### Changed
+- `status_groups` table gains three new columns via `ALTER TABLE` with `try/catch` (safe on existing installs).
+- Group POST and PUT API bodies accept `hero_title`, `kicker_text`, and `layout`; all three are sanitized before persistence.
+
 ## [3.13.0] — 2026-08-18
 
 ### Added

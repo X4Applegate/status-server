@@ -1186,6 +1186,15 @@ async function initDB() {
   try {
     await db.query("ALTER TABLE status_groups ADD COLUMN custom_css MEDIUMTEXT DEFAULT NULL");
   } catch(e) { /* column already exists */ }
+  try {
+    await db.query("ALTER TABLE status_groups ADD COLUMN hero_title VARCHAR(200) DEFAULT NULL");
+  } catch(e) { /* column already exists */ }
+  try {
+    await db.query("ALTER TABLE status_groups ADD COLUMN kicker_text VARCHAR(100) DEFAULT NULL");
+  } catch(e) { /* column already exists */ }
+  try {
+    await db.query("ALTER TABLE status_groups ADD COLUMN layout ENUM('default','minimal','grid') NOT NULL DEFAULT 'default'");
+  } catch(e) { /* column already exists */ }
 
   // Beta: email subscriptions — allow public visitors to opt in to down/recovery alerts
   await db.query(`
@@ -4884,6 +4893,9 @@ app.post("/api/admin/groups", requireManager, async (req, res) => {
   const { name, slug, description, logo_text, logo_image, logo_size, accent_color, bg_color, default_theme, custom_domain, server_ids, privacy_text, terms_text } = req.body;
   const public_enabled = req.body.public_enabled ? 1 : 0;
   const cleanCustomCss = req.body.custom_css ? String(req.body.custom_css).replace(/<\/style>/gi, "").slice(0, 65535) : null;
+  const cleanHeroTitle  = req.body.hero_title  ? String(req.body.hero_title).trim().slice(0, 200)  : null;
+  const cleanKickerText = req.body.kicker_text ? String(req.body.kicker_text).trim().slice(0, 100) : null;
+  const cleanLayout     = ["minimal","grid"].includes(req.body.layout) ? req.body.layout : "default";
   if (!name) return res.status(400).json({ error: "Name is required" });
   const finalSlug = slugify(slug || name);
   if (!finalSlug) return res.status(400).json({ error: "Slug is required" });
@@ -4899,8 +4911,8 @@ app.post("/api/admin/groups", requireManager, async (req, res) => {
   const cleanLogoSize = Math.max(20, Math.min(120, parseInt(logo_size) || 42));
   try {
     const [result] = await db.query(
-      "INSERT INTO status_groups (slug, name, description, logo_text, logo_image, logo_size, accent_color, bg_color, default_theme, custom_domain, privacy_text, terms_text, public_enabled, custom_css) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
-      [finalSlug, name, description || "", logo_text || "", cleanLogo, cleanLogoSize, accent_color || "#2a7fff", cleanBg, cleanTheme, cleanDomain, privacy_text || null, terms_text || null, public_enabled, cleanCustomCss]
+      "INSERT INTO status_groups (slug, name, description, logo_text, logo_image, logo_size, accent_color, bg_color, default_theme, custom_domain, privacy_text, terms_text, public_enabled, custom_css, hero_title, kicker_text, layout) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+      [finalSlug, name, description || "", logo_text || "", cleanLogo, cleanLogoSize, accent_color || "#2a7fff", cleanBg, cleanTheme, cleanDomain, privacy_text || null, terms_text || null, public_enabled, cleanCustomCss, cleanHeroTitle, cleanKickerText, cleanLayout]
     );
     const newId = result.insertId;
     if (Array.isArray(server_ids) && server_ids.length) {
@@ -4929,6 +4941,9 @@ app.put("/api/admin/groups/:id", requireAuth, async (req, res) => {
   const { name, slug, description, logo_text, logo_image, logo_size, accent_color, bg_color, default_theme, custom_domain, privacy_text, terms_text } = req.body;
   const public_enabled = req.body.public_enabled ? 1 : 0;
   const cleanCustomCss = req.body.custom_css ? String(req.body.custom_css).replace(/<\/style>/gi, "").slice(0, 65535) : null;
+  const cleanHeroTitle  = req.body.hero_title  ? String(req.body.hero_title).trim().slice(0, 200)  : null;
+  const cleanKickerText = req.body.kicker_text ? String(req.body.kicker_text).trim().slice(0, 100) : null;
+  const cleanLayout     = ["minimal","grid"].includes(req.body.layout) ? req.body.layout : "default";
   // Only admins may change server assignments
   const server_ids = req.session.role === "admin" ? req.body.server_ids : undefined;
   if (!name) return res.status(400).json({ error: "Name is required" });
@@ -4950,8 +4965,8 @@ app.put("/api/admin/groups/:id", requireAuth, async (req, res) => {
   const cleanLogoSize = Math.max(20, Math.min(120, parseInt(logo_size) || 42));
   try {
     const [result] = await db.query(
-      "UPDATE status_groups SET slug=?, name=?, description=?, logo_text=?, logo_image=?, logo_size=?, accent_color=?, bg_color=?, default_theme=?, custom_domain=?, privacy_text=?, terms_text=?, public_enabled=?, custom_css=? WHERE id=?",
-      [finalSlug, name, description || "", logo_text || "", cleanLogo, cleanLogoSize, accent_color || "#2a7fff", cleanBg, cleanTheme, cleanDomain, privacy_text || null, terms_text || null, public_enabled, cleanCustomCss, gid]
+      "UPDATE status_groups SET slug=?, name=?, description=?, logo_text=?, logo_image=?, logo_size=?, accent_color=?, bg_color=?, default_theme=?, custom_domain=?, privacy_text=?, terms_text=?, public_enabled=?, custom_css=?, hero_title=?, kicker_text=?, layout=? WHERE id=?",
+      [finalSlug, name, description || "", logo_text || "", cleanLogo, cleanLogoSize, accent_color || "#2a7fff", cleanBg, cleanTheme, cleanDomain, privacy_text || null, terms_text || null, public_enabled, cleanCustomCss, cleanHeroTitle, cleanKickerText, cleanLayout, gid]
     );
     if (result.affectedRows === 0) return res.status(404).json({ error: "Group not found" });
     if (Array.isArray(server_ids)) {
@@ -6775,6 +6790,9 @@ app.use(async (req, res, next) => {
         privacyUrl:   g.privacy_text ? "/privacy" : null,
         termsUrl:     g.terms_text   ? "/terms"   : null,
         customCss:    g.custom_css   || null,
+        heroTitle:    g.hero_title   || null,
+        kickerText:   g.kicker_text  || null,
+        pageLayout:   g.layout       || "default",
       });
     }
   } catch(e) { /* silent — fall through to normal routing */ }
@@ -6836,6 +6854,9 @@ app.get("/status/:slug", pageLimiter, async (req, res) => {
       termsUrl:      g.terms_text   ? `/dashboard/${g.slug}/terms`   : "/terms",
       isPublicPage:  true,
       customCss:     g.custom_css || null,
+      heroTitle:     g.hero_title  || null,
+      kickerText:    g.kicker_text || null,
+      pageLayout:    g.layout      || "default",
     });
   } catch(e) {
     res.status(500).send("Server error");
@@ -6864,6 +6885,9 @@ app.get("/dashboard/:slug", pageLimiter, async (req, res) => {
       privacyUrl:   g.privacy_text ? `/dashboard/${g.slug}/privacy` : "/privacy",
       termsUrl:     g.terms_text   ? `/dashboard/${g.slug}/terms`   : "/terms",
       customCss:    g.custom_css   || null,
+      heroTitle:    g.hero_title   || null,
+      kickerText:   g.kicker_text  || null,
+      pageLayout:   g.layout       || "default",
     });
   } catch(e) {
     res.status(500).send("Server error");

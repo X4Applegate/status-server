@@ -1214,6 +1214,14 @@ body.admin-role .admin-only-nav,body.admin-role .admin-only-action{display:flex!
                 <div style="font-size:11px;color:var(--text-2);margin-top:4px">Leave blank to use the default Applegate Monitor terms page</div>
               </div>
               <div>
+                <label class="flabel">Status Page Design</label>
+                <div class="form-grid" style="margin-top:6px">
+                  <div class="fg full"><label class="flabel" for="gHeroTitle">Hero Title <span style="font-weight:400;text-transform:none;letter-spacing:0;color:var(--text-2)">(replaces "All systems operational" when everything is up)</span></label><input class="finput" id="gHeroTitle" maxlength="200" placeholder="All systems go"></div>
+                  <div class="fg full"><label class="flabel" for="gKickerText">Kicker Text <span style="font-weight:400;text-transform:none;letter-spacing:0;color:var(--text-2)">(replaces "Live service health" above the title)</span></label><input class="finput" id="gKickerText" maxlength="100" placeholder="Live service health"></div>
+                  <div class="fg full"><label class="flabel" for="gLayout">Service List Layout</label><select class="fselect" id="gLayout"><option value="default">Default — sidebar + scrollable list</option><option value="grid">Grid — 2-column service cards</option><option value="minimal">Minimal — full-width list, no sidebar</option></select></div>
+                </div>
+              </div>
+              <div>
                 <label class="flabel" for="gCustomCss">Custom CSS <span style="font-weight:400;text-transform:none;letter-spacing:0;color:var(--text-2)">(injected into this status page only — override any style)</span></label>
                 <textarea class="finput" id="gCustomCss" rows="8" placeholder=".topbar { background: #1a1a2e; }&#10;.srv-card { border-radius: 12px; }&#10;:root { --blue: #7c3aed; }" style="resize:vertical;font-family:var(--mono);font-size:12px;line-height:1.6"></textarea>
                 <div style="font-size:11px;color:var(--text-2);margin-top:4px">Plain CSS only — no &lt;script&gt; tags. Changes are live immediately on the public dashboard.</div>
@@ -5061,6 +5069,9 @@ async function showGroupForm(g){
   document.getElementById("gPrivacyText").value = g?.privacy_text || "";
   document.getElementById("gTermsText").value   = g?.terms_text   || "";
   document.getElementById("gCustomCss").value   = g?.custom_css   || "";
+  document.getElementById("gHeroTitle").value   = g?.hero_title   || "";
+  document.getElementById("gKickerText").value  = g?.kicker_text  || "";
+  document.getElementById("gLayout").value      = g?.layout       || "default";
   // Background color: if the group has one set, enable the toggle and pre-fill; else show default
   const hasBg = !!g?.bg_color;
   document.getElementById("gBgColorEnabled").checked = hasBg;
@@ -5167,6 +5178,9 @@ async function submitGroupForm(){
     privacy_text:   document.getElementById("gPrivacyText").value.trim() || null,
     terms_text:     document.getElementById("gTermsText").value.trim()   || null,
     custom_css:     document.getElementById("gCustomCss").value.trim()   || null,
+    hero_title:     document.getElementById("gHeroTitle").value.trim()   || null,
+    kicker_text:    document.getElementById("gKickerText").value.trim()  || null,
+    layout:         document.getElementById("gLayout").value             || "default",
     public_enabled: document.getElementById("gPublicEnabled").checked ? 1 : 0,
     server_ids:     Array.from(pickedServers)
   };

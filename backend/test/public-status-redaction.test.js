@@ -40,6 +40,9 @@ test("anonymous group serialization exposes branding without operator metadata",
     accent_color: "#123456",
     bg_color: "#ffffff",
     default_theme: "light",
+    hero_title: null,
+    kicker_text: null,
+    layout: "default",
   });
   for (const forbidden of ["custom_domain", "privacy_text", "terms_text", "created_at"]) {
     assert.equal(Object.hasOwn(result, forbidden), false, `${forbidden} must not cross the public boundary`);

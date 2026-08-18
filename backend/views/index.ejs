@@ -1078,8 +1078,24 @@ html[data-theme="light"] .theme-icon-dark,html[data-theme="dark"] .theme-icon-li
 }
 </style>
 <% if (typeof customCss !== 'undefined' && customCss) { %><style id="group-custom-css"><%- customCss %></style><% } %>
+<% if (typeof pageLayout !== 'undefined' && pageLayout === 'minimal') { %>
+<style id="layout-minimal">
+/* Minimal layout: hide sidebar, full-width service list */
+.layout{display:block}
+.sidebar{display:none}
+.main{display:block;width:100%;border-left:0}
+.srv-list{max-width:720px;margin:0 auto}
+.page-section-label{font-size:11px;font-weight:700;letter-spacing:.08em;text-transform:uppercase;color:var(--text-2);margin:20px 0 8px;padding:0 4px}
+</style>
+<% } else if (typeof pageLayout !== 'undefined' && pageLayout === 'grid') { %>
+<style id="layout-grid">
+/* Grid layout: 2-column service cards */
+.srv-list{display:grid;grid-template-columns:repeat(auto-fill,minmax(300px,1fr));gap:10px}
+.srv-list .srv-item{border-radius:10px;border:1px solid var(--border);background:var(--surface);height:100%}
+</style>
+<% } %>
 </head>
-<body>
+<body class="layout-<%= (typeof pageLayout !== 'undefined' && pageLayout) ? pageLayout : 'default' %>">
 
 <%- include('partials/topbar-public', {
   adminHref:     adminHref,
@@ -1099,7 +1115,7 @@ html[data-theme="light"] .theme-icon-dark,html[data-theme="dark"] .theme-icon-li
       <section class="status-overview checking" id="statusOverview" aria-labelledby="statusHeadline">
         <div class="overview-top">
           <div class="overview-copy">
-            <div class="overview-kicker"><span class="overview-live-dot"></span>Live service health</div>
+            <div class="overview-kicker"><span class="overview-live-dot"></span><%= (typeof kickerText !== 'undefined' && kickerText) ? kickerText : 'Live service health' %></div>
             <h1 class="overview-title" id="statusHeadline">Checking system status</h1>
             <p class="overview-description" id="statusSummaryText">Loading the latest health checks across every monitored service.</p>
             <div class="overview-updated">
@@ -1197,7 +1213,9 @@ html[data-theme="light"] .theme-icon-dark,html[data-theme="dark"] .theme-icon-li
 
 <script>
 // -- Group context (injected from server)
-const GROUP_SLUG = <%- JSON.stringify(groupSlug) %>;
+const GROUP_SLUG   = <%- JSON.stringify(groupSlug) %>;
+const HERO_TITLE   = <%- JSON.stringify((typeof heroTitle !== 'undefined' && heroTitle) ? heroTitle : null) %>;
+const PAGE_LAYOUT  = <%- JSON.stringify((typeof pageLayout !== 'undefined' && pageLayout) ? pageLayout : 'default') %>;
 let   currentGroupId = null; // populated from /api/public/group/:slug response
 let   statusFilter = "all";
 
@@ -1330,7 +1348,7 @@ function updateStatusOverview() {
     signalIcon.innerHTML = alertIcon;
   } else {
     overview.classList.add("all-up");
-    headline.textContent = "All systems operational";
+    headline.textContent = HERO_TITLE || "All systems operational";
     summary.textContent = `Every monitored service is responding normally. We are continuously checking ${total} service${total === 1 ? "" : "s"} for availability and performance.`;
     signal.textContent = "Fully operational";
     signalSub.textContent = `${up} of ${total} online`;
