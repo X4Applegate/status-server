@@ -3992,7 +3992,7 @@ async function doDelete(){
     toast(r.ok ? "Server removed" : (d.error||"Failed"), r.ok ? "info" : "error");
   } catch(e){ toast("Error: "+e.message, "error"); }
   closeConfirm();
-  loadServerList();
+  await showList();
 }
 
 // ── User list ─────────────────────────────────────────────────────────────────
