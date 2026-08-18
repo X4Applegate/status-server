@@ -744,6 +744,55 @@ body.admin-role .admin-only-nav,body.admin-role .admin-only-action{display:flex!
   .brand-name{font-size:14px}.admin-page-title{font-size:27px}.admin-health-card{padding:18px 15px}.admin-health-top{display:block}.admin-health-state{margin-top:15px;white-space:normal}.admin-kpi{padding:7px 10px}.admin-kpi-icon{display:none}.admin-kpi-value{font-size:18px}.quick-action-grid{grid-template-columns:1fr}.admin-page-actions .btn{flex:1}.topbar-right.menu-open{left:10px;right:10px}.admin-nav-item svg{display:none}.admin-service-toolbar{align-items:flex-start;flex-direction:column}.record-directory-controls{grid-template-columns:1fr}.record-detail-head{display:block}.record-detail-actions{margin-top:14px;justify-content:flex-start}.record-facts{grid-template-columns:1fr}#mainArea .uptime-row{grid-template-columns:repeat(3,minmax(0,1fr))}#mainArea .uptime-card{min-width:0;padding:12px 4px}#mainArea .uptime-pct{font-size:clamp(17px,5vw,20px)}#mainArea .uptime-label{font-size:8px;white-space:nowrap}
 }
 @media(prefers-reduced-motion:reduce){*,*::before,*::after{scroll-behavior:auto!important;animation-duration:.01ms!important;animation-iteration-count:1!important;transition-duration:.01ms!important}}
+
+/* ── Spotlight / ⌘K global search ── */
+.spotlight-overlay{position:fixed;inset:0;background:rgba(0,0,0,.55);z-index:9900;display:none;align-items:flex-start;justify-content:center;padding-top:12vh;animation:wFade .12s}
+.spotlight-overlay.open{display:flex}
+.spotlight-modal{width:min(600px,92vw);background:var(--surface);border:1px solid var(--border-hi);border-radius:14px;box-shadow:0 24px 64px rgba(0,0,0,.55);overflow:hidden}
+.spotlight-bar{display:flex;align-items:center;gap:10px;padding:14px 18px;border-bottom:1px solid var(--border)}
+.spotlight-icon{width:18px;height:18px;color:var(--text-2);flex-shrink:0}
+.spotlight-input{flex:1;background:none;border:none;outline:none;font-family:var(--sans);font-size:15px;color:var(--text-white);caret-color:var(--blue)}
+.spotlight-input::placeholder{color:var(--text-2)}
+.spotlight-kbd{font-size:10px;color:var(--text-2);background:var(--surface2);border:1px solid var(--border-hi);border-radius:4px;padding:2px 6px;white-space:nowrap;flex-shrink:0}
+.spotlight-results{max-height:min(420px,60vh);overflow-y:auto;padding:6px}
+.spotlight-results::-webkit-scrollbar{width:3px}
+.spotlight-results::-webkit-scrollbar-thumb{background:var(--surface3)}
+.spotlight-section-label{font-size:10px;font-weight:600;letter-spacing:.08em;text-transform:uppercase;color:var(--text-2);padding:8px 12px 4px}
+.spotlight-item{display:flex;align-items:center;gap:10px;padding:9px 12px;border-radius:8px;cursor:pointer;transition:background .1s}
+.spotlight-item:hover,.spotlight-item.selected{background:var(--surface2)}
+.spotlight-item.selected{background:var(--blue-soft)}
+.spotlight-item-icon{width:28px;height:28px;border-radius:7px;background:var(--surface2);border:1px solid var(--border);display:flex;align-items:center;justify-content:center;flex-shrink:0}
+.spotlight-item-icon svg{width:13px;height:13px;color:var(--text-2)}
+.spotlight-item-body{flex:1;min-width:0}
+.spotlight-item-title{font-size:13px;font-weight:500;color:var(--text-white);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.spotlight-item-meta{font-size:11px;color:var(--text-2);margin-top:1px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.spotlight-dot{width:7px;height:7px;border-radius:50%;flex-shrink:0}
+.spotlight-dot.up{background:var(--green)}
+.spotlight-dot.down{background:var(--red)}
+.spotlight-dot.degraded{background:var(--orange)}
+.spotlight-dot.pending{background:var(--text-2)}
+.spotlight-empty{padding:28px;text-align:center;color:var(--text-2);font-size:13px}
+.spotlight-footer{padding:8px 18px;border-top:1px solid var(--border);display:flex;gap:14px;font-size:11px;color:var(--text-2)}
+.spotlight-footer kbd{background:var(--surface2);border:1px solid var(--border-hi);border-radius:3px;padding:1px 5px;font-size:10px;font-family:var(--mono)}
+
+/* ── Inline status dot popover ── */
+.admin-dot.clickable{cursor:pointer;position:relative}
+.admin-dot.clickable:hover{transform:scale(1.4)}
+.status-popover{position:fixed;z-index:9500;background:var(--surface2);border:1px solid var(--border-hi);border-radius:10px;padding:5px;display:flex;flex-direction:column;gap:2px;box-shadow:0 6px 24px rgba(0,0,0,.45);min-width:140px}
+.status-popover-item{display:flex;align-items:center;gap:8px;padding:7px 10px;border-radius:6px;cursor:pointer;font-size:12px;font-weight:500;color:var(--text-hi);background:none;border:none;font-family:var(--sans);width:100%;text-align:left;transition:background .1s}
+.status-popover-item:hover{background:var(--surface3)}
+.status-popover-item .pop-dot{width:8px;height:8px;border-radius:50%;flex-shrink:0}
+.pop-dot.up{background:var(--green)}
+.pop-dot.degraded{background:var(--orange)}
+.pop-dot.down{background:var(--red)}
+.status-popover-label{font-size:9px;font-weight:600;letter-spacing:.07em;text-transform:uppercase;color:var(--text-2);padding:4px 10px 2px}
+
+/* ── Bulk status submenu ── */
+.bulk-status-wrap{position:relative;display:inline-flex}
+.bulk-status-menu{position:absolute;bottom:calc(100% + 6px);left:0;background:var(--surface2);border:1px solid var(--border-hi);border-radius:8px;padding:4px;display:none;flex-direction:column;gap:2px;z-index:600;min-width:130px;box-shadow:0 4px 16px rgba(0,0,0,.35)}
+.bulk-status-menu.open{display:flex}
+.bulk-status-menu button{display:flex;align-items:center;gap:7px;padding:6px 10px;font-size:12px;font-weight:500;border:none;border-radius:5px;background:none;color:var(--text-hi);cursor:pointer;text-align:left;font-family:var(--sans);white-space:nowrap;transition:background .1s}
+.bulk-status-menu button:hover{background:var(--surface3)}
 </style>
 </head>
 <body>
@@ -784,6 +833,31 @@ body.admin-role .admin-only-nav,body.admin-role .admin-only-action{display:flex!
 </div>
 
 <div class="toast-stack" id="toasts"></div>
+
+<!-- Spotlight search (⌘K / Ctrl+K) -->
+<div class="spotlight-overlay" id="spotlightOverlay" role="dialog" aria-modal="true" aria-label="Global search" onclick="if(event.target===this)closeSpotlight()">
+  <div class="spotlight-modal">
+    <div class="spotlight-bar">
+      <svg class="spotlight-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+      <input class="spotlight-input" id="spotlightInput" placeholder="Search servers, groups, users…" autocomplete="off" oninput="renderSpotlight()" onkeydown="spotlightKey(event)">
+      <span class="spotlight-kbd">ESC</span>
+    </div>
+    <div class="spotlight-results" id="spotlightResults"></div>
+    <div class="spotlight-footer">
+      <span><kbd>↑↓</kbd> navigate</span>
+      <span><kbd>↵</kbd> select</span>
+      <span><kbd>ESC</kbd> close</span>
+    </div>
+  </div>
+</div>
+
+<!-- Inline status popover (shared singleton) -->
+<div class="status-popover" id="statusPopover" style="display:none">
+  <div class="status-popover-label">Set status</div>
+  <button class="status-popover-item" onclick="applyQuickStatus('up')"><span class="pop-dot up"></span>Operational</button>
+  <button class="status-popover-item" onclick="applyQuickStatus('degraded')"><span class="pop-dot degraded"></span>Degraded</button>
+  <button class="status-popover-item" onclick="applyQuickStatus('down')"><span class="pop-dot down"></span>Down</button>
+</div>
 
 <!-- LOG DRAWER -->
 <div class="drawer" id="logDrawer" role="dialog" aria-modal="true" aria-labelledby="logDrawerTitle" aria-hidden="true">
@@ -840,6 +914,14 @@ body.admin-role .admin-only-nav,body.admin-role .admin-only-action{display:flex!
         <div class="panel-scroll-wrap">
           <div class="bulk-bar" id="bulkBar" role="toolbar" aria-label="Bulk actions">
             <span id="bulkCount" style="font-weight:600;color:var(--blue)">0 selected</span>
+            <div class="bulk-status-wrap">
+              <button class="btn btn-sm" onclick="toggleBulkStatusMenu(event)">Set status &#9662;</button>
+              <div class="bulk-status-menu" id="bulkStatusMenu">
+                <button onclick="bulkStatusAction('up')"><span class="pop-dot up"></span>Operational</button>
+                <button onclick="bulkStatusAction('degraded')"><span class="pop-dot degraded"></span>Degraded</button>
+                <button onclick="bulkStatusAction('down')"><span class="pop-dot down"></span>Down</button>
+              </div>
+            </div>
             <button class="btn btn-sm" onclick="bulkAction('enable')">Enable</button>
             <button class="btn btn-sm" onclick="bulkAction('disable')">Pause</button>
             <button class="btn btn-sm btn-danger" onclick="bulkAction('delete')">Delete</button>
@@ -1332,6 +1414,7 @@ body.admin-role .admin-only-nav,body.admin-role .admin-only-action{display:flex!
     </button>
     <div class="topbar-right" id="topbarRight">
       <span class="user-badge" id="userBadge" style="display:none;font-size:12px"></span>
+      <button class="btn btn-icon" id="spotlightBtn" onclick="openSpotlight()" title="Search (⌘K)" style="display:none"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg></button>
       <button class="btn theme-toggle-admin" id="adminThemeToggle" type="button" onclick="toggleAdminTheme()" title="Switch color theme" aria-label="Switch color theme">
         <svg class="theme-sun" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="4"/><line x1="12" y1="2" x2="12" y2="4"/><line x1="12" y1="20" x2="12" y2="22"/><line x1="4.93" y1="4.93" x2="6.34" y2="6.34"/><line x1="17.66" y1="17.66" x2="19.07" y2="19.07"/><line x1="2" y1="12" x2="4" y2="12"/><line x1="20" y1="12" x2="22" y2="12"/><line x1="4.93" y1="19.07" x2="6.34" y2="17.66"/><line x1="17.66" y1="6.34" x2="19.07" y2="4.93"/></svg>
         <svg class="theme-moon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20.5 14.1A8.5 8.5 0 0 1 9.9 3.5 8.5 8.5 0 1 0 20.5 14.1Z"/></svg>
@@ -2050,7 +2133,7 @@ function sessionCacheFingerprint(session){
       const show = ids => ids.forEach(id => { const el=document.getElementById(id); if(el) el.style.display=""; });
       // Both roles get badge, logout, change-password, refresh, AND the Admin button
       // (viewers need it to manage servers in their assigned groups)
-      show(["userBadge","logoutBtn","profileBtn","pwdBtn","rfBtn"]);
+      show(["userBadge","logoutBtn","profileBtn","pwdBtn","rfBtn","spotlightBtn"]);
       // Logs are system-info — admin only
       if (isAdmin()) show(["logMenuBtn"]);
       const badge = document.getElementById("userBadge");
@@ -2193,8 +2276,16 @@ document.addEventListener("click", (e) => {
 });
 
 document.addEventListener("keydown", event => {
+  // ⌘K / Ctrl+K opens spotlight
+  if ((event.metaKey || event.ctrlKey) && event.key === "k") {
+    event.preventDefault();
+    if (document.getElementById("spotlightOverlay")?.classList.contains("open")) closeSpotlight();
+    else openSpotlight();
+    return;
+  }
   const activeLayer = document.querySelector(".confirm-overlay.open,.modal-overlay.open,.drawer.open");
   if (event.key === "Escape") {
+    if (document.getElementById("spotlightOverlay")?.classList.contains("open")) { closeSpotlight(); event.preventDefault(); return; }
     if (document.getElementById("confirmDlg")?.classList.contains("open")) closeConfirm();
     else if (document.getElementById("profileModal")?.classList.contains("open")) closeProfile();
     else if (document.getElementById("changePwdModal")?.classList.contains("open")) closeChangePassword();
@@ -2969,6 +3060,202 @@ function clearBulkSelect() {
   if (bar) bar.className = "bulk-bar";
 }
 
+// Bulk status submenu
+function toggleBulkStatusMenu(e) {
+  e.stopPropagation();
+  const menu = document.getElementById("bulkStatusMenu");
+  if (!menu) return;
+  menu.classList.toggle("open");
+  if (menu.classList.contains("open")) {
+    document.addEventListener("click", function _close(){ menu.classList.remove("open"); document.removeEventListener("click", _close); }, { once: true });
+  }
+}
+
+async function bulkStatusAction(status) {
+  document.getElementById("bulkStatusMenu")?.classList.remove("open");
+  if (!bulkSelected.size) return;
+  const ids = Array.from(bulkSelected);
+  const label = status === "up" ? "Operational" : status === "degraded" ? "Degraded" : "Down";
+  try {
+    const r = await fetch("/api/admin/servers/bulk", {
+      method: "POST",
+      headers: {"Content-Type": "application/json"},
+      body: JSON.stringify({ ids, action: "status", status })
+    });
+    const d = await r.json();
+    if (!r.ok) { toast(d.error || "Bulk status failed", "error"); return; }
+    toast(`Set ${d.affected} server${d.affected === 1 ? "" : "s"} to ${label}`, "success");
+    clearBulkSelect();
+    await loadServerList();
+  } catch(e) {
+    toast("Network error — bulk status failed", "error");
+  }
+}
+
+// Inline status dot popover
+let _statusPopoverServerId = null;
+
+function openStatusPopover(serverId, dotEl) {
+  _statusPopoverServerId = serverId;
+  const pop = document.getElementById("statusPopover");
+  if (!pop) return;
+  const rect = dotEl.getBoundingClientRect();
+  pop.style.display = "flex";
+  // Position below-left of dot, keep within viewport
+  let top = rect.bottom + 6;
+  let left = rect.left - 10;
+  if (left + 150 > window.innerWidth) left = window.innerWidth - 158;
+  if (top + 130 > window.innerHeight) top = rect.top - 136;
+  pop.style.top  = top  + "px";
+  pop.style.left = left + "px";
+  setTimeout(() => {
+    document.addEventListener("click", _closeStatusPopover, { once: true });
+  }, 0);
+}
+
+function _closeStatusPopover() {
+  const pop = document.getElementById("statusPopover");
+  if (pop) pop.style.display = "none";
+  _statusPopoverServerId = null;
+}
+
+async function applyQuickStatus(status) {
+  _closeStatusPopover();
+  const id = _statusPopoverServerId;
+  if (!id) return;
+  const server = findAdminServer(id);
+  try {
+    const r = await fetch(`/api/admin/servers/${encodeURIComponent(id)}/status`, {
+      method: "PATCH",
+      headers: {"Content-Type": "application/json"},
+      body: JSON.stringify({ status })
+    });
+    const d = await r.json();
+    if (!r.ok) { toast(d.error || "Status update failed", "error"); return; }
+    const label = status === "up" ? "Operational" : status === "degraded" ? "Degraded" : "Down";
+    toast(`${server?.name || "Server"} → ${label}`, "success");
+    await loadServerList();
+  } catch(e) {
+    toast("Network error", "error");
+  }
+}
+
+// ── ⌘K Spotlight search ────────────────────────────────────────────────────────
+let _spotlightIdx = -1;
+
+function openSpotlight() {
+  const overlay = document.getElementById("spotlightOverlay");
+  if (!overlay) return;
+  overlay.classList.add("open");
+  const input = document.getElementById("spotlightInput");
+  if (input) { input.value = ""; input.focus(); }
+  _spotlightIdx = -1;
+  renderSpotlight();
+}
+
+function closeSpotlight() {
+  document.getElementById("spotlightOverlay")?.classList.remove("open");
+  _spotlightIdx = -1;
+}
+
+function _spotlightItems(query) {
+  const q = query.toLowerCase();
+  const results = [];
+
+  // Servers
+  if (adminServers?.length) {
+    const servers = adminServers.filter(s =>
+      !q || s.name?.toLowerCase().includes(q) || s.host?.toLowerCase().includes(q) ||
+      s.category?.toLowerCase().includes(q) || (s.tags||[]).some(t => t.toLowerCase().includes(q))
+    ).slice(0, q ? 8 : 6);
+    servers.forEach(s => results.push({ type:"server", id:s.id, title:s.name, meta:s.host, status:s.overall||"pending" }));
+  }
+
+  // Groups (loaded when groups tab opens)
+  if (adminGroups?.length) {
+    const matched = adminGroups.filter(g =>
+      !q || g.name?.toLowerCase().includes(q) || g.slug?.toLowerCase().includes(q)
+    ).slice(0, q ? 5 : 4);
+    matched.forEach(g => results.push({ type:"group", id:g.id, title:g.name, meta:`/dashboard/${g.slug}` }));
+  }
+
+  // Users (admin only — loaded when users tab opens)
+  if (isAdmin()) {
+    const users = Object.values(_userStore || {});
+    const matched = users.filter(u =>
+      !q || u.username?.toLowerCase().includes(q) || u.email?.toLowerCase().includes(q)
+    ).slice(0, q ? 4 : 3);
+    matched.forEach(u => results.push({ type:"user", id:u.id, title:u.username, meta:u.role }));
+  }
+
+  return results;
+}
+
+function renderSpotlight() {
+  const query = document.getElementById("spotlightInput")?.value || "";
+  const items = _spotlightItems(query.trim());
+  const el = document.getElementById("spotlightResults");
+  if (!el) return;
+  _spotlightIdx = -1;
+  if (!items.length) {
+    el.innerHTML = `<div class="spotlight-empty">${query ? "No results found" : "Start typing to search…"}</div>`;
+    return;
+  }
+  const svgServer = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="4" width="18" height="6" rx="2"/><rect x="3" y="14" width="18" height="6" rx="2"/></svg>`;
+  const svgGroup  = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="9"/><line x1="3" y1="12" x2="21" y2="12"/></svg>`;
+  const svgUser   = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/></svg>`;
+  el.innerHTML = items.map((item, i) => {
+    const icon  = item.type === "server" ? svgServer : item.type === "group" ? svgGroup : svgUser;
+    const dot   = item.type === "server" ? `<span class="spotlight-dot ${item.status}"></span>` : "";
+    return `<div class="spotlight-item" data-idx="${i}" data-type="${item.type}" data-id="${_escHtml(String(item.id))}" onclick="spotlightSelect(${i})" onmouseenter="spotlightHover(${i})">
+      <div class="spotlight-item-icon">${icon}</div>
+      <div class="spotlight-item-body"><div class="spotlight-item-title">${_escHtml(item.title)}</div><div class="spotlight-item-meta">${_escHtml(item.meta||"")}</div></div>
+      ${dot}
+    </div>`;
+  }).join("");
+  // Store items for keyboard access
+  el._items = items;
+}
+
+function spotlightHover(idx) { _spotlightSetIdx(idx); }
+
+function _spotlightSetIdx(idx) {
+  const el = document.getElementById("spotlightResults");
+  if (!el) return;
+  _spotlightIdx = idx;
+  el.querySelectorAll(".spotlight-item").forEach((row, i) => row.classList.toggle("selected", i === idx));
+}
+
+function spotlightKey(e) {
+  const el = document.getElementById("spotlightResults");
+  const items = el?._items || [];
+  if (e.key === "Escape") { e.preventDefault(); closeSpotlight(); return; }
+  if (e.key === "ArrowDown") { e.preventDefault(); _spotlightSetIdx(Math.min(_spotlightIdx + 1, items.length - 1)); return; }
+  if (e.key === "ArrowUp")   { e.preventDefault(); _spotlightSetIdx(Math.max(_spotlightIdx - 1, 0)); return; }
+  if (e.key === "Enter")     { e.preventDefault(); spotlightSelect(_spotlightIdx >= 0 ? _spotlightIdx : 0); return; }
+}
+
+function spotlightSelect(idx) {
+  const el = document.getElementById("spotlightResults");
+  const items = el?._items || [];
+  const item = items[idx];
+  if (!item) return;
+  closeSpotlight();
+  if (item.type === "server") {
+    const s = findAdminServer(item.id);
+    if (s) showServerForm(s);
+  } else if (item.type === "group") {
+    openManagementTab("groups").then(() => {
+      setTimeout(() => {
+        const g = findManagementRecord("groups", item.id);
+        if (g) showGroupForm(g);
+      }, 400);
+    });
+  } else if (item.type === "user") {
+    openManagementTab("users");
+  }
+}
+
 async function reorderServer(id, direction) {
   try {
     const r = await fetch("/api/admin/servers/reorder", {
@@ -3512,7 +3799,7 @@ function renderAdminServerList(list){
     const msBadge = ms !== null ? `<span class="chip-ms ${ms < 150 ? 'ms-fast' : ms < 500 ? 'ms-med' : 'ms-slow'}">${ms}ms</span>` : "";
     return `<div class="admin-server-item" role="button" tabindex="0" data-service-id="${serviceId}" onclick="if(!event.target.matches('.srv-select-cb,.reorder-btn')){showServerForm(findAdminServer(this.dataset.serviceId))}" onkeydown="if(event.target===event.currentTarget&&(event.key==='Enter'||event.key===' ')){event.preventDefault();showServerForm(findAdminServer(this.dataset.serviceId))}">
       ${isAdmin() ? `<input type="checkbox" class="srv-select-cb" data-id="${serviceId}" aria-label="Select ${_escHtml(s.name)}"${cbChecked} onclick="event.stopPropagation();toggleBulkSelect(this.dataset.id,this.checked)">` : ""}
-      <div class="admin-dot ${isPaused ? 'pending' : (s.overall||'pending')}"></div>
+      ${isManager() ? `<div class="admin-dot clickable ${isPaused ? 'pending' : (s.overall||'pending')}" title="Click to set status" data-id="${serviceId}" onclick="event.stopPropagation();openStatusPopover(this.dataset.id,this)"></div>` : `<div class="admin-dot ${isPaused ? 'pending' : (s.overall||'pending')}"></div>`}
       <div class="admin-info">
         <div class="admin-name">${_escHtml(s.name)} ${pausedBadge}</div>
         <div class="admin-host">${_escHtml(s.host)}${(s.category||s.sub_category) ? ` <span style="color:var(--text-2);opacity:.7">·</span> <span style="color:var(--blue);opacity:.8">${_escHtml([s.category,s.sub_category].filter(Boolean).join(" › "))}</span>` : ""}${s.description ? ` <span style="color:var(--text-2);opacity:.6;font-style:italic">— ${_escHtml(s.description)}</span>` : ""}</div>

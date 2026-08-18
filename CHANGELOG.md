@@ -8,6 +8,17 @@ All notable changes to this project are documented here.
 
 ## [Unreleased]
 
+## [3.15.0] — 2026-08-18
+
+### Added
+- **⌘K / Ctrl+K global search** — spotlight-style modal that searches all loaded servers (by name, host, tags, category), status page groups, and users (admin only). Keyboard-navigable with arrow keys and Enter; pressing Enter or clicking a result jumps directly to that record's edit form or management tab. A search icon in the topbar provides a mouse-accessible entry point.
+- **Inline status change** — click the status dot on any server row in the admin panel to open a small popover with Operational / Degraded / Down options. Sets the status immediately without opening the full edit form. Powered by a new `PATCH /api/admin/servers/:id/status` endpoint (manager or admin auth); status is recorded in history and emitted to SSE subscribers. Available for manager and admin roles.
+- **Bulk status change** — "Set status" dropdown button added to the bulk-selection bar. Select multiple servers and bulk-set them all to Operational, Degraded, or Down in one click. Uses a new `status` action on the existing `POST /api/admin/servers/bulk` endpoint.
+- **24 new tests** — v315-admin-workflow.test.js covers PATCH endpoint auth/validation/history/audit, bulk status action, spotlight HTML/JS/keyboard shortcut, inline status popover, and bulk status submenu. Total test count: 165 → 189.
+
+### Changed
+- `POST /api/admin/servers/bulk` now accepts a `status` action in addition to the existing `enable`, `disable`, `delete`, and `move` actions.
+
 ## [3.14.0] — 2026-08-18
 
 ### Added

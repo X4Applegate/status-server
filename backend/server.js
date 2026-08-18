@@ -4117,7 +4117,7 @@ app.post("/api/admin/servers/reorder", requireManager, async (req, res) => {
 app.post("/api/admin/servers/bulk", requireManager, async (req, res) => {
   const { ids, action, group_id } = req.body;
   if (!Array.isArray(ids) || !ids.length) return res.status(400).json({ error: "ids required" });
-  const ACTIONS = ["enable", "disable", "delete", "move"];
+  const ACTIONS = ["enable", "disable", "delete", "move", "status"];
   if (!ACTIONS.includes(action)) return res.status(400).json({ error: `action must be one of: ${ACTIONS.join(", ")}` });
   const safeIds = ids.filter(id => typeof id === "string" && id.length <= 200);
   if (!safeIds.length) return res.status(400).json({ error: "No valid ids" });
@@ -4145,6 +4145,19 @@ app.post("/api/admin/servers/bulk", requireManager, async (req, res) => {
       const [groupRows] = await db.query("SELECT id FROM status_groups WHERE id=?", [gid]);
       if (!groupRows.length) return res.status(404).json({ error: "Group not found" });
       for (const id of safeIds) await setServerGroupIds(id, [gid]);
+    } else if (action === "status") {
+      const { status } = req.body;
+      if (!["up","degraded","down"].includes(status)) return res.status(400).json({ error: "status must be up|degraded|down" });
+      const now = new Date().toISOString();
+      for (const id of safeIds) {
+        const def = serverConfig.find(s => s.id === id);
+        if (!def) continue;
+        const result = { type:"external", ok: status === "up", detail: `set via admin bulk action by ${req.session.username}`, response_ms: null };
+        serverStatus[id] = { ...(serverStatus[id] || {}), overall: status, checks: [result], lastChecked: now };
+        await recordHistory(def, [result], status).catch(() => {});
+      }
+      const all = Object.values(serverStatus);
+      sseClients.filter(r => !r.writableEnded).forEach(r => { try { r.write(`data: ${JSON.stringify(all)}\n\n`); } catch(_) {} });
     }
     await loadConfig();
     addLog({ level:"info", server:"admin", message:`Bulk ${action}: ${safeIds.length} server(s) by ${req.session.username}` });
@@ -4152,6 +4165,21 @@ app.post("/api/admin/servers/bulk", requireManager, async (req, res) => {
   } catch(err) {
     res.status(500).json({ error: err.message });
   }
+});
+
+// Quick status override — admin/manager can push a status without a full server edit.
+app.patch("/api/admin/servers/:id/status", requireManager, async (req, res) => {
+  const { status } = req.body;
+  if (!["up","degraded","down"].includes(status)) return res.status(400).json({ error:"status must be up|degraded|down" });
+  const def = serverConfig.find(s => s.id === req.params.id);
+  if (!def) return res.status(404).json({ error:"Server not found" });
+  const result = { type:"external", ok: status === "up", detail: `set by ${req.session.username} via admin`, response_ms: null };
+  serverStatus[def.id] = { ...(serverStatus[def.id] || {}), overall: status, checks: [result], lastChecked: new Date().toISOString() };
+  await recordHistory(def, [result], status).catch(() => {});
+  const all = Object.values(serverStatus);
+  sseClients.filter(r => !r.writableEnded).forEach(r => { try { r.write(`data: ${JSON.stringify(all)}\n\n`); } catch(_) {} });
+  addAuditLog({ userId: req.session.userId, username: req.session.username, action:"server.status", resourceType:"server", resourceId: def.id, resourceName: def.name, detail: status, ip: req.ip });
+  res.json({ ok: true });
 });
 
 // -- User Management (admin only) ----------------------------------------------
