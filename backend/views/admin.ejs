@@ -2763,13 +2763,13 @@ function renderServers(servers){
 // ── Tag filter helpers ────────────────────────────────────────────────────────
 let _activeTagFilter = null;
 function buildTagFilterBar() {
-  const bar = document.getElementById(“tagFilterBar”);
+  const bar = document.getElementById("tagFilterBar");
   if (!bar) return;
   const allTags = [...new Set((adminServers || []).flatMap(s => s.tags || []))].sort();
-  if (!allTags.length) { bar.innerHTML = “”; return; }
+  if (!allTags.length) { bar.innerHTML = ""; return; }
   bar.innerHTML = allTags.map(t =>
-    `<button class=”tag-pill${_activeTagFilter === t ? “ active” : “”}” type=”button” onclick=”filterTagToggle(${JSON.stringify(t)})”>${_escHtml(t)}</button>`
-  ).join(“”);
+    `<button class="tag-pill${_activeTagFilter === t ? " active" : ""}" type="button" onclick="filterTagToggle(${JSON.stringify(t)})">${_escHtml(t)}</button>`
+  ).join("");
 }
 function filterTagToggle(tag) {
   _activeTagFilter = _activeTagFilter === tag ? null : tag;
@@ -2779,52 +2779,52 @@ function filterTagToggle(tag) {
 
 // ── Sidebar list renderer ─────────────────────────────────────────────────────
 function renderSidebarList(servers){
-  const focusedServiceId = document.activeElement?.matches?.(“#sidebarList .srv-row”)
+  const focusedServiceId = document.activeElement?.matches?.("#sidebarList .srv-row")
     ? document.activeElement.dataset.serviceId
     : null;
-  const q = (document.getElementById(“sidebarSearchInput”)?.value || “”).trim().toLowerCase();
+  const q = (document.getElementById("sidebarSearchInput")?.value || "").trim().toLowerCase();
   let list = q ? servers.filter(s =>
-    (s.name        || “”).toLowerCase().includes(q) ||
-    (s.host        || “”).toLowerCase().includes(q) ||
-    (s.category    || “”).toLowerCase().includes(q) ||
-    (s.sub_category|| “”).toLowerCase().includes(q) ||
-    (s.description || “”).toLowerCase().includes(q) ||
+    (s.name        || "").toLowerCase().includes(q) ||
+    (s.host        || "").toLowerCase().includes(q) ||
+    (s.category    || "").toLowerCase().includes(q) ||
+    (s.sub_category|| "").toLowerCase().includes(q) ||
+    (s.description || "").toLowerCase().includes(q) ||
     (s.tags        || []).some(t => t.toLowerCase().includes(q))
   ) : servers;
   if (_activeTagFilter) list = list.filter(s => (s.tags || []).includes(_activeTagFilter));
-  const sidebar = document.getElementById(“sidebarList”);
+  const sidebar = document.getElementById("sidebarList");
   if (!sidebar) return;
-  const count = document.getElementById(“serviceDirectoryCount”);
+  const count = document.getElementById("serviceDirectoryCount");
   if (count) {
     const nextCount = (q || _activeTagFilter)
       ? `${list.length} of ${servers.length} services shown`
-      : `${servers.length} monitored service${servers.length === 1 ? “” : “s”}`;
+      : `${servers.length} monitored service${servers.length === 1 ? "" : "s"}`;
     if (count.textContent !== nextCount) count.textContent = nextCount;
   }
   if (!list.length) {
-    sidebar.innerHTML = `<div class=”service-directory-empty”>${servers.length ? `No services match the current filter.` : “No services configured yet.”}</div>`;
+    sidebar.innerHTML = `<div class="service-directory-empty">${servers.length ? `No services match the current filter.` : "No services configured yet."}</div>`;
     return;
   }
   sidebar.innerHTML = list.map(s => {
-    const lbl    = s.maintenance ? “MAINT” : (s.overall===”up”?”UP”:s.overall===”down”?”DOWN”:s.overall===”degraded”?”DEG”:”PEND”);
-    const badgeCls = s.maintenance ? “pending” : (s.overall||”pending”);
+    const lbl    = s.maintenance ? "MAINT" : (s.overall==="up"?"UP":s.overall==="down"?"DOWN":s.overall==="degraded"?"DEG":"PEND");
+    const badgeCls = s.maintenance ? "pending" : (s.overall||"pending");
     const active = String(s.id) === String(selectedServerId);
-    const maintTag = s.maintenance ? ` <span title=”Under scheduled maintenance — alerts suppressed” style=”font-size:10px”>🔧</span>` : “”;
+    const maintTag = s.maintenance ? ` <span title="Under scheduled maintenance — alerts suppressed" style="font-size:10px">🔧</span>` : "";
     const uptime = s.uptime_30d;
-    const uptimeCls = uptime == null ? “” : uptime >= 99 ? “great” : uptime >= 95 ? “” : uptime >= 90 ? “warn” : “bad”;
-    const uptimeHtml = uptime != null ? `<div class=”srv-uptime ${uptimeCls}”>${uptime}% 30d</div>` : “”;
-    return `<button class=”srv-row${active ? “ active” : “”}” type=”button” data-service-id=”${_escHtml(s.id)}” onclick=”selectServer(this.dataset.serviceId)”${active ? ` aria-current=”true”` : “”}>
-      <div class=”srv-dot ${s.overall||'pending'}”></div>
-      <div class=”srv-row-info”>
-        <div class=”srv-row-name”>${_escHtml(s.name)}${maintTag}</div>
-        <div class=”srv-row-host”>${_escHtml(s.host)}</div>
+    const uptimeCls = uptime == null ? "" : uptime >= 99 ? "great" : uptime >= 95 ? "" : uptime >= 90 ? "warn" : "bad";
+    const uptimeHtml = uptime != null ? `<div class="srv-uptime ${uptimeCls}">${uptime}% 30d</div>` : "";
+    return `<button class="srv-row${active ? " active" : ""}" type="button" data-service-id="${_escHtml(s.id)}" onclick="selectServer(this.dataset.serviceId)"${active ? ` aria-current="true"` : ""}>
+      <div class="srv-dot ${s.overall||'pending'}"></div>
+      <div class="srv-row-info">
+        <div class="srv-row-name">${_escHtml(s.name)}${maintTag}</div>
+        <div class="srv-row-host">${_escHtml(s.host)}</div>
         ${uptimeHtml}
       </div>
-      <div class=”srv-badge ${badgeCls}”>${lbl}</div>
+      <div class="srv-badge ${badgeCls}">${lbl}</div>
     </button>`;
-  }).join(“”);
+  }).join("");
   if (focusedServiceId !== null && focusedServiceId !== undefined) {
-    const focusedRow = [...sidebar.querySelectorAll(“.srv-row”)]
+    const focusedRow = [...sidebar.querySelectorAll(".srv-row")]
       .find(row => String(row.dataset.serviceId) === String(focusedServiceId));
     focusedRow?.focus({ preventScroll:true });
   }
