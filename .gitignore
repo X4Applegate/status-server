@@ -6,3 +6,6 @@ servers.json
 docker-compose.yml
 backups/*.sql.gz
 grafana.db
+# Stray root-level npm files (e.g. @openai/codex); the app lives in backend/
+/package.json
+/package-lock.json
