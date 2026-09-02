@@ -126,8 +126,9 @@ test("invite-claim view has username and password fields", () => {
   assert.match(inviteView, /id="confirm"/);
 });
 
-test("invite-claim view POSTs to /api/invite/<token>/claim", () => {
-  assert.match(inviteView, /\/api\/invite\/.*\/claim/);
+test("invite-claim view POSTs to the fixed /api/invite/claim URL with the token in the body", () => {
+  assert.match(inviteView, /fetch\("\/api\/invite\/claim"/);
+  assert.match(inviteView, /JSON\.stringify\(\{ token, username, password \}\)/);
 });
 
 test("invite-claim view redirects to /login on success", () => {

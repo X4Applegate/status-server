@@ -8,6 +8,19 @@ All notable changes to this project are documented here.
 
 ## [Unreleased]
 
+## [3.16.1] — 2026-09-02
+
+### Security
+- **mysql2 upgraded to 3.24.3** — resolves Dependabot alert GHSA-3f6p-5ww8-9rcr (auth plugin downgrade leaking plaintext credentials) and GHSA-rgwj-5xj2-c3m3 (decompression-bomb DoS). `express-mysql-session` pinned an old `mysql2@3.10.2` internally; the `overrides` block now forces the whole tree onto the patched release. `qs` bumped to 6.16.0 via `npm audit fix`. `npm audit` reports 0 vulnerabilities.
+- **Prototype pollution guard on bulk server actions** — `POST /api/admin/servers/bulk` now drops ids named `__proto__`, `constructor`, or `prototype` and uses `Object.hasOwn` before mutating entries in the in-memory `serverStatus` map. Closes CodeQL alerts js/prototype-polluting-assignment (#100–#103).
+- **Invite claim no longer builds a request URL from page data** — `invite-claim.ejs` posts to the fixed `/api/invite/claim` URL with the token in the JSON body (read from a hidden input) instead of interpolating the token into the fetch URL. The legacy `/api/invite/:token/claim` route is kept for already-open pages. Closes CodeQL alert js/request-forgery (#104).
+- **Invite token format validation** — all invite routes reject tokens that are not 64 lowercase hex characters before touching the database.
+- **Rate limiting on the invite page** — `GET /invite/:token` now runs behind `pageLimiter` like the other public DB-backed pages. Closes CodeQL alert js/missing-rate-limiting (#105).
+- **Invite note is HTML-escaped** — the admin-supplied invite note was rendered unescaped (`<%-`) on the claim page; it now uses `<%=`.
+
+### Added
+- **9 new tests** — v3161-security-hardening.test.js covers the dependency floor, prototype-pollution guard, fixed claim URL, token validation, and invite-page rate limiting.
+
 ## [3.16.0] — 2026-08-18
 
 ### Added

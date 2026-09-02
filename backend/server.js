@@ -372,6 +372,11 @@ process.on("uncaughtException", (err) => {
 // -- State ---------------------------------------------------------------------
 let db;
 let serverStatus = {};
+// Property names that would reach Object.prototype when a user-supplied id is
+// used as a key on plain-object maps such as serverStatus. Ids that hit this
+// list are dropped before they can touch the map (CodeQL js/prototype-polluting-assignment).
+const UNSAFE_OBJECT_KEYS = new Set(["__proto__", "constructor", "prototype"]);
+function isSafeObjectKey(key) { return typeof key === "string" && !UNSAFE_OBJECT_KEYS.has(key); }
 let sseClients   = [];
 let logClients   = [];
 // Alert debounce: hold DOWN alerts for 5 min; cancel if server recovers first
@@ -4132,16 +4137,16 @@ app.post("/api/admin/servers/bulk", requireManager, async (req, res) => {
   if (!Array.isArray(ids) || !ids.length) return res.status(400).json({ error: "ids required" });
   const ACTIONS = ["enable", "disable", "delete", "move", "status"];
   if (!ACTIONS.includes(action)) return res.status(400).json({ error: `action must be one of: ${ACTIONS.join(", ")}` });
-  const safeIds = ids.filter(id => typeof id === "string" && id.length <= 200);
+  const safeIds = ids.filter(id => typeof id === "string" && id.length <= 200 && isSafeObjectKey(id));
   if (!safeIds.length) return res.status(400).json({ error: "No valid ids" });
   try {
     if (action === "enable") {
       await db.query("UPDATE status_servers SET enabled=1 WHERE id IN (?)", [safeIds]);
-      safeIds.forEach(id => { if (serverStatus[id]) serverStatus[id].enabled = true; });
+      safeIds.forEach(id => { if (Object.hasOwn(serverStatus, id)) serverStatus[id].enabled = true; });
     } else if (action === "disable") {
       await db.query("UPDATE status_servers SET enabled=0 WHERE id IN (?)", [safeIds]);
       safeIds.forEach(id => {
-        if (serverStatus[id]) { serverStatus[id].enabled = false; serverStatus[id].overall = "pending"; serverStatus[id].flapping = false; }
+        if (Object.hasOwn(serverStatus, id)) { serverStatus[id].enabled = false; serverStatus[id].overall = "pending"; serverStatus[id].flapping = false; }
       });
     } else if (action === "delete") {
       for (const id of safeIds) {
@@ -4166,7 +4171,7 @@ app.post("/api/admin/servers/bulk", requireManager, async (req, res) => {
         const def = serverConfig.find(s => s.id === id);
         if (!def) continue;
         const result = { type:"external", ok: status === "up", detail: `set via admin bulk action by ${req.session.username}`, response_ms: null };
-        serverStatus[id] = { ...(serverStatus[id] || {}), overall: status, checks: [result], lastChecked: now };
+        serverStatus[id] = { ...(Object.hasOwn(serverStatus, id) ? serverStatus[id] : {}), overall: status, checks: [result], lastChecked: now };
         await recordHistory(def, [result], status).catch(() => {});
       }
       const all = Object.values(serverStatus);
@@ -4636,6 +4641,10 @@ app.delete("/api/admin/users/:id", requireAdmin, async (req, res) => {
 const { randomBytes } = require("node:crypto");
 
 function generateInviteToken() { return randomBytes(32).toString("hex"); }
+// Tokens are always 32 random bytes hex-encoded; anything else is rejected
+// before it reaches the database.
+const INVITE_TOKEN_RE = /^[a-f0-9]{64}$/;
+function isValidInviteToken(token) { return typeof token === "string" && INVITE_TOKEN_RE.test(token); }
 
 app.get("/api/admin/invites", requireAdmin, async (req, res) => {
   try {
@@ -4683,6 +4692,7 @@ app.delete("/api/admin/invites/:id", requireAdmin, async (req, res) => {
 
 // Public invite claim endpoints
 app.get("/api/invite/:token", async (req, res) => {
+  if (!isValidInviteToken(req.params.token)) return res.status(404).json({ error: "Invite not found or already used" });
   try {
     const [rows] = await db.query(
       "SELECT role, note, expires_at, used_at FROM status_invite_tokens WHERE token=?",
@@ -4696,15 +4706,22 @@ app.get("/api/invite/:token", async (req, res) => {
   } catch(e) { res.status(500).json({ error: e.message }); }
 });
 
-app.post("/api/invite/:token/claim", async (req, res) => {
+// Claim an invite. The invite-claim page posts to the fixed /api/invite/claim
+// URL with the token in the JSON body so the browser never builds a request URL
+// from a page-supplied value (CodeQL js/request-forgery). The legacy
+// /api/invite/:token/claim form is kept for any already-open invite pages.
+app.post("/api/invite/claim", (req, res) => claimInvite(req.body && req.body.token, req, res));
+app.post("/api/invite/:token/claim", (req, res) => claimInvite(req.params.token, req, res));
+async function claimInvite(token, req, res) {
   const { username, password } = req.body;
+  if (!isValidInviteToken(token)) return res.status(410).json({ error: "Invite not found or already used" });
   if (!username || !password) return res.status(400).json({ error: "Username and password are required" });
   if (password.length < 8) return res.status(400).json({ error: "Password must be at least 8 characters" });
   if (!/^[a-zA-Z0-9_.\-@]{3,50}$/.test(username)) return res.status(400).json({ error: "Username: 3–50 chars, letters/digits/._-@ only" });
   try {
     const [rows] = await db.query(
       "SELECT id, role, expires_at, used_at FROM status_invite_tokens WHERE token=?",
-      [req.params.token]
+      [token]
     );
     if (!rows.length || rows[0].used_at) return res.status(410).json({ error: "Invite not found or already used" });
     if (new Date(rows[0].expires_at) < new Date()) return res.status(410).json({ error: "Invite has expired" });
@@ -4723,7 +4740,7 @@ app.post("/api/invite/:token/claim", async (req, res) => {
     addAuditLog({ action:"user.create", resourceType:"user", resourceId: result.insertId, resourceName: username, detail: `via invite / ${inv.role}`, ip: req.ip });
     res.json({ ok: true, role: inv.role });
   } catch(e) { res.status(500).json({ error: e.message }); }
-});
+}
 
 // -- Webhook Management (admin only) -------------------------------------------
 // Helper: viewer can manage a webhook iff its group_id is in their allowed list.
@@ -6894,7 +6911,10 @@ app.get("/",       requireAuthPage, (req, res) => res.render("index", { adminHre
 app.get("/status", requireAuthPage, (req, res) => res.render("index", { adminHref: "/", ...DEFAULT_BRANDING }));
 app.get("/admin",  requireAuthPage, (req, res) => res.render("admin"));
 app.get("/login",   (req, res) => res.render("login", { googleEnabled: !!googleOAuth }));
-app.get("/invite/:token", async (req, res) => {
+app.get("/invite/:token", pageLimiter, async (req, res) => {
+  if (!isValidInviteToken(req.params.token)) {
+    return res.render("login", { googleEnabled: !!googleOAuth, inviteError: "This invite is invalid, expired, or already used." });
+  }
   try {
     const [rows] = await db.query(
       "SELECT role, note, expires_at, used_at FROM status_invite_tokens WHERE token=?",

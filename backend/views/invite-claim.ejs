@@ -52,12 +52,13 @@ body{font-family:var(--sans);background:var(--bg);color:var(--text);min-height:1
   </div>
   <div class="heading">Create your account</div>
   <div class="subhead">
-    <% if (note) { %><%- note %><br><% } %>
+    <% if (note) { %><%= note %><br><% } %>
     Choose a username and password to access Applegate Monitor.
   </div>
   <div class="error" id="errMsg"></div>
   <div class="success" id="okMsg"></div>
   <form id="claimForm" onsubmit="submit(event)" autocomplete="off">
+    <input type="hidden" id="inviteToken" value="<%= token %>">
     <div class="form-group">
       <label class="label">Username</label>
       <input class="input" id="username" name="username" type="text" autocomplete="username" placeholder="your_username" required maxlength="50">
@@ -83,13 +84,15 @@ async function submit(e) {
   const username = document.getElementById("username").value.trim();
   const password = document.getElementById("password").value;
   const confirm  = document.getElementById("confirm").value;
+  const token    = document.getElementById("inviteToken").value;
   if (password !== confirm) { err.textContent = "Passwords do not match."; err.style.display = ""; return; }
   btn.disabled = true; btn.textContent = "Creating account…";
   try {
-    const r = await fetch("/api/invite/<%= token %>/claim", {
+    // Fixed URL — the invite token travels in the JSON body, never in the URL.
+    const r = await fetch("/api/invite/claim", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ username, password })
+      body: JSON.stringify({ token, username, password })
     });
     const d = await r.json();
     if (!r.ok) { err.textContent = d.error || "Failed to create account."; err.style.display = ""; btn.disabled = false; btn.textContent = "Create account"; return; }
