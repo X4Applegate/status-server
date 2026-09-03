@@ -8,6 +8,17 @@ All notable changes to this project are documented here.
 
 ## [Unreleased]
 
+## [3.16.3] — 2026-09-03
+
+### Fixed
+- **Admin API hung after a few minutes of use (could not edit servers, `/api/me` and `/healthz` never answered, then recovered when the admin sat idle).** The 30-day uptime aggregate added in v3.16.0 ran inline on every `GET /api/admin/servers`. Its `WHERE checked_at >= ...` filter cannot use the history table's `(server_id, checked_at)` index, so each call scanned the entire `status_history` table — measured at 156 s on a 5.4M-row table. The admin page requests that endpoint on load, on every tab switch and every 60 s, so the scans overlapped until all 10 pool connections were busy and every other query queued forever. Only the session store kept working because it has its own pool.
+  - New `status_uptime_daily` rollup (server, day, total, up) is maintained by `recordHistory` with one tiny upsert per poll. The 30-day figure is summed from that rollup in the background (every 60 s, `UPTIME_CACHE_MS`) and the route only reads memory.
+  - Once per startup, in the background and without blocking startup: a covering index `status_history(server_id, checked_at, ok)` is built online (`ALGORITHM=INPLACE, LOCK=NONE`) if missing, then the last 31 days are backfilled into the rollup newest-first, one day per statement with a 10 s pause between days. Progress is stored in `status_settings` so a restart resumes instead of repeating. The 30-day badge shows "—" until the first days land.
+  - Every pool query is now capped at 60 s (`DB_QUERY_TIMEOUT_MS`) and rejects instead of hanging; MariaDB also kills statements server-side after 300 s (`DB_STATEMENT_CAP_S`, MySQL `MAX_EXECUTION_TIME` fallback) so a wedged connection is eventually returned to the pool. Maintenance statements run on a dedicated connection with that cap lifted.
+  - A watchdog probes the pool every 30 s and replaces it after three consecutive failures, so the app recovers from an exhausted or black-holed pool without a container restart. `/healthz` answers 503 within 5 s when the pool is stuck and reports `db_query_timeouts` / `db_pool_recreations`.
+  - Pool connections use TCP keepalive and a 10 s connect timeout; `DB_POOL_SIZE` is configurable.
+- 10 new tests in v3163-db-resilience.test.js, including a live check of the timeout wrapper and pool factory against mysql2's in-process fake MySQL server.
+
 ## [3.16.2] — 2026-09-02
 
 ### Fixed

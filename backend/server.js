@@ -736,12 +736,16 @@ app.get("/healthz", pageLimiter, async (req, res) => {
   res.setHeader("Cache-Control", "no-store");
   try {
     if (!db) return res.status(503).json({ ok: false, db: "not-initialized" });
-    await db.query("SELECT 1");
+    // Short probe so an unresponsive pool reports 503 within the Docker
+    // HEALTHCHECK timeout instead of hanging the check.
+    await withDbTimeout(db.query("SELECT 1"), "SELECT 1 /* healthz */", 5000);
     res.json({
       ok:      true,
       version: APP_VERSION,
       uptime:  Math.floor(process.uptime()),
-      db:      "ok"
+      db:      "ok",
+      db_query_timeouts:  dbQueryTimeouts,
+      db_pool_recreations: dbPoolRecreations
     });
   } catch (e) {
     res.status(503).json({ ok: false, db: "down" });
@@ -811,19 +815,100 @@ async function addAuditLog({ userId, username, action, resourceType, resourceId,
   }
 }
 
+// -- Database pool -------------------------------------------------------------
+// Every query is capped at DB_QUERY_TIMEOUT_MS so a slow or black-holed
+// statement fails fast instead of pinning a pool connection forever (and, with
+// no timeout, every later request queued behind it forever too). MariaDB is
+// also told to kill statements server-side after the same interval so the
+// connection actually comes back to the pool.
+const DB_QUERY_TIMEOUT_MS = Math.max(5000, parseInt(process.env.DB_QUERY_TIMEOUT_MS) || 60 * 1000);
+const DB_STATEMENT_CAP_S  = Math.max(30, parseInt(process.env.DB_STATEMENT_CAP_S) || 300);
+const DB_POOL_SIZE        = Math.max(2, parseInt(process.env.DB_POOL_SIZE) || 10);
+let dbQueryTimeouts = 0;
+
+function withDbTimeout(promise, sql, ms = DB_QUERY_TIMEOUT_MS) {
+  let timer;
+  const timeout = new Promise((_, reject) => {
+    timer = setTimeout(() => {
+      dbQueryTimeouts += 1;
+      const err = new Error(`DB query timed out after ${ms}ms`);
+      err.code = "DB_QUERY_TIMEOUT";
+      err.sql  = String((sql && sql.sql) || sql || "").replace(/\s+/g, " ").slice(0, 160);
+      reject(err);
+    }, ms);
+  });
+  return Promise.race([promise, timeout]).finally(() => clearTimeout(timer));
+}
+
+function createDbPool() {
+  const pool = mysql.createPool({
+    host: DB_HOST, port: DB_PORT,
+    user: DB_USER, password: DB_PASS,
+    database: DB_NAME,
+    waitForConnections: true,
+    connectionLimit: DB_POOL_SIZE,
+    timezone: "local",
+    connectTimeout: 10 * 1000,
+    enableKeepAlive: true,
+    keepAliveInitialDelay: 10 * 1000
+  });
+  // Server-side statement cap: MariaDB syntax first, MySQL 5.7+/8 fallback.
+  // Both are best-effort — an unsupported variable just leaves the client-side
+  // timeout in charge.
+  const secs = DB_STATEMENT_CAP_S;
+  (pool.pool || pool).on("connection", (conn) => {
+    conn.query(`SET SESSION max_statement_time=${secs}`, (err) => {
+      if (err) conn.query(`SET SESSION MAX_EXECUTION_TIME=${secs * 1000}`, () => {});
+    });
+  });
+  const rawQuery   = pool.query.bind(pool);
+  const rawExecute = pool.execute.bind(pool);
+  pool.query   = (sql, ...rest) => withDbTimeout(rawQuery(sql, ...rest), sql);
+  pool.execute = (sql, ...rest) => withDbTimeout(rawExecute(sql, ...rest), sql);
+  return pool;
+}
+
+// Watchdog: a cheap probe every 30s. If the pool cannot answer SELECT 1 three
+// times in a row (every connection wedged behind stuck statements, or sockets
+// black-holed by a network blip), swap in a fresh pool so the app recovers
+// without a container restart. The old pool is drained in the background.
+const DB_WATCHDOG_INTERVAL_MS = 30 * 1000;
+const DB_WATCHDOG_PROBE_MS    = 10 * 1000;
+const DB_WATCHDOG_MAX_FAILURES = 3;
+let dbWatchdogFailures = 0;
+let dbPoolRecreations  = 0;
+async function dbWatchdog() {
+  if (!db) return;
+  try {
+    await withDbTimeout(db.query("SELECT 1"), "SELECT 1 /* watchdog */", DB_WATCHDOG_PROBE_MS);
+    dbWatchdogFailures = 0;
+  } catch (e) {
+    dbWatchdogFailures += 1;
+    addLog({ level:"warn", server:"system", message:`DB watchdog probe failed (${dbWatchdogFailures}/${DB_WATCHDOG_MAX_FAILURES}): ${e.message}` });
+    if (dbWatchdogFailures >= DB_WATCHDOG_MAX_FAILURES) recreateDbPool("watchdog");
+  }
+}
+function recreateDbPool(reason) {
+  const old = db;
+  db = createDbPool();
+  dbWatchdogFailures = 0;
+  dbPoolRecreations += 1;
+  addLog({ level:"error", server:"system", message:`DB pool unresponsive — replaced it (${reason}); ${dbQueryTimeouts} query timeout(s) so far` });
+  if (!old) return;
+  old.end().catch(() => {});
+  // end() waits politely for every connection; a black-holed socket never
+  // answers, so force the stragglers closed after a grace period.
+  setTimeout(() => {
+    try { ((old.pool || old)._allConnections.toArray() || []).forEach(c => { try { c.destroy(); } catch(_) {} }); } catch(_) {}
+  }, 5000).unref();
+}
+
 // -- Database setup ------------------------------------------------------------
 async function initDB() {
   // Retry loop � MariaDB may not be ready immediately on first boot
   for (let attempt = 1; attempt <= 10; attempt++) {
     try {
-      db = await mysql.createPool({
-        host: DB_HOST, port: DB_PORT,
-        user: DB_USER, password: DB_PASS,
-        database: DB_NAME,
-        waitForConnections: true,
-        connectionLimit: 10,
-        timezone: "local"
-      });
+      db = createDbPool();
       await db.query("SELECT 1"); // test connection
       addLog({ level:"info", server:"system", message:`Database connected (${DB_HOST}:${DB_PORT}/${DB_NAME})` });
       break;
@@ -924,6 +1009,20 @@ async function initDB() {
       detail      VARCHAR(255) DEFAULT NULL,
       checked_at  TIMESTAMP    DEFAULT CURRENT_TIMESTAMP,
       INDEX idx_server_time (server_id, checked_at)
+    )
+  `);
+
+  // Per-server, per-day check counters maintained by recordHistory. The 30-day
+  // uptime figure is read from here (a few hundred tiny rows) instead of
+  // aggregating millions of status_history rows on demand.
+  await db.query(`
+    CREATE TABLE IF NOT EXISTS status_uptime_daily (
+      server_id VARCHAR(150) NOT NULL,
+      day       DATE         NOT NULL,
+      total     INT          NOT NULL DEFAULT 0,
+      up        INT          NOT NULL DEFAULT 0,
+      PRIMARY KEY (server_id, day),
+      INDEX idx_day (day)
     )
   `);
 
@@ -2467,6 +2566,7 @@ async function recordHistory(def, checks, overall) {
   const now = new Date();
   try {
     // Store each check result
+    let rollupTotal = 0, rollupUp = 0;
     for (const ch of checks) {
       // Prefer an explicit response_ms field; fall back to parsing the detail string
       // for backwards compatibility with any check that still embeds ms in detail.
@@ -2494,6 +2594,14 @@ async function recordHistory(def, checks, overall) {
       await db.query(
         "INSERT INTO status_history (server_id, check_type, ok, response_ms, detail, checked_at) VALUES (?,?,?,?,?,?)",
         [def.id, label, ch.ok ? 1 : 0, ms, ch.detail || null, now]
+      );
+      rollupTotal += 1;
+      if (ch.ok) rollupUp += 1;
+    }
+    if (rollupTotal) {
+      await db.query(
+        "INSERT INTO status_uptime_daily (server_id, day, total, up) VALUES (?, DATE(?), ?, ?) ON DUPLICATE KEY UPDATE total = total + VALUES(total), up = up + VALUES(up)",
+        [def.id, now, rollupTotal, rollupUp]
       );
     }
 
@@ -3906,25 +4014,146 @@ function validateViewerGroupIds(allowedIds, groupIds) {
   return { ok: true };
 }
 
+// -- 30-day uptime --------------------------------------------------------------
+// The per-server 30-day uptime used to be aggregated straight from
+// status_history on every GET /api/admin/servers. That filter cannot use the
+// table's (server_id, checked_at) index, so each call scanned the whole table
+// (150 s+ once the table reached a few million rows). The admin page requests
+// that endpoint on load, on tab switches and every 60 s, so the scans overlapped
+// until every pool connection was busy and the entire API hung behind them.
+//
+// Now: recordHistory keeps status_uptime_daily up to date (one tiny upsert per
+// poll), the figure is summed from that rollup in the background, and the
+// route only reads memory. Historical days are backfilled once, one day at a
+// time, after startup (see runHistoryMaintenance).
+const UPTIME30_REFRESH_MS = Math.max(15 * 1000, parseInt(process.env.UPTIME_CACHE_MS) || 60 * 1000);
+const uptime30Cache = { map: {}, at: 0, inflight: null };
+function refreshUptime30Cache() {
+  if (uptime30Cache.inflight) return uptime30Cache.inflight;
+  if (!db) return Promise.resolve();
+  uptime30Cache.inflight = (async () => {
+    const [rows] = await db.query(
+      `SELECT server_id, SUM(total) AS total, SUM(up) AS up_count
+       FROM status_uptime_daily
+       WHERE day >= DATE_SUB(CURDATE(), INTERVAL 30 DAY)
+       GROUP BY server_id`
+    );
+    const map = {};
+    for (const u of rows) {
+      const total = Number(u.total), up = Number(u.up_count);
+      map[u.server_id] = total > 0 ? Math.round((up / total) * 1000) / 10 : null;
+    }
+    uptime30Cache.map = map;
+    uptime30Cache.at  = Date.now();
+  })().catch((e) => {
+    addLog({ level:"warn", server:"system", message:`30-day uptime refresh failed: ${e.message}` });
+  }).finally(() => { uptime30Cache.inflight = null; });
+  return uptime30Cache.inflight;
+}
+function getUptime30Map() {
+  if (Date.now() - uptime30Cache.at > UPTIME30_REFRESH_MS) refreshUptime30Cache();
+  return uptime30Cache.map;
+}
+
+// -- History maintenance (background, once per startup) ------------------------
+// 1. Covering index (server_id, checked_at, ok): every uptime-style query only
+//    needs those three columns, so with this index MariaDB answers them from
+//    the index alone instead of fetching each row. Built online (INPLACE,
+//    LOCK=NONE) so polling keeps writing while it runs.
+// 2. Backfill status_uptime_daily from status_history for the last 31 days,
+//    newest day first, one day per statement, with a pause between days.
+//    Progress is recorded in status_settings so a restart resumes, not repeats.
+// Both run on a dedicated connection with the server-side statement cap lifted,
+// and never block startup or request handling.
+const UPTIME_BACKFILL_DAYS = 31;
+const UPTIME_BACKFILL_SETTING = "uptime_daily_backfill_days";
+let historyMaintenanceRan = false;
+async function withMaintenanceConnection(fn, timeoutMs) {
+  const conn = await db.getConnection();
+  try {
+    await conn.query("SET SESSION max_statement_time=0").catch(() => {});
+    await conn.query("SET SESSION MAX_EXECUTION_TIME=0").catch(() => {});
+    return await withDbTimeout(fn(conn), "maintenance", timeoutMs);
+  } finally {
+    try { conn.release(); } catch(_) {}
+  }
+}
+async function ensureHistoryCoveringIndex() {
+  const [idx] = await db.query(
+    "SELECT 1 FROM information_schema.STATISTICS WHERE TABLE_SCHEMA=DATABASE() AND TABLE_NAME='status_history' AND INDEX_NAME='idx_server_time_ok' LIMIT 1"
+  );
+  if (idx.length) return false;
+  addLog({ level:"info", server:"system", message:"Building covering index status_history(server_id, checked_at, ok) online — this can take several minutes on a large table" });
+  const started = Date.now();
+  await withMaintenanceConnection(
+    (conn) => conn.query("ALTER TABLE status_history ADD INDEX idx_server_time_ok (server_id, checked_at, ok), ALGORITHM=INPLACE, LOCK=NONE"),
+    60 * 60 * 1000
+  );
+  addLog({ level:"info", server:"system", message:`Covering index built in ${Math.round((Date.now() - started) / 1000)}s` });
+  return true;
+}
+async function backfillUptimeDaily() {
+  const [setRows] = await db.query("SELECT value FROM status_settings WHERE key_name=?", [UPTIME_BACKFILL_SETTING]);
+  let done = [];
+  try { done = JSON.parse(setRows[0]?.value || "[]"); } catch(_) { done = []; }
+  const [[{ today }]] = await db.query("SELECT DATE_FORMAT(CURDATE(), '%Y-%m-%d') AS today");
+  const dayStr = (n) => { const d = new Date(`${today}T00:00:00Z`); d.setUTCDate(d.getUTCDate() - n); return d.toISOString().slice(0, 10); };
+  let filled = 0;
+  for (let n = 0; n < UPTIME_BACKFILL_DAYS; n++) {
+    const day = dayStr(n), next = dayStr(n - 1);
+    if (done.includes(day)) continue;
+    const started = Date.now();
+    await withMaintenanceConnection(
+      (conn) => conn.query(
+        `INSERT INTO status_uptime_daily (server_id, day, total, up)
+         SELECT s.id, ?, COUNT(h.id), COALESCE(SUM(h.ok), 0)
+         FROM status_servers s
+         LEFT JOIN status_history h
+           ON h.server_id = s.id AND h.checked_at >= ? AND h.checked_at < ?
+         GROUP BY s.id
+         ON DUPLICATE KEY UPDATE total = VALUES(total), up = VALUES(up)`,
+        [day, day, next]
+      ),
+      30 * 60 * 1000
+    );
+    done.push(day);
+    done = done.filter(d => d >= dayStr(UPTIME_BACKFILL_DAYS + 5)).sort();
+    await db.query(
+      "INSERT INTO status_settings (key_name, value) VALUES (?, ?) ON DUPLICATE KEY UPDATE value=VALUES(value)",
+      [UPTIME_BACKFILL_SETTING, JSON.stringify(done)]
+    );
+    filled += 1;
+    addLog({ level:"info", server:"system", message:`Uptime rollup backfilled ${day} in ${Math.round((Date.now() - started) / 1000)}s` });
+    refreshUptime30Cache();
+    await new Promise(r => setTimeout(r, 10 * 1000));
+  }
+  return filled;
+}
+async function runHistoryMaintenance() {
+  if (historyMaintenanceRan || !db) return;
+  historyMaintenanceRan = true;
+  try {
+    await ensureHistoryCoveringIndex();
+  } catch(e) {
+    addLog({ level:"warn", server:"system", message:`Covering index build skipped: ${e.message}` });
+  }
+  try {
+    const filled = await backfillUptimeDaily();
+    if (filled) addLog({ level:"info", server:"system", message:`Uptime rollup backfill complete (${filled} day(s))` });
+  } catch(e) {
+    addLog({ level:"warn", server:"system", message:`Uptime rollup backfill stopped: ${e.message} — will resume on next restart` });
+  }
+}
+
 app.get("/api/admin/servers", requireAuth, async (req, res) => {
   try {
     const [rows] = await db.query("SELECT * FROM status_servers ORDER BY sort_order, created_at");
     const [mapRows] = await db.query("SELECT server_id, group_id FROM status_server_group_map");
     const groupsByServer = {};
     mapRows.forEach(m => { (groupsByServer[m.server_id] ||= []).push(m.group_id); });
-    // Batch 30-day uptime % per server — single query, no N+1
-    const [uptimeRows] = await db.query(
-      `SELECT server_id,
-         COUNT(*) AS total,
-         SUM(CASE WHEN ok=1 THEN 1 ELSE 0 END) AS up_count
-       FROM status_history
-       WHERE checked_at >= DATE_SUB(NOW(), INTERVAL 30 DAY)
-       GROUP BY server_id`
-    );
-    const uptimeMap = {};
-    for (const u of uptimeRows) {
-      uptimeMap[u.server_id] = u.total > 0 ? Math.round((u.up_count / u.total) * 1000) / 10 : null;
-    }
+    // 30-day uptime % per server — served from the background cache, never
+    // computed inline (see refreshUptime30Cache).
+    const uptimeMap = getUptime30Map();
     const allowed = await getUserAllowedGroupIds(req.session.userId, req.session.role);
     const filtered = (allowed === null)
       ? rows
@@ -7276,6 +7505,12 @@ app.use((err, req, res, next) => {
   // Refresh maintenance cache every 60s — CRUD endpoints also refresh inline;
   // this is a safety net for windows that become active/inactive purely by time passing.
   setInterval(() => { refreshMaintenanceCache().catch(() => {}); }, 60 * 1000);
+  // DB self-healing probe (see dbWatchdog) and the background 30-day uptime
+  // aggregate. The first uptime pass waits for the initial poll to settle.
+  setInterval(() => { dbWatchdog().catch(() => {}); }, DB_WATCHDOG_INTERVAL_MS);
+  setTimeout(() => { refreshUptime30Cache(); }, 5 * 1000);
+  setInterval(() => { refreshUptime30Cache(); }, UPTIME30_REFRESH_MS);
+  setTimeout(() => { runHistoryMaintenance().catch(() => {}); }, 20 * 1000);
   // Graceful shutdown. Container orchestrators send SIGTERM; Ctrl-C sends
   // SIGINT. We stop accepting new connections, end SSE streams, close the
   // DB pool, then exit. A 10s hard-kill guards against hung drains.
