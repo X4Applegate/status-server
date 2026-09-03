@@ -80,6 +80,11 @@ app.use(helmet({
       scriptSrc:       ["'self'", "'unsafe-inline'",
                         "https://challenges.cloudflare.com",  // Turnstile CAPTCHA
                         "https://unpkg.com"],                  // MapLibre GL JS
+      // Helmet's default CSP adds `script-src-attr 'none'`, which blocks every
+      // inline event-handler attribute (onclick="..."). The admin, status and
+      // login views are built on those handlers, so the whole UI becomes
+      // unclickable if this is left at the default. Explicitly allow them.
+      scriptSrcAttr:   ["'unsafe-inline'"],
       styleSrc:        ["'self'", "'unsafe-inline'",
                         "https://fonts.googleapis.com",        // Google Fonts CSS
                         "https://unpkg.com"],                  // MapLibre GL CSS

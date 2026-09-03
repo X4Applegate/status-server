@@ -8,6 +8,12 @@ All notable changes to this project are documented here.
 
 ## [Unreleased]
 
+## [3.16.2] — 2026-09-02
+
+### Fixed
+- **Admin UI unclickable — every `onclick=` handler was blocked by CSP.** Helmet's default Content-Security-Policy includes `script-src-attr 'none'`, and because the app only overrode the directives it listed, that default was merged into the live header. Browsers that enforce `script-src-attr` (Chrome, Edge, Firefox 108+) then refuse to compile inline event-handler attributes, so the sidebar, topbar buttons, service rows, and modals all did nothing when clicked (the page rendered normally and logged no console errors, only CSP violation reports). The helmet config now sets `scriptSrcAttr: ["'unsafe-inline'"]` explicitly, matching the `'unsafe-inline'` already granted to `script-src`.
+- 4 new tests in v3162-csp-inline-handlers.test.js render the real helmet config to a header and assert `script-src-attr 'none'` never comes back.
+
 ## [3.16.1] — 2026-09-02
 
 ### Security
