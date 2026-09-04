@@ -30,4 +30,4 @@
     "ip-address": "^10.4.0",
     "mysql2": "$mysql2"
   }
-}\n
+}

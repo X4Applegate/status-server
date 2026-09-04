@@ -8,6 +8,15 @@ All notable changes to this project are documented here.
 
 ## [Unreleased]
 
+## [3.16.4] — 2026-09-04
+
+### Fixed
+- **History maintenance could stall the poller after the v3.16.3 upgrade.** Two issues seen on the first production boot:
+  - The online index build waited for a metadata lock behind long-running scans left over from the previous container. While it waited, MariaDB queued every new statement on `status_history` (including the poller's INSERTs) behind its pending lock request, so the pool filled up again. Maintenance statements now run with a 10 s lock wait (`lock_wait_timeout` / `innodb_lock_wait_timeout`), give up quickly if the table is busy, and retry every 10 minutes until they succeed.
+  - The backfill used `INSERT ... SELECT`, which takes shared next-key locks on the history rows it reads and blocked the poller's INSERTs for the minute-plus each day's scan took ("Lock wait timeout exceeded" in `recordHistory`). The backfill now does a plain non-locking SELECT and writes the ~50 rollup rows in a separate small INSERT.
+  - The backfill only starts once the covering index exists, so each day's slice is an index-only read instead of random I/O over the whole table.
+- Operational note: if the previous container was mid-scan when you updated, its orphaned `SELECT ... FROM status_history ... INTERVAL 30 DAY` statements keep running in MariaDB until they finish. `SHOW FULL PROCESSLIST` lists them; `KILL QUERY <id>` releases the lock immediately.
+
 ## [3.16.3] — 2026-09-03
 
 ### Fixed
