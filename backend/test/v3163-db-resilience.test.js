@@ -114,19 +114,21 @@ test("status_uptime_daily rollup table exists and recordHistory upserts into it 
   assert.match(fn, /rollupTotal \+= 1;\s+if \(ch\.ok\) rollupUp \+= 1;/);
 });
 
-test("history maintenance builds the covering index online and backfills newest-first with resumable progress", () => {
+test("history maintenance builds the covering index online, backfills newest-first with a non-locking read, and retries", () => {
   const idx = sourceBetween("async function ensureHistoryCoveringIndex", "async function backfillUptimeDaily");
-  assert.match(idx, /INDEX_NAME='idx_server_time_ok'/);
   assert.match(idx, /ADD INDEX idx_server_time_ok \(server_id, checked_at, ok\), ALGORITHM=INPLACE, LOCK=NONE/);
   const bf = sourceBetween("async function backfillUptimeDaily", "async function runHistoryMaintenance");
-  assert.match(bf, /FROM status_servers s\s+LEFT JOIN status_history h\s+ON h\.server_id = s\.id AND h\.checked_at >= \? AND h\.checked_at < \?/);
-  assert.match(bf, /ON DUPLICATE KEY UPDATE total = VALUES\(total\), up = VALUES\(up\)/);
+  assert.match(bf, /`SELECT s\.id AS server_id, COUNT\(h\.id\) AS total, COALESCE\(SUM\(h\.ok\), 0\) AS up_count\s+FROM status_servers s\s+LEFT JOIN status_history h/);
+  assert.doesNotMatch(bf, /INSERT INTO status_uptime_daily[^;]*SELECT/s, "backfill must not use INSERT ... SELECT (it locks the history rows it reads)");
+  assert.match(bf, /INSERT INTO status_uptime_daily \(server_id, day, total, up\) VALUES \? ON DUPLICATE KEY UPDATE total = VALUES\(total\), up = VALUES\(up\)/);
   assert.match(bf, /if \(done\.includes\(day\)\) continue/);
-  assert.match(bf, /key_name=\?", \[UPTIME_BACKFILL_SETTING\]/);
-  const mw = sourceBetween("async function withMaintenanceConnection", "async function ensureHistoryCoveringIndex");
+  const mw = sourceBetween("async function withMaintenanceConnection", "async function historyCoveringIndexExists");
   assert.match(mw, /SET SESSION max_statement_time=0/);
+  assert.match(mw, /SET SESSION lock_wait_timeout=10/);
   assert.match(mw, /conn\.release\(\)/);
-  assert.match(serverSource, /setTimeout\(\(\) => \{ runHistoryMaintenance\(\)\.catch\(\(\) => \{\}\); \}, 20 \* 1000\)/);
+  const run = sourceBetween("async function runHistoryMaintenance", "app.get(\"/api/admin/servers\"");
+  assert.match(run, /await ensureHistoryCoveringIndex\(\);\s*\} catch\(e\) \{[\s\S]*?return;\s*\}/, "backfill must wait for the index");
+  assert.match(serverSource, /setInterval\(\(\) => \{ runHistoryMaintenance\(\)\.catch\(\(\) => \{\}\); \}, HISTORY_MAINTENANCE_RETRY_MS\)/);
 });
 
 test("startup registers the DB watchdog and the uptime cache refresh", () => {

@@ -4067,22 +4067,33 @@ function getUptime30Map() {
 // and never block startup or request handling.
 const UPTIME_BACKFILL_DAYS = 31;
 const UPTIME_BACKFILL_SETTING = "uptime_daily_backfill_days";
-let historyMaintenanceRan = false;
+const HISTORY_MAINTENANCE_RETRY_MS = 10 * 60 * 1000;
+let historyMaintenanceRunning = false;
+let historyMaintenanceDone = false;
+// Maintenance statements get a dedicated connection: no server-side statement
+// cap (they are meant to run long), but a SHORT metadata-lock wait so that a
+// busy table makes them give up quickly instead of stalling every other
+// statement on that table behind their pending lock request.
 async function withMaintenanceConnection(fn, timeoutMs) {
   const conn = await db.getConnection();
   try {
     await conn.query("SET SESSION max_statement_time=0").catch(() => {});
     await conn.query("SET SESSION MAX_EXECUTION_TIME=0").catch(() => {});
+    await conn.query("SET SESSION lock_wait_timeout=10").catch(() => {});
+    await conn.query("SET SESSION innodb_lock_wait_timeout=10").catch(() => {});
     return await withDbTimeout(fn(conn), "maintenance", timeoutMs);
   } finally {
     try { conn.release(); } catch(_) {}
   }
 }
-async function ensureHistoryCoveringIndex() {
+async function historyCoveringIndexExists() {
   const [idx] = await db.query(
     "SELECT 1 FROM information_schema.STATISTICS WHERE TABLE_SCHEMA=DATABASE() AND TABLE_NAME='status_history' AND INDEX_NAME='idx_server_time_ok' LIMIT 1"
   );
-  if (idx.length) return false;
+  return idx.length > 0;
+}
+async function ensureHistoryCoveringIndex() {
+  if (await historyCoveringIndexExists()) return true;
   addLog({ level:"info", server:"system", message:"Building covering index status_history(server_id, checked_at, ok) online — this can take several minutes on a large table" });
   const started = Date.now();
   await withMaintenanceConnection(
@@ -4103,19 +4114,27 @@ async function backfillUptimeDaily() {
     const day = dayStr(n), next = dayStr(n - 1);
     if (done.includes(day)) continue;
     const started = Date.now();
-    await withMaintenanceConnection(
+    // Plain SELECT first: a consistent non-locking read. (INSERT ... SELECT
+    // would take shared next-key locks on the history rows it reads and block
+    // the poller's INSERTs for the whole minute-plus the scan takes.)
+    const rows = await withMaintenanceConnection(
       (conn) => conn.query(
-        `INSERT INTO status_uptime_daily (server_id, day, total, up)
-         SELECT s.id, ?, COUNT(h.id), COALESCE(SUM(h.ok), 0)
+        `SELECT s.id AS server_id, COUNT(h.id) AS total, COALESCE(SUM(h.ok), 0) AS up_count
          FROM status_servers s
          LEFT JOIN status_history h
            ON h.server_id = s.id AND h.checked_at >= ? AND h.checked_at < ?
-         GROUP BY s.id
-         ON DUPLICATE KEY UPDATE total = VALUES(total), up = VALUES(up)`,
-        [day, day, next]
-      ),
+         GROUP BY s.id`,
+        [day, next]
+      ).then(([r]) => r),
       30 * 60 * 1000
     );
+    if (rows.length) {
+      const values = rows.map(r => [r.server_id, day, Number(r.total), Number(r.up_count)]);
+      await db.query(
+        "INSERT INTO status_uptime_daily (server_id, day, total, up) VALUES ? ON DUPLICATE KEY UPDATE total = VALUES(total), up = VALUES(up)",
+        [values]
+      );
+    }
     done.push(day);
     done = done.filter(d => d >= dayStr(UPTIME_BACKFILL_DAYS + 5)).sort();
     await db.query(
@@ -4129,19 +4148,28 @@ async function backfillUptimeDaily() {
   }
   return filled;
 }
+// Runs 20 s after startup and then every 10 min until both steps have
+// succeeded. The backfill only starts once the covering index exists — without
+// it each day's scan is a minute-plus of random I/O on a large table.
 async function runHistoryMaintenance() {
-  if (historyMaintenanceRan || !db) return;
-  historyMaintenanceRan = true;
+  if (historyMaintenanceDone || historyMaintenanceRunning || !db) return;
+  historyMaintenanceRunning = true;
   try {
-    await ensureHistoryCoveringIndex();
-  } catch(e) {
-    addLog({ level:"warn", server:"system", message:`Covering index build skipped: ${e.message}` });
-  }
-  try {
-    const filled = await backfillUptimeDaily();
-    if (filled) addLog({ level:"info", server:"system", message:`Uptime rollup backfill complete (${filled} day(s))` });
-  } catch(e) {
-    addLog({ level:"warn", server:"system", message:`Uptime rollup backfill stopped: ${e.message} — will resume on next restart` });
+    try {
+      await ensureHistoryCoveringIndex();
+    } catch(e) {
+      addLog({ level:"warn", server:"system", message:`Covering index build postponed (table busy?): ${e.message} — retrying in ${HISTORY_MAINTENANCE_RETRY_MS / 60000} min` });
+      return;
+    }
+    try {
+      const filled = await backfillUptimeDaily();
+      if (filled) addLog({ level:"info", server:"system", message:`Uptime rollup backfill complete (${filled} day(s))` });
+      historyMaintenanceDone = true;
+    } catch(e) {
+      addLog({ level:"warn", server:"system", message:`Uptime rollup backfill paused: ${e.message} — resuming in ${HISTORY_MAINTENANCE_RETRY_MS / 60000} min` });
+    }
+  } finally {
+    historyMaintenanceRunning = false;
   }
 }
 
@@ -7511,6 +7539,7 @@ app.use((err, req, res, next) => {
   setTimeout(() => { refreshUptime30Cache(); }, 5 * 1000);
   setInterval(() => { refreshUptime30Cache(); }, UPTIME30_REFRESH_MS);
   setTimeout(() => { runHistoryMaintenance().catch(() => {}); }, 20 * 1000);
+  setInterval(() => { runHistoryMaintenance().catch(() => {}); }, HISTORY_MAINTENANCE_RETRY_MS);
   // Graceful shutdown. Container orchestrators send SIGTERM; Ctrl-C sends
   // SIGINT. We stop accepting new connections, end SSE streams, close the
   // DB pool, then exit. A 10s hard-kill guards against hung drains.
