@@ -655,6 +655,19 @@ async function sanitizeBaseUrl(rawUrl) {
   return `${proto}//${hostname}${port}`;
 }
 
+// Cloud instance-metadata endpoints. These are never a legitimate monitor or
+// webhook target, but they are the classic SSRF prize (IAM credentials, etc.).
+// We block them by host without touching private/LAN ranges, because monitoring
+// internal hosts (10.x, 192.168.x, LTE probe IPs, Omada controllers) is exactly
+// what this app is for. Kept deliberately narrow so we never break real checks.
+const BLOCKED_METADATA_HOSTS = new Set([
+  "169.254.169.254",        // AWS / GCP / Azure / OpenStack IMDS
+  "169.254.170.2",          // AWS ECS task metadata
+  "fd00:ec2::254",          // AWS IMDS over IPv6
+  "metadata.google.internal",
+  "metadata",
+]);
+
 /**
  * Reconstruct a full URL (origin + path + query) from parsed components only.
  * Breaks the CodeQL taint chain so user-supplied input never flows directly
@@ -665,6 +678,10 @@ function sanitizeRequestUrl(rawUrl) {
   try { parsed = new URL(rawUrl); } catch { throw new Error("Invalid URL"); }
   if (!["http:", "https:"].includes(parsed.protocol)) {
     throw new Error("URL must use http:// or https://");
+  }
+  const host = parsed.hostname.toLowerCase().replace(/^\[|\]$/g, ""); // unwrap [ipv6]
+  if (BLOCKED_METADATA_HOSTS.has(host)) {
+    throw new Error("Refusing to request cloud-metadata endpoint");
   }
   const port = parsed.port ? `:${parsed.port}` : "";
   const origin = `${parsed.protocol}//${parsed.hostname}${port}`;
@@ -2564,6 +2581,10 @@ async function runChecks(def) {
 // -- History + Incident tracking -----------------------------------------------
 async function recordHistory(def, checks, overall) {
   const now = new Date();
+  // status_history / status_incidents .server_id are VARCHAR; bind the id as a
+  // string so "WHERE server_id = ?" comparisons use the (server_id, checked_at)
+  // index instead of MariaDB coercing the whole column to a number (full scan).
+  const sid = String(def.id);
   try {
     // Store each check result
     let rollupTotal = 0, rollupUp = 0;
@@ -2593,7 +2614,7 @@ async function recordHistory(def, checks, overall) {
                   : ch.type;
       await db.query(
         "INSERT INTO status_history (server_id, check_type, ok, response_ms, detail, checked_at) VALUES (?,?,?,?,?,?)",
-        [def.id, label, ch.ok ? 1 : 0, ms, ch.detail || null, now]
+        [sid, label, ch.ok ? 1 : 0, ms, ch.detail || null, now]
       );
       rollupTotal += 1;
       if (ch.ok) rollupUp += 1;
@@ -2601,14 +2622,14 @@ async function recordHistory(def, checks, overall) {
     if (rollupTotal) {
       await db.query(
         "INSERT INTO status_uptime_daily (server_id, day, total, up) VALUES (?, DATE(?), ?, ?) ON DUPLICATE KEY UPDATE total = total + VALUES(total), up = up + VALUES(up)",
-        [def.id, now, rollupTotal, rollupUp]
+        [sid, now, rollupTotal, rollupUp]
       );
     }
 
     // Incident detection � look at the primary check result (overall)
     const [open] = await db.query(
       "SELECT * FROM status_incidents WHERE server_id=? AND ended_at IS NULL ORDER BY started_at DESC LIMIT 1",
-      [def.id]
+      [sid]
     );
 
     if (overall !== "up" && open.length === 0) {
@@ -2618,7 +2639,7 @@ async function recordHistory(def, checks, overall) {
       const cause = checks.filter(c => !c.ok).map(c => c.detail).join(", ");
       const [ins] = await db.query(
         "INSERT INTO status_incidents (server_id, server_name, started_at, cause) VALUES (?,?,?,?)",
-        [def.id, def.name, now, cause]
+        [sid, def.name, now, cause]
       );
       const detectionMsg = cause
         ? `Automated check failed: ${cause}`
@@ -2644,7 +2665,7 @@ async function recordHistory(def, checks, overall) {
     // Prune history older than 90 days
     await db.query(
       "DELETE FROM status_history WHERE server_id=? AND checked_at < DATE_SUB(NOW(), INTERVAL 90 DAY)",
-      [def.id]
+      [sid]
     );
   } catch(e) {
     addLog({ level:"warn", server:"system", message:`recordHistory failed: ${e.message}` });
@@ -2964,8 +2985,10 @@ async function postWebhook(url, body) {
       signal:  AbortSignal.timeout(8000)
     });
     if (!r.ok) {
-      const text = await r.text().catch(() => "");
-      throw new Error(`HTTP ${r.status}${text ? ": " + text.slice(0, 200) : ""}`);
+      // Report the status only. Reflecting the upstream response body back to the
+      // caller (e.g. the operator "test webhook" button) would leak the contents
+      // of whatever URL was configured — a read-SSRF/exfil primitive.
+      throw new Error(`HTTP ${r.status}`);
     }
     return { status: r.status };
   }
@@ -2979,8 +3002,9 @@ async function postWebhook(url, body) {
     signal: AbortSignal.timeout(8000)
   });
   if (!r.ok) {
-    const text = await r.text().catch(() => "");
-    throw new Error(`HTTP ${r.status}${text ? ": " + text.slice(0, 200) : ""}`);
+    // Report the status only — see the _ntfy branch above; the upstream body is
+    // not surfaced to the caller to avoid a read-SSRF/exfil primitive.
+    throw new Error(`HTTP ${r.status}`);
   }
   return { status: r.status };
 }
@@ -4055,6 +4079,53 @@ function getUptime30Map() {
   return uptime30Cache.map;
 }
 
+// SLA dashboard (24h/7d/30d per server). This aggregate used to run inline on
+// every GET /api/admin/sla; because the join compared VARCHAR server_id to INT
+// s.id it could not use the history index and scanned the whole table, so a few
+// concurrent tab loads pinned the pool (same failure mode as the v3.16.3
+// /api/admin/servers outage, just on a different route). It now:
+//   - joins on CAST(s.id AS CHAR) so the (server_id, checked_at, ok) index is used,
+//   - refreshes on a single-flight promise (concurrent callers share ONE query,
+//     never N), so it can never pile up and exhaust the pool,
+//   - is served from memory; only the first-ever load awaits, later loads return
+//     the cached rows and refresh in the background when stale.
+const SLA_REFRESH_MS = UPTIME30_REFRESH_MS;
+const slaCache = { rows: [], at: 0, inflight: null };
+function refreshSlaCache() {
+  if (slaCache.inflight) return slaCache.inflight;
+  if (!db) return Promise.resolve(slaCache.rows);
+  slaCache.inflight = (async () => {
+    const [rows] = await db.query(`
+      SELECT s.id, s.name, s.sla_target,
+        SUM(CASE WHEN h.checked_at >= DATE_SUB(NOW(), INTERVAL 24 HOUR) THEN 1 ELSE 0 END) AS total_24,
+        SUM(CASE WHEN h.checked_at >= DATE_SUB(NOW(), INTERVAL 24 HOUR) AND h.ok=1 THEN 1 ELSE 0 END) AS up_24,
+        SUM(CASE WHEN h.checked_at >= DATE_SUB(NOW(), INTERVAL 7  DAY)  THEN 1 ELSE 0 END) AS total_7,
+        SUM(CASE WHEN h.checked_at >= DATE_SUB(NOW(), INTERVAL 7  DAY)  AND h.ok=1 THEN 1 ELSE 0 END) AS up_7,
+        COUNT(h.id) AS total_30,
+        SUM(CASE WHEN h.ok=1 THEN 1 ELSE 0 END) AS up_30
+      FROM status_servers s
+      LEFT JOIN status_history h ON h.server_id = CAST(s.id AS CHAR)
+        AND h.checked_at >= DATE_SUB(NOW(), INTERVAL 30 DAY)
+      GROUP BY s.id, s.name, s.sla_target
+      ORDER BY s.sort_order, s.created_at`);
+    const pct = (t, u) => Number(t) > 0 ? Math.round((Number(u) / Number(t)) * 10000) / 100 : null;
+    slaCache.rows = rows.map(r => ({
+      id:         r.id,
+      name:       r.name,
+      sla_target: r.sla_target != null ? parseFloat(r.sla_target) : null,
+      uptime_24h: pct(r.total_24, r.up_24), checks_24h: Number(r.total_24),
+      uptime_7d:  pct(r.total_7,  r.up_7),  checks_7d:  Number(r.total_7),
+      uptime_30d: pct(r.total_30, r.up_30), checks_30d: Number(r.total_30),
+    }));
+    slaCache.at = Date.now();
+    return slaCache.rows;
+  })().catch((e) => {
+    addLog({ level:"warn", server:"system", message:`SLA refresh failed: ${e.message}` });
+    return slaCache.rows;
+  }).finally(() => { slaCache.inflight = null; });
+  return slaCache.inflight;
+}
+
 // -- History maintenance (background, once per startup) ------------------------
 // 1. Covering index (server_id, checked_at, ok): every uptime-style query only
 //    needs those three columns, so with this index MariaDB answers them from
@@ -4321,28 +4392,15 @@ app.put("/api/admin/servers/:id", requireAuth, async (req, res) => {
 
 app.get("/api/admin/sla", requireAdmin, async (req, res) => {
   try {
-    const [rows] = await db.query(`
-      SELECT s.id, s.name, s.sla_target,
-        SUM(CASE WHEN h.checked_at >= DATE_SUB(NOW(), INTERVAL 24 HOUR) THEN 1 ELSE 0 END) AS total_24,
-        SUM(CASE WHEN h.checked_at >= DATE_SUB(NOW(), INTERVAL 24 HOUR) AND h.ok=1 THEN 1 ELSE 0 END) AS up_24,
-        SUM(CASE WHEN h.checked_at >= DATE_SUB(NOW(), INTERVAL 7  DAY)  THEN 1 ELSE 0 END) AS total_7,
-        SUM(CASE WHEN h.checked_at >= DATE_SUB(NOW(), INTERVAL 7  DAY)  AND h.ok=1 THEN 1 ELSE 0 END) AS up_7,
-        COUNT(h.id) AS total_30,
-        SUM(CASE WHEN h.ok=1 THEN 1 ELSE 0 END) AS up_30
-      FROM status_servers s
-      LEFT JOIN status_history h ON h.server_id = s.id
-        AND h.checked_at >= DATE_SUB(NOW(), INTERVAL 30 DAY)
-      GROUP BY s.id, s.name, s.sla_target
-      ORDER BY s.sort_order, s.created_at`);
-    const pct = (t, u) => Number(t) > 0 ? Math.round((Number(u) / Number(t)) * 10000) / 100 : null;
-    res.json(rows.map(r => ({
-      id:         r.id,
-      name:       r.name,
-      sla_target: r.sla_target != null ? parseFloat(r.sla_target) : null,
-      uptime_24h: pct(r.total_24, r.up_24), checks_24h: Number(r.total_24),
-      uptime_7d:  pct(r.total_7,  r.up_7),  checks_7d:  Number(r.total_7),
-      uptime_30d: pct(r.total_30, r.up_30), checks_30d: Number(r.total_30),
-    })));
+    const fresh = slaCache.at && (Date.now() - slaCache.at < SLA_REFRESH_MS);
+    if (!fresh) {
+      const p = refreshSlaCache();
+      // First-ever load has nothing to show yet, so wait for it once. The query
+      // is single-flight and 60s-capped, so this cannot pile up or hang the pool.
+      // Later loads return the cached rows immediately and refresh in the background.
+      if (!slaCache.at) await p;
+    }
+    res.json(slaCache.rows);
   } catch(e) { res.status(500).json({ error: e.message }); }
 });
 
@@ -5212,7 +5270,11 @@ function cleanCustomDomain(s) {
 app.post("/api/admin/groups", requireManager, async (req, res) => {
   const { name, slug, description, logo_text, logo_image, logo_size, accent_color, bg_color, default_theme, custom_domain, server_ids, privacy_text, terms_text } = req.body;
   const public_enabled = req.body.public_enabled ? 1 : 0;
-  const cleanCustomCss = req.body.custom_css ? String(req.body.custom_css).replace(/<\/style>/gi, "").slice(0, 65535) : null;
+  // Strip every '<' so operator-supplied CSS cannot break out of the inline
+  // <style> element. The old filter only removed the literal "</style>", but the
+  // HTML tokenizer also closes the element on "</style >", "</style\n>", etc., so
+  // "</style ><script>…</script>" slipped through. No valid CSS needs '<'.
+  const cleanCustomCss = req.body.custom_css ? String(req.body.custom_css).replace(/</g, "").slice(0, 65535) : null;
   const cleanHeroTitle  = req.body.hero_title  ? String(req.body.hero_title).trim().slice(0, 200)  : null;
   const cleanKickerText = req.body.kicker_text ? String(req.body.kicker_text).trim().slice(0, 100) : null;
   const cleanLayout     = ["minimal","grid"].includes(req.body.layout) ? req.body.layout : "default";
@@ -5260,7 +5322,11 @@ app.put("/api/admin/groups/:id", requireAuth, async (req, res) => {
   }
   const { name, slug, description, logo_text, logo_image, logo_size, accent_color, bg_color, default_theme, custom_domain, privacy_text, terms_text } = req.body;
   const public_enabled = req.body.public_enabled ? 1 : 0;
-  const cleanCustomCss = req.body.custom_css ? String(req.body.custom_css).replace(/<\/style>/gi, "").slice(0, 65535) : null;
+  // Strip every '<' so operator-supplied CSS cannot break out of the inline
+  // <style> element. The old filter only removed the literal "</style>", but the
+  // HTML tokenizer also closes the element on "</style >", "</style\n>", etc., so
+  // "</style ><script>…</script>" slipped through. No valid CSS needs '<'.
+  const cleanCustomCss = req.body.custom_css ? String(req.body.custom_css).replace(/</g, "").slice(0, 65535) : null;
   const cleanHeroTitle  = req.body.hero_title  ? String(req.body.hero_title).trim().slice(0, 200)  : null;
   const cleanKickerText = req.body.kicker_text ? String(req.body.kicker_text).trim().slice(0, 100) : null;
   const cleanLayout     = ["minimal","grid"].includes(req.body.layout) ? req.body.layout : "default";

@@ -1,6 +1,6 @@
 {
   "name": "status-server-backend",
-  "version": "3.16.4",
+  "version": "3.16.5",
   "description": "Self-hosted server status monitor",
   "main": "server.js",
   "engines": {
@@ -20,7 +20,7 @@
     "google-auth-library": "^11.0.0",
     "helmet": "^8.3.0",
     "mysql2": "^3.24.3",
-    "nodemailer": "^9.0.5",
+    "nodemailer": "^9.1.1",
     "pino": "^10.3.1",
     "pino-http": "^11.0.0",
     "pino-pretty": "^13.1.3",

@@ -8,6 +8,19 @@ All notable changes to this project are documented here.
 
 ## [Unreleased]
 
+## [3.16.5] — 2026-09-14
+
+### Security
+- **Stored XSS via group Custom CSS (fixed).** The sanitizer only stripped the literal `</style>`, but the HTML tokenizer also closes a `<style>` element on `</style >`, `</style\n>`, etc., so a payload like `</style ><script>…</script>` slipped through and ran on the public status page (and in an admin's browser). Any *manager* could set it — a manager→admin escalation plus mass visitor compromise. The filter now strips every `<` (no valid CSS needs one), so the element can't be broken out of.
+- **Stored XSS on the public status page (fixed).** Operator-authored service fields — name, description, host, category, sub-category, tags, incident cause, and the TLS-cert tooltip — were interpolated raw into `innerHTML` in the client render functions while an `escapeHtml` helper sat unused beside them. All of these fields are now escaped.
+- **Authenticated SSRF hardening (targeted).** The poller and webhook sender now refuse requests to cloud instance-metadata endpoints (`169.254.169.254`, `169.254.170.2`, `fd00:ec2::254`, `metadata.google.internal`). LAN/internal monitoring (10.x, 192.168.x, LTE probe IPs, controllers) is deliberately left working. The webhook sender also no longer reflects the upstream response body back to the caller, removing a read-SSRF/exfil primitive from the "test webhook" flow.
+- **nodemailer upgraded to 9.1.1** — clears the high-severity advisory GHSA-2x7j-588g-ccc2 (`resolveContent()` file/URL-access bypass) plus three moderate advisories. `npm audit` reports 0 vulnerabilities.
+
+### Fixed
+- **SLA dashboard could re-trigger the v3.16.3 pool-exhaustion outage.** `GET /api/admin/sla` ran a 30-day `status_history` aggregate across all servers inline on every request — the same "scan the whole history table in the request path" pattern that the v3.16.3 fix removed from `/api/admin/servers`, just on an endpoint that fix never touched. It now serves from a single-flight in-memory cache (concurrent loads share one query and can never pile up), and the join casts `s.id` so the `(server_id, checked_at)` index is actually usable.
+- **History writes defeated their own index.** `status_history.server_id` is `VARCHAR` but the id was bound as a number, so `WHERE server_id = ?` in `recordHistory` (incident lookup + 90-day prune) compared VARCHAR to INT and forced a scan instead of an index lookup. The id is now bound as a string.
+- 12 new/updated tests in `v3165-security-hardening.test.js` (SSRF block with LAN preserved, custom_css strip, public-page escaping, SLA single-flight cache, webhook non-reflection, nodemailer floor).
+
 ## [3.16.4] — 2026-09-04
 
 ### Fixed
