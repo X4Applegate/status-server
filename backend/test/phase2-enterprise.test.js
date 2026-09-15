@@ -57,20 +57,22 @@ test("GET /api/admin/sla exists and requires admin authentication", () => {
   assert.match(serverSource, /app\.get\("\/api\/admin\/sla",\s*requireAdmin/);
 });
 
-test("SLA endpoint uses conditional aggregation for 24h/7d/30d windows", () => {
-  const route = sourceBetween(
-    'app.get("/api/admin/sla"',
-    'app.get("/api/admin/api-keys"',
-  );
-  assert.match(route, /CASE WHEN h\.checked_at >= DATE_SUB\(NOW\(\), INTERVAL 24 HOUR\)/);
-  assert.match(route, /CASE WHEN h\.checked_at >= DATE_SUB\(NOW\(\), INTERVAL 7\s+DAY\)/);
-  assert.match(route, /LEFT JOIN status_history/);
-  assert.match(route, /GROUP BY s\.id/);
+test("SLA aggregation uses conditional 24h/7d/30d windows in a single-flight cache", () => {
+  // v3.16.5: the aggregation moved off the request path into refreshSlaCache so
+  // concurrent /api/admin/sla loads can no longer pile up and exhaust the pool
+  // (the v3.16.3 outage mode). The conditional windows are preserved; the join
+  // now casts s.id so the (server_id, checked_at) index is usable.
+  const refresh = sourceBetween("function refreshSlaCache", "// -- History maintenance");
+  assert.match(refresh, /CASE WHEN h\.checked_at >= DATE_SUB\(NOW\(\), INTERVAL 24 HOUR\)/);
+  assert.match(refresh, /CASE WHEN h\.checked_at >= DATE_SUB\(NOW\(\), INTERVAL 7\s+DAY\)/);
+  assert.match(refresh, /LEFT JOIN status_history h ON h\.server_id = CAST\(s\.id AS CHAR\)/);
+  assert.match(refresh, /GROUP BY s\.id/);
+  assert.match(refresh, /if \(slaCache\.inflight\) return slaCache\.inflight/);
 });
 
 // -- Per-group Custom CSS --
 
-test("custom_css sanitizes closing style tags before storage", () => {
+test("custom_css strips every '<' before storage (no <style> breakout)", () => {
   const postRoute = sourceBetween(
     'app.post("/api/admin/groups"',
     'app.put("/api/admin/groups/:id"',
@@ -79,9 +81,12 @@ test("custom_css sanitizes closing style tags before storage", () => {
     'app.put("/api/admin/groups/:id"',
     'app.delete("/api/admin/groups/:id"',
   );
-  const sanitizePattern = /replace\(\/<\\\/style>/;
-  assert.match(postRoute, sanitizePattern, "POST must strip </style> from custom_css");
-  assert.match(putRoute, sanitizePattern, "PUT must strip </style> from custom_css");
+  // Strengthened in v3.16.5: the old filter only removed the literal "</style>",
+  // which the HTML tokenizer bypasses via "</style >". Stripping every '<' closes
+  // that hole because no valid CSS needs a '<'.
+  const sanitizePattern = /replace\(\/<\/g, ""\)/;
+  assert.match(postRoute, sanitizePattern, "POST must strip '<' from custom_css");
+  assert.match(putRoute, sanitizePattern, "PUT must strip '<' from custom_css");
 });
 
 test("custom_css is included in the group INSERT SQL", () => {
