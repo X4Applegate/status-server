@@ -8,6 +8,19 @@ All notable changes to this project are documented here.
 
 ## [Unreleased]
 
+## [3.16.6] — 2026-09-16
+
+### Security
+- **Session fixation (fixed).** Login, first-time setup, and Google OAuth attached the authenticated identity to the *existing* pre-auth session id. A new `establishSession()` helper now calls `req.session.regenerate()` and issues a fresh session id on every successful authentication, so any cookie a victim's browser held beforehand is discarded.
+- **Google OAuth account-takeover hardening.** The callback now requires `email_verified === true` before linking a Google identity to an existing account by email (an unverified/attacker-asserted address could otherwise hijack an account, including an admin) and before auto-provisioning a new viewer. Added an optional `GOOGLE_ALLOWED_DOMAINS` allowlist (comma-separated; matched against the email domain or the Google `hd` claim) — unset preserves the previous behaviour, set restricts sign-in to those domains.
+
+### Fixed
+- **SIGTERM never drained cleanly.** `httpServer.close()` only runs its callback once every connection has closed, but the long-lived SSE and log-stream responses never close on their own — so the drain never completed and shutdown always fell through to the 10 s hard `exit(1)`, cutting in-flight `recordHistory` writes and skipping the pool drain. Those streams are now ended and their sockets destroyed at the start of shutdown, so `close()` completes, the DB pool drains, and the process exits 0.
+- 9 new tests in `v3166-auth-hardening.test.js` (session regeneration order, route wiring, OAuth verified-email/domain guards, shutdown ordering).
+
+### Deferred
+- Broader CSRF defence-in-depth (double-submit token / Origin checks, and moving the token-based unsubscribe off GET) is intentionally not in this release: `sameSite=lax` already blocks the cross-site cookie vector, and a global token/Origin gate needs a careful rollout. Tracked as a follow-up.
+
 ## [3.16.5] — 2026-09-14
 
 ### Security

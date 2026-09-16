@@ -3617,6 +3617,22 @@ async function computeLoginRedirect(userId, role) {
   return "/";
 }
 
+// Regenerate the session ID on every successful authentication, then attach the
+// identity to the fresh session. This prevents session fixation: any session id
+// the client held before logging in (which an attacker could have planted) is
+// discarded and replaced with a new one bound to the authenticated user.
+function establishSession(req, { userId, username, role }) {
+  return new Promise((resolve, reject) => {
+    req.session.regenerate(err => {
+      if (err) return reject(err);
+      req.session.userId   = userId;
+      req.session.username = username;
+      req.session.role     = role;
+      req.session.save(saveErr => (saveErr ? reject(saveErr) : resolve()));
+    });
+  });
+}
+
 app.post("/api/login", loginLimiter, async (req, res) => {
   const { username, password, turnstile_token } = req.body;
   if (!username || !password) return res.status(400).json({ error:"Username and password required" });
@@ -3639,9 +3655,7 @@ app.post("/api/login", loginLimiter, async (req, res) => {
       addAuditLog({ userId: rows[0].id, username, action:"login.failed", detail:"wrong password", ip: req.ip });
       return res.status(401).json({ error:"Invalid credentials" });
     }
-    req.session.userId   = rows[0].id;
-    req.session.username = rows[0].username;
-    req.session.role     = rows[0].role;
+    await establishSession(req, { userId: rows[0].id, username: rows[0].username, role: rows[0].role });
     addLog({ level:"info", server:"auth", message:`Login: ${username} (${rows[0].role})` });
     addAuditLog({ userId: rows[0].id, username, action:"login", detail: rows[0].role, ip: req.ip });
     const redirect = await computeLoginRedirect(rows[0].id, rows[0].role);
@@ -3670,9 +3684,7 @@ app.post("/api/setup", setupLimiter, async (req, res) => {
     if (users[0].cnt > 0) return res.status(403).json({ error: "Setup already completed — use the login form" });
     const hash = await bcrypt.hash(password, 10);
     const [result] = await db.query("INSERT INTO status_users (username, password_hash, role) VALUES (?, ?, 'admin')", [username, hash]);
-    req.session.userId   = result.insertId;
-    req.session.username = username;
-    req.session.role     = "admin";
+    await establishSession(req, { userId: result.insertId, username, role: "admin" });
     addLog({ level:"info", server:"system", message:`First admin account created: ${username}` });
     addAuditLog({ userId: result.insertId, username, action:"user.setup", detail:"initial admin created", ip: req.ip });
     res.json({ ok: true, redirect: "/admin?welcome=1" });
@@ -3714,14 +3726,32 @@ app.get("/auth/google/callback", loginLimiter, async (req, res) => {
     const payload   = ticket.getPayload();
     const googleId  = payload.sub;
     const email     = payload.email     || null;
+    const emailVerified = payload.email_verified === true;
     const firstName = payload.given_name  || null;
     const lastName  = payload.family_name || null;
+
+    // Optional hosted-domain allowlist. GOOGLE_ALLOWED_DOMAINS is a comma-separated
+    // list of domains; unset preserves the existing behaviour (any Google account),
+    // set restricts sign-in to those domains (matched against the email domain or
+    // the Google `hd` claim).
+    const allowedDomains = (process.env.GOOGLE_ALLOWED_DOMAINS || "")
+      .split(",").map(s => s.trim().toLowerCase()).filter(Boolean);
+    if (allowedDomains.length) {
+      const domain = ((email || "").split("@")[1] || "").toLowerCase();
+      const hd     = (payload.hd || "").toLowerCase();
+      if (!allowedDomains.includes(domain) && !allowedDomains.includes(hd)) {
+        addLog({ level:"warn", server:"auth", message:`Google OAuth rejected: domain not allowed (${email || "no-email"})` });
+        return res.redirect("/login?error=google_domain");
+      }
+    }
 
     // 1. Existing account with this Google ID
     let [rows] = await db.query("SELECT * FROM status_users WHERE google_id=?", [googleId]);
 
-    // 2. Link by matching email
-    if (!rows.length && email) {
+    // 2. Link by matching email — only for a Google-verified email, so an
+    //    unverified / attacker-asserted address can't be used to take over an
+    //    existing account (which may be an admin).
+    if (!rows.length && email && emailVerified) {
       [rows] = await db.query("SELECT * FROM status_users WHERE email=?", [email]);
       if (rows.length) {
         await db.query(
@@ -3735,7 +3765,12 @@ app.get("/auth/google/callback", loginLimiter, async (req, res) => {
     if (rows.length) {
       user = rows[0];
     } else {
-      // 3. Auto-create as viewer
+      // 3. Auto-create as viewer — require a Google-verified email so an account
+      //    is never provisioned from an unverified / attacker-asserted address.
+      if (!emailVerified) {
+        addLog({ level:"warn", server:"auth", message:`Google OAuth rejected: unverified email (${email || "no-email"})` });
+        return res.redirect("/login?error=google_unverified");
+      }
       let base = (email || "user").split("@")[0].toLowerCase().replace(/[^a-z0-9._-]/g, "") || "user";
       let username = base, suffix = 1;
       while ((await db.query("SELECT id FROM status_users WHERE username=?", [username]))[0].length) {
@@ -3751,9 +3786,7 @@ app.get("/auth/google/callback", loginLimiter, async (req, res) => {
       addAuditLog({ userId: user.id, username, action:"user.create", resourceType:"user", resourceId: user.id, resourceName: username, detail:"google-oauth auto-created", ip: req.ip });
     }
 
-    req.session.userId   = user.id;
-    req.session.username = user.username;
-    req.session.role     = user.role;
+    await establishSession(req, { userId: user.id, username: user.username, role: user.role });
     addLog({ level:"info", server:"auth", message:`Google OAuth login: ${user.username} (${user.role})` });
     addAuditLog({ userId: user.id, username: user.username, action:"login", detail:`google-oauth / ${user.role}`, ip: req.ip });
     const redirect = await computeLoginRedirect(user.id, user.role);
@@ -7614,8 +7647,18 @@ app.use((err, req, res, next) => {
     if (shuttingDown) return;
     shuttingDown = true;
     addLog({ level:"info", server:"system", message:`Shutdown requested (${signal}); draining...` });
+    // End long-lived SSE / log streams FIRST. httpServer.close() only fires its
+    // callback once every open connection has closed, and these streams never
+    // close on their own — so if we wait for close() before ending them, the
+    // drain never completes and we always hit the 10s hard-kill below (exit 1,
+    // cutting in-flight DB writes). Ending + destroying them lets close() finish.
+    for (const r of [...sseClients, ...logClients]) {
+      try { r.end(); } catch(_) {}
+      try { r.socket && r.socket.destroy(); } catch(_) {}
+    }
+    sseClients = [];
+    logClients = [];
     httpServer.close(() => {
-      [...sseClients, ...logClients].forEach(r => { try { r.end(); } catch(_) {} });
       const dbClose = db ? db.end().catch(() => {}) : Promise.resolve();
       dbClose.finally(() => process.exit(0));
     });
