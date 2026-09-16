@@ -1,0 +1,22 @@
+name: "status-server CodeQL config"
+
+# Keeps parity with the previous default setup (query_suite = default,
+# threat model = remote). No first-party source is excluded — server.js and the
+# EJS views stay in scope, so XSS / request-forgery / sanitization coverage is
+# unchanged. We only scope scanning to the app code and skip vendored deps and
+# test fixtures, which reduces noise without dropping real coverage.
+#
+# About the "N relatedLocations were ignored" line on the status page: that is a
+# fixed GitHub-side SARIF ingestion cap on very long data-flow paths (they run
+# through the 7.5k-line server.js and the ~500KB admin.ejs). It is cosmetic — it
+# neither fails the scan nor hides alerts — and cannot be disabled via config.
+# The only way to actually shorten those paths is to break up those large files
+# (tracked separately as a maintainability follow-up).
+
+paths:
+  - backend
+  - .github/workflows
+
+paths-ignore:
+  - backend/node_modules
+  - backend/test
