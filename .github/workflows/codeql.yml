@@ -1,0 +1,59 @@
+name: CodeQL
+
+# Advanced CodeQL setup. Replaces the repository's *default* setup, which had
+# quietly enabled four overlapping configurations — `javascript`, `typescript`
+# AND the combined `javascript-typescript`, plus `actions` — so the code-scanning
+# status page listed redundant analyses. This runs a single combined JS/TS
+# configuration (plus Actions), pinned and reviewable in-repo.
+#
+# NOTE: default setup must be turned off for this workflow to upload results
+# (GitHub does not allow default + advanced setup at the same time).
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  schedule:
+    # Weekly, Monday 06:24 UTC — matches the previous default-setup cadence.
+    - cron: "24 6 * * 1"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  analyze:
+    name: Analyze (${{ matrix.language }})
+    runs-on: ubuntu-latest
+    permissions:
+      security-events: write   # upload SARIF results
+      actions: read
+      contents: read
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - language: javascript-typescript
+            build-mode: none
+          - language: actions
+            build-mode: none
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Initialize CodeQL
+        uses: github/codeql-action/init@v3
+        with:
+          languages: ${{ matrix.language }}
+          build-mode: ${{ matrix.build-mode }}
+          config-file: ./.github/codeql/codeql-config.yml
+
+      - name: Perform CodeQL Analysis
+        uses: github/codeql-action/analyze@v3
+        with:
+          category: "/language:${{ matrix.language }}"
