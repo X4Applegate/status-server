@@ -8,6 +8,15 @@ All notable changes to this project are documented here.
 
 ## [Unreleased]
 
+## [3.16.7] — 2026-09-17
+
+### Fixed
+- **History retention no longer runs an unbounded delete on every poll.** `recordHistory` used to issue one `DELETE FROM status_history WHERE server_id=? AND checked_at < 90 days` per server on every 30 s poll cycle. On a large table on slow storage that delete could exceed the query timeout and be retried forever without completing — a constant write load that contributed to the pool exhaustion (query timeouts / watchdog pool recreations). Retention now runs as a **periodic, batched background job** (`pruneHistoryBatched`): shortly after boot and then hourly, deleting in small `LIMIT`ed batches per server (so the `(server_id, checked_at)` index is used) with a hard cap per run, single-flighted so it can never overlap itself or monopolise the pool.
+
+### Operational (applied to the production database, not code)
+- **InnoDB buffer pool raised from 128 MB (the default) to 2 GB.** The `status_history` table (~1 GB incl. indexes, 5.5M rows) could not fit the 128 MB cache, so nearly every history read hit disk — the underlying cause of the periodic DB stalls. Done online (no restart). Persist it in the MariaDB server config so it survives restarts (e.g. `--innodb-buffer-pool-size=2G`).
+- **Retention backlog cleared.** History had grown past the 90-day policy (back to ~April) because the old inline prune was timing out; ~188k stale rows were removed in small batches so the table now holds exactly the intended 90-day window.
+
 ## [3.16.6] — 2026-09-16
 
 ### Security
