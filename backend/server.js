@@ -2662,11 +2662,9 @@ async function recordHistory(def, checks, overall) {
       );
     }
 
-    // Prune history older than 90 days
-    await db.query(
-      "DELETE FROM status_history WHERE server_id=? AND checked_at < DATE_SUB(NOW(), INTERVAL 90 DAY)",
-      [sid]
-    );
+    // Retention (deleting rows older than 90 days) is no longer done here on
+    // every poll — it runs as a periodic, batched background job
+    // (pruneHistoryBatched) so a slow bulk delete can't stall the poller.
   } catch(e) {
     addLog({ level:"warn", server:"system", message:`recordHistory failed: ${e.message}` });
   }
@@ -4274,6 +4272,45 @@ async function runHistoryMaintenance() {
     }
   } finally {
     historyMaintenanceRunning = false;
+  }
+}
+
+// -- History retention (background, periodic, batched) -------------------------
+// Retention used to run inline in recordHistory as one unbounded
+// `DELETE ... WHERE server_id=? AND checked_at < 90d` per server on EVERY poll.
+// On a large table / slow disk that delete could exceed the query timeout, so it
+// was retried every cycle without ever completing — constant write load that
+// helped wedge the pool. Retention now runs on its own schedule, deleting in
+// small bounded batches (per server, so the (server_id, checked_at) index is
+// used) with a hard cap per run so it can never monopolise the pool.
+const HISTORY_RETENTION_DAYS   = 90;
+const HISTORY_PRUNE_BATCH      = 5000;
+const HISTORY_PRUNE_MAX_BATCHES = 400; // safety cap per run
+let historyPruneRunning = false;
+async function pruneHistoryBatched() {
+  if (historyPruneRunning || !db) return;
+  historyPruneRunning = true;
+  try {
+    const [servers] = await db.query("SELECT DISTINCT server_id FROM status_history");
+    let batches = 0, deleted = 0;
+    outer:
+    for (const { server_id } of servers) {
+      let n;
+      do {
+        const [res] = await db.query(
+          "DELETE FROM status_history WHERE server_id=? AND checked_at < DATE_SUB(NOW(), INTERVAL ? DAY) LIMIT ?",
+          [String(server_id), HISTORY_RETENTION_DAYS, HISTORY_PRUNE_BATCH]
+        );
+        n = res.affectedRows;
+        deleted += n;
+        if (++batches >= HISTORY_PRUNE_MAX_BATCHES) break outer;
+      } while (n === HISTORY_PRUNE_BATCH);
+    }
+    if (deleted) addLog({ level:"info", server:"system", message:`History retention: pruned ${deleted} row(s) older than ${HISTORY_RETENTION_DAYS} days` });
+  } catch(e) {
+    addLog({ level:"warn", server:"system", message:`History retention prune failed: ${e.message}` });
+  } finally {
+    historyPruneRunning = false;
   }
 }
 
@@ -7639,6 +7676,9 @@ app.use((err, req, res, next) => {
   setInterval(() => { refreshUptime30Cache(); }, UPTIME30_REFRESH_MS);
   setTimeout(() => { runHistoryMaintenance().catch(() => {}); }, 20 * 1000);
   setInterval(() => { runHistoryMaintenance().catch(() => {}); }, HISTORY_MAINTENANCE_RETRY_MS);
+  // History retention: batched prune shortly after boot, then hourly.
+  setTimeout(() => { pruneHistoryBatched().catch(() => {}); }, 90 * 1000);
+  setInterval(() => { pruneHistoryBatched().catch(() => {}); }, 60 * 60 * 1000);
   // Graceful shutdown. Container orchestrators send SIGTERM; Ctrl-C sends
   // SIGINT. We stop accepting new connections, end SSE streams, close the
   // DB pool, then exit. A 10s hard-kill guards against hung drains.
