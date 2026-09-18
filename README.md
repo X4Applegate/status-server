@@ -14,11 +14,7 @@ Applegate Monitor combines protocol checks, controller and POS integrations, liv
 
 > **🔴 Live demo:** try a sample dashboard at **[uptime.richardapplegate.io/dashboard/demo](https://uptime.richardapplegate.io/dashboard/demo)**.
 
-<!--
-  Hero screenshot — add docs/screenshots/dashboard.png (the public status page) and
-  uncomment the line below so it renders above the fold:
-![Applegate Monitor — public status dashboard](docs/screenshots/dashboard.png)
--->
+[![Applegate Monitor — public status dashboard](docs/screenshots/dashboard.png)](https://uptime.richardapplegate.io/dashboard/demo)
 
 
 > [!IMPORTANT]
@@ -45,17 +41,11 @@ Applegate Monitor combines protocol checks, controller and POS integrations, liv
 
 > A live sample dashboard is at **[uptime.richardapplegate.io/dashboard/demo](https://uptime.richardapplegate.io/dashboard/demo)** — the fastest way to see it in action.
 
-Screenshots live in [`docs/screenshots/`](docs/screenshots/). Add your captures there and reference them here:
+**Public status page**
 
-<!--
-  Add the images to docs/screenshots/ then uncomment:
+![Applegate Monitor — public status dashboard](docs/screenshots/dashboard.png)
 
-| Public status page | Admin console |
-| --- | --- |
-| ![Public status page](docs/screenshots/dashboard.png) | ![Admin console](docs/screenshots/admin.png) |
-
-![Incident timeline](docs/screenshots/incident.png)
--->
+More captures (admin console, incident timeline, a short demo GIF) can be dropped into [`docs/screenshots/`](docs/screenshots/) and linked here.
 
 ## How it compares
 
