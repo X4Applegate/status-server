@@ -12,11 +12,22 @@ Applegate Monitor combines protocol checks, controller and POS integrations, liv
 
 [Product page](https://richardapplegate.io/static/case-studies/applegatemonitor.html) · [Live deployment](https://uptime.richardapplegate.io) · [Docker Hub](https://hub.docker.com/r/applegater/status-server) · [Releases](https://github.com/X4Applegate/status-server/releases)
 
+> **🔴 See it live:** a running instance is at **[uptime.richardapplegate.io](https://uptime.richardapplegate.io)**.
+
+<!--
+  Hero screenshot — add docs/screenshots/dashboard.png (the public status page) and
+  uncomment the line below so it renders above the fold:
+![Applegate Monitor — public status dashboard](docs/screenshots/dashboard.png)
+-->
+
+
 > [!IMPORTANT]
 > Applegate Monitor is **source-available, not open source**. Personal and internal non-commercial use is permitted. Modification, redistribution, derivative works, and commercial use require prior written permission. See [LICENSE](LICENSE).
 
 ## Contents
 
+- [Screenshots](#screenshots)
+- [How it compares](#how-it-compares)
 - [Quick start](#quick-start)
 - [What it provides](#what-it-provides)
 - [Supported checks](#supported-checks)
@@ -29,6 +40,39 @@ Applegate Monitor combines protocol checks, controller and POS integrations, liv
 - [Backup and restore](#backup-and-restore)
 - [Development](#development)
 - [Security and license](#security-and-license)
+
+## Screenshots
+
+> A running instance is live at **[uptime.richardapplegate.io](https://uptime.richardapplegate.io)** — the fastest way to see it in action.
+
+Screenshots live in [`docs/screenshots/`](docs/screenshots/). Add your captures there and reference them here:
+
+<!--
+  Add the images to docs/screenshots/ then uncomment:
+
+| Public status page | Admin console |
+| --- | --- |
+| ![Public status page](docs/screenshots/dashboard.png) | ![Admin console](docs/screenshots/admin.png) |
+
+![Incident timeline](docs/screenshots/incident.png)
+-->
+
+## How it compares
+
+Most self-hosted monitors watch **one** set of endpoints for **one** audience. Applegate Monitor is built for operators who serve **multiple teams or clients** — each getting its own branded, access-controlled status page from a single deployment.
+
+| | **Applegate Monitor** | Uptime Kuma | Gatus | Statping-ng |
+| --- | --- | --- | --- |
+| Multi-tenant, per-client **branded** dashboards from one install | ✅ Built-in | Limited | ✗ | ✗ |
+| Per-tenant login + role-based visibility (RBAC) | ✅ | ✗ | ✗ | ✗ |
+| Configuration | Web admin UI | Web admin UI | YAML file | Web admin UI |
+| Incident timelines + planned maintenance windows | ✅ | Partial | ✗ | Partial |
+| Checks: HTTP/TCP/UDP/Ping/DNS/TLS-cert | ✅ | ✅ | ✅ (HTTP-centric) | ✅ |
+| Network/POS integrations (TP-Link Omada, UniFi, Square) | ✅ | ✗ | ✗ | ✗ |
+| Email alerts, quiet hours, embeddable SVG badges, JSON/SSE feeds | ✅ | Partial | Partial | Partial |
+| Storage | MariaDB | SQLite/MariaDB | In-memory/store | SQLite/Postgres |
+
+*Uptime Kuma, Gatus, and Statping-ng are excellent projects with large communities; this table is a general positioning guide as of 2026 — check each project for its current feature set. Applegate Monitor's focus is the multi-tenant, white-label use case.*
 
 ## Quick start
 
