@@ -41,11 +41,17 @@ Applegate Monitor combines protocol checks, controller and POS integrations, liv
 
 > A live sample dashboard is at **[uptime.richardapplegate.io/dashboard/demo](https://uptime.richardapplegate.io/dashboard/demo)** — the fastest way to see it in action.
 
+**Product tour**
+
+![Applegate Monitor product tour](docs/screenshots/demo.gif)
+
 **Public status page**
 
 ![Applegate Monitor — public status dashboard](docs/screenshots/dashboard.png)
 
-More captures (admin console, incident timeline, a short demo GIF) can be dropped into [`docs/screenshots/`](docs/screenshots/) and linked here.
+**Admin operations console**
+
+![Applegate Monitor — admin console](docs/screenshots/admin.png)
 
 ## How it compares
 
