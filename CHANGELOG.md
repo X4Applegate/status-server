@@ -9,7 +9,7 @@ All notable changes to this project are documented here.
 ## [Unreleased]
 
 ### Changed
-- **Relicensed to a dual license — GNU AGPL v3.0 + commercial** (previously proprietary source-available). Self-hosting and modification are now permitted under the AGPL-3.0; closed-source / SaaS use without source disclosure requires a commercial license. See `LICENSING.md`, `LICENSE`, `COMMERCIAL-LICENSE.md`, and `CLA.md`. Commercial license and CLA are governed by Washington State (USA) law. Draft pending legal review.
+- **Relicensed to the Apache License 2.0** (previously proprietary source-available). Applegate Monitor is now free and open source — use, modify, and redistribute it (including commercially) under the Apache-2.0 terms, with attribution. See `LICENSE` and `NOTICE`.
 
 ## [3.16.7] — 2026-09-17
 
