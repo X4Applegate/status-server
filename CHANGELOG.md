@@ -8,6 +8,9 @@ All notable changes to this project are documented here.
 
 ## [Unreleased]
 
+### Changed
+- **Relicensed to the Apache License 2.0** (previously proprietary source-available). Applegate Monitor is now free and open source — use, modify, and redistribute it (including commercially) under the Apache-2.0 terms, with attribution. See `LICENSE` and `NOTICE`.
+
 ## [3.16.7] — 2026-09-17
 
 ### Fixed

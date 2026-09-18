@@ -4,7 +4,7 @@
 [![Latest release](https://img.shields.io/github/v/release/X4Applegate/status-server?color=2563eb)](https://github.com/X4Applegate/status-server/releases/latest)
 [![Docker pulls](https://img.shields.io/docker/pulls/applegater/status-server?color=2563eb)](https://hub.docker.com/r/applegater/status-server)
 [![Node.js](https://img.shields.io/badge/Node.js-22.19%2B-339933?logo=node.js&logoColor=white)](https://nodejs.org/)
-[![License](https://img.shields.io/badge/license-source--available-7c3aed)](LICENSE)
+[![License: Apache 2.0](https://img.shields.io/badge/license-Apache--2.0-2563eb)](LICENSE)
 
 A self-hosted status monitoring and incident-communication platform for teams that operate multiple branded status pages from one deployment.
 
@@ -18,7 +18,7 @@ Applegate Monitor combines protocol checks, controller and POS integrations, liv
 
 
 > [!IMPORTANT]
-> Applegate Monitor is **source-available, not open source**. Personal and internal non-commercial use is permitted. Modification, redistribution, derivative works, and commercial use require prior written permission. See [LICENSE](LICENSE).
+> Applegate Monitor is **free and open source** under the **Apache License 2.0**. Use it, self-host it, modify it, and build on it — commercially or not — with attribution per the license. See [LICENSE](LICENSE).
 
 ## Contents
 
@@ -478,7 +478,7 @@ Security controls include bcrypt password hashing, database-backed sessions, sec
 
 Report vulnerabilities privately according to [SECURITY.md](SECURITY.md). Do not open a public issue for a suspected vulnerability.
 
-This repository uses a proprietary source-available license. See [LICENSE](LICENSE) for the complete terms and contact the author before modification, redistribution, derivative work, or commercial use.
+Applegate Monitor is **free and open source** under the **Apache License 2.0** — see [LICENSE](LICENSE) and [NOTICE](NOTICE). You may use, modify, and redistribute it (including commercially) under the terms of that license. Contributions are accepted under the same Apache-2.0 terms; please read [CONTRIBUTING.md](CONTRIBUTING.md). If it's useful to you, a ⭐ on the repo is appreciated.
 
 ## AI assistance
 
