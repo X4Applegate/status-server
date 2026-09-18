@@ -10,9 +10,9 @@ A self-hosted status monitoring and incident-communication platform for teams th
 
 Applegate Monitor combines protocol checks, controller and POS integrations, live observability, incident timelines, planned maintenance, alert delivery, and tenant-aware administration in one Node.js and MariaDB application.
 
-[Product page](https://richardapplegate.io/static/case-studies/applegatemonitor.html) · [Live deployment](https://uptime.richardapplegate.io) · [Docker Hub](https://hub.docker.com/r/applegater/status-server) · [Releases](https://github.com/X4Applegate/status-server/releases)
+[Live demo](https://uptime.richardapplegate.io/dashboard/demo) · [Product page](https://richardapplegate.io/static/case-studies/applegatemonitor.html) · [Docker Hub](https://hub.docker.com/r/applegater/status-server) · [Releases](https://github.com/X4Applegate/status-server/releases)
 
-> **🔴 See it live:** a running instance is at **[uptime.richardapplegate.io](https://uptime.richardapplegate.io)**.
+> **🔴 Live demo:** try a sample dashboard at **[uptime.richardapplegate.io/dashboard/demo](https://uptime.richardapplegate.io/dashboard/demo)**.
 
 <!--
   Hero screenshot — add docs/screenshots/dashboard.png (the public status page) and
@@ -43,7 +43,7 @@ Applegate Monitor combines protocol checks, controller and POS integrations, liv
 
 ## Screenshots
 
-> A running instance is live at **[uptime.richardapplegate.io](https://uptime.richardapplegate.io)** — the fastest way to see it in action.
+> A live sample dashboard is at **[uptime.richardapplegate.io/dashboard/demo](https://uptime.richardapplegate.io/dashboard/demo)** — the fastest way to see it in action.
 
 Screenshots live in [`docs/screenshots/`](docs/screenshots/). Add your captures there and reference them here:
 
