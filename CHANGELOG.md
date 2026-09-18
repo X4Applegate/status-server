@@ -8,6 +8,9 @@ All notable changes to this project are documented here.
 
 ## [Unreleased]
 
+### Changed
+- **Relicensed to a dual license — GNU AGPL v3.0 + commercial** (previously proprietary source-available). Self-hosting and modification are now permitted under the AGPL-3.0; closed-source / SaaS use without source disclosure requires a commercial license. See `LICENSING.md`, `LICENSE`, `COMMERCIAL-LICENSE.md`, and `CLA.md`. Commercial license and CLA are governed by Washington State (USA) law. Draft pending legal review.
+
 ## [3.16.7] — 2026-09-17
 
 ### Fixed

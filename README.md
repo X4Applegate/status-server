@@ -4,7 +4,8 @@
 [![Latest release](https://img.shields.io/github/v/release/X4Applegate/status-server?color=2563eb)](https://github.com/X4Applegate/status-server/releases/latest)
 [![Docker pulls](https://img.shields.io/docker/pulls/applegater/status-server?color=2563eb)](https://hub.docker.com/r/applegater/status-server)
 [![Node.js](https://img.shields.io/badge/Node.js-22.19%2B-339933?logo=node.js&logoColor=white)](https://nodejs.org/)
-[![License](https://img.shields.io/badge/license-source--available-7c3aed)](LICENSE)
+[![License: AGPL v3](https://img.shields.io/badge/license-AGPL--3.0-2563eb)](LICENSE)
+[![Commercial license available](https://img.shields.io/badge/commercial-available-7c3aed)](COMMERCIAL-LICENSE.md)
 
 A self-hosted status monitoring and incident-communication platform for teams that operate multiple branded status pages from one deployment.
 
@@ -18,7 +19,7 @@ Applegate Monitor combines protocol checks, controller and POS integrations, liv
 
 
 > [!IMPORTANT]
-> Applegate Monitor is **source-available, not open source**. Personal and internal non-commercial use is permitted. Modification, redistribution, derivative works, and commercial use require prior written permission. See [LICENSE](LICENSE).
+> Applegate Monitor is **dual-licensed**: free and open source under the **GNU AGPL v3.0** (self-host, modify, and share under its terms), **or** under a **commercial license** for closed-source / SaaS use without the AGPL's source-disclosure obligations. See [LICENSING.md](LICENSING.md), [LICENSE](LICENSE), and [COMMERCIAL-LICENSE.md](COMMERCIAL-LICENSE.md).
 
 ## Contents
 
@@ -478,7 +479,7 @@ Security controls include bcrypt password hashing, database-backed sessions, sec
 
 Report vulnerabilities privately according to [SECURITY.md](SECURITY.md). Do not open a public issue for a suspected vulnerability.
 
-This repository uses a proprietary source-available license. See [LICENSE](LICENSE) for the complete terms and contact the author before modification, redistribution, derivative work, or commercial use.
+Applegate Monitor is **dual-licensed** under the **GNU AGPL v3.0** ([LICENSE](LICENSE)) and a **commercial license** ([COMMERCIAL-LICENSE.md](COMMERCIAL-LICENSE.md)) — see [LICENSING.md](LICENSING.md) for how to choose. Self-hosting and modification are welcome under the AGPL; closed-source or SaaS use without source disclosure requires a commercial license. Contributions are accepted under the [Contributor License Agreement](CLA.md). For commercial licensing, contact **admin@richardapplegate.io**.
 
 ## AI assistance
 
