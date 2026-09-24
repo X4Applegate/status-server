@@ -1,3 +1,5 @@
+
+
 # Applegate Monitor
 
 [![CI](https://github.com/X4Applegate/status-server/actions/workflows/ci.yml/badge.svg)](https://github.com/X4Applegate/status-server/actions/workflows/ci.yml)
@@ -258,7 +260,7 @@ For predictable production upgrades, replace `latest` in the Compose file with a
 
 ### Upgrade
 
-Back up first, then pull and recreate only the application service:
+Back up first (with `DB_PASS` set in `.backup.env` or the environment), then pull and recreate only the application service:
 
 ```bash
 ./backup.sh
