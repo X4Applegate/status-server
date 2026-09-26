@@ -8,10 +8,41 @@ All notable changes to this project are documented here.
 
 ## [Unreleased]
 
+_Nothing yet._
+
+## [3.16.10] — 2026-09-25
+
 ### Changed
-- **Relicensed to the Apache License 2.0** (previously proprietary source-available). Applegate Monitor is now free and open source — use, modify, and redistribute it (including commercially) under the Apache-2.0 terms, with attribution. See `LICENSE` and `NOTICE`.
+- **Reverted the Omada WAN speed tests shipped in 3.16.8 and 3.16.9.** The feature was built against the wrong codebase — `itstatus.myanthemcoffee.com` is served by a separate application (`anthem-itstatus`, on the Anthem VPS), not by Applegate Monitor. The backend is byte-identical to its 3.16.7 state (plus the relicense and README work listed under 3.16.8). Removed: the `status_omada_speedtests`, `status_omada_speedtest_thresholds` and `status_omada_speedtest_alert_state` migrations; `omadaApiPost()`; the `omadaSpeedTest*` harvest/alert functions; the `/api/omada/speedtests` routes; the Speed topbar view; and `v3168-omada-speedtests.test.js`. Suite back to 272 passing.
+- **The version moves forward to 3.16.10 rather than back to 3.16.7.** `applegater/status-server:v3.16.7` is already published with different content and must not be overwritten, so the revert ships as a new version instead of reusing a released tag.
+
+### Upgrade note
+- **Three tables are not dropped by this revert.** Their `CREATE TABLE` statements are simply gone, so on any install that already ran 3.16.8 or 3.16.9 they persist as orphaned tables holding only speed-test rows. They are harmless. To clean the schema manually:
+  `DROP TABLE IF EXISTS status_omada_speedtest_alert_state, status_omada_speedtest_thresholds, status_omada_speedtests;`
+
+## [3.16.9] — 2026-09-25
+
+> Superseded by the 3.16.10 revert — retained here because `applegater/status-server:v3.16.9` is published and pullable.
+
+### Fixed
+- **Omada WAN speed tests collected nothing in production.** Port discovery used `GET /sites/{id}/wan-lan-status`, which returns `-1007` for a Viewer-role API client — and the status server's Omada credentials are deliberately read-only. Zero discovered ports meant the site was skipped, and the skip was silent, so the fault was indistinguishable from "the gateway never ran a test". Primary discovery moved to `GET /sites/{id}/internet/basic-info`, which the same credentials read fine and which is the better source anyway (`portMode` filters to real WAN ports — `0` = WAN, `1` = LAN, `-1` = absent, e.g. a USB modem slot — and it carries the human-readable port name), falling back to `/internet` and finally to `wan-lan-status`. A site whose gateway supports speed test but reports no WAN ports now logs a warning naming permissions as the likely cause, because a silent skip is exactly how this fault hid.
+
+## [3.16.8] — 2026-09-25
+
+> The speed-test feature below was superseded by the 3.16.10 revert. The relicense is permanent and unaffected.
+
+### Changed
+- **Relicensed to the Apache License 2.0** (previously proprietary source-available). Applegate Monitor is now free and open source — use, modify, and redistribute it (including commercially) under the Apache-2.0 terms, with attribution. See `LICENSE` and `NOTICE`. This landed after the `v3.16.7` tag was cut, so it is also present in the republished `applegater/status-server:v3.16.7` image (see the 3.16.7 note below).
+
+### Added
+- **Omada WAN speed tests per location**, behind login, with per-threshold alerting. Reverted in 3.16.10.
+
+### Documentation
+- README marketing pass — comparison table, live demo link, and product screenshots.
 
 ## [3.16.7] — 2026-09-17
+
+> **Image/tag note:** the `applegater/status-server:v3.16.7` image was rebuilt and republished on 2026-09-25 from a `main` that already contained the Apache-2.0 relicense and the README marketing pass (both listed under 3.16.8). That image therefore does **not** match the `v3.16.7` git tag at `d684b27`. Code behaviour is identical; only licensing and documentation differ.
 
 ### Fixed
 - **History retention no longer runs an unbounded delete on every poll.** `recordHistory` used to issue one `DELETE FROM status_history WHERE server_id=? AND checked_at < 90 days` per server on every 30 s poll cycle. On a large table on slow storage that delete could exceed the query timeout and be retried forever without completing — a constant write load that contributed to the pool exhaustion (query timeouts / watchdog pool recreations). Retention now runs as a **periodic, batched background job** (`pruneHistoryBatched`): shortly after boot and then hourly, deleting in small `LIMIT`ed batches per server (so the `(server_id, checked_at)` index is used) with a hard cap per run, single-flighted so it can never overlap itself or monopolise the pool.
