@@ -41,10 +41,20 @@ test("history is read from dateList WITH a portUuid, not from the live result", 
   assert.doesNotMatch(fn, /\/speedTestResult["'`]\s*\)/, "the bare speedTestResult endpoint is live-only and returns [] when idle");
 });
 
-test("port UUIDs come from wan-lan-status", () => {
+test("port discovery prefers an endpoint a read-only API client can read", () => {
   const fn = sourceBetween("async function omadaSpeedTestHarvest(", "async function omadaSpeedTestHarvestAll");
-  assert.match(fn, /wan-lan-status/);
-  assert.match(fn, /wanList/, "wanList[].portId is already '<port>_<uuid>'");
+  // wan-lan-status returns -1007 for a Viewer-role client; internet/basic-info does not.
+  const basicAt = fn.indexOf("internet/basic-info");
+  const wanLanAt = fn.indexOf("wan-lan-status");
+  assert.ok(basicAt > -1, "must try internet/basic-info");
+  assert.ok(wanLanAt > -1, "wan-lan-status remains a fallback");
+  assert.ok(basicAt < wanLanAt, "internet/basic-info must be tried FIRST");
+  assert.match(fn, /p\.portMode === 0/, "portMode 0 = WAN (1 = LAN, -1 = absent)");
+});
+
+test("a supported site returning no WAN ports is logged, never skipped silently", () => {
+  const fn = sourceBetween("async function omadaSpeedTestHarvest(", "async function omadaSpeedTestHarvestAll");
+  assert.match(fn, /returned no WAN ports/, "a silent skip is how a permissions fault hides");
 });
 
 // -- Data correctness ----------------------------------------------------------

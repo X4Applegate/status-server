@@ -2686,19 +2686,45 @@ async function omadaSpeedTestHarvest(controller) {
       if (!gw?.mac) { skipped++; continue; }
       gatewayMac = gw.mac;
 
-      // wanList[].portId is already "<portNumber>_<uuid>" — exactly what dateList wants.
-      const st = await omadaApiGet(controller, `/sites/${siteId}/wan-lan-status`);
-      const names = st?.portName || {};
-      ports = (st?.wanList || [])
-        .map(w => w.portId)
-        .filter(Boolean)
-        .map(uuid => ({ uuid, name: names[uuid] || null }));
+      // Port UUIDs, formatted "<portNumber>_<uuid>" — exactly what dateList wants.
+      //
+      // internet/basic-info is the primary source because a READ-ONLY (Viewer) API client can
+      // read it. wan-lan-status returns -1007 for such a client, which silently yielded zero
+      // ports and made the whole feature look like it collected nothing. portMode 0 = WAN,
+      // 1 = LAN, -1 = absent (e.g. a USB modem slot), so this also filters to real WAN ports
+      // and gives us the human port name for free.
+      try {
+        const basic = await omadaApiGet(controller, `/sites/${siteId}/internet/basic-info`);
+        ports = (basic?.portList || [])
+          .filter(p => p.portMode === 0 && p.portId)
+          .map(p => ({ uuid: p.portId, name: p.portName || null }));
+      } catch(e) { /* fall through to the alternatives below */ }
+
+      if (!ports.length) {
+        try {
+          const inet = await omadaApiGet(controller, `/sites/${siteId}/internet`);
+          ports = (inet?.portUuids || []).filter(Boolean).map(uuid => ({ uuid, name: null }));
+        } catch(e) { /* fall through */ }
+      }
+      if (!ports.length) {
+        const st = await omadaApiGet(controller, `/sites/${siteId}/wan-lan-status`);
+        const names = st?.portName || {};
+        ports = (st?.wanList || [])
+          .map(w => w.portId)
+          .filter(Boolean)
+          .map(uuid => ({ uuid, name: names[uuid] || null }));
+      }
     } catch(e) {
       addLog({ level:"warn", server:"omada", message:`Speed test: ${site.name || siteId} port discovery failed: ${e.message}` });
       continue;
     }
 
-    if (!ports.length) { skipped++; continue; }
+    // A site whose gateway CAN speed-test but exposes no WAN ports is a real fault, not a
+    // quiet skip — it is exactly how a permissions problem presents. Say so.
+    if (!ports.length) {
+      addLog({ level:"warn", server:"omada", message:`Speed test: ${site.name || siteId} supports speed test but returned no WAN ports — check the API client's permissions` });
+      skipped++; continue;
+    }
     sites++;
 
     for (const port of ports) {
