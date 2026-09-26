@@ -218,6 +218,26 @@ body::before{content:'';position:fixed;inset:0;pointer-events:none;background:ra
 .srv-ms.slow{color:var(--red);background:var(--red-soft)}
 .srv-sparkline{display:block;width:100%;height:20px;margin-top:3px;opacity:.7}
 .srv-sparkline-wrap{width:100%;overflow:hidden}
+/* Speed-test view (logged-in only) */
+.speed-view{display:none;flex-direction:column;flex:1;min-height:0;padding:24px 28px;overflow:auto}
+.speed-view.active{display:flex}
+.speed-head h2{margin:0 0 4px;font-size:20px}
+.speed-sub{margin:0 0 20px;font-size:13px;color:#7a9abf}
+.speed-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(280px,1fr));gap:16px}
+.speed-card{background:var(--card,#101b2d);border:1px solid rgba(255,255,255,.07);border-radius:12px;padding:16px}
+.speed-card.is-slow{border-color:#e0533d}
+.speed-card.is-stale{border-color:#d99b2b}
+.speed-card.is-unsupported{opacity:.72}
+.speed-site{font-size:15px;font-weight:600;margin-bottom:2px}
+.speed-meta{font-size:11px;color:#7a9abf;margin-bottom:12px}
+.speed-nums{display:flex;gap:18px;margin-bottom:10px}
+.speed-num .v{font-size:19px;font-weight:600;font-variant-numeric:tabular-nums}
+.speed-num .l{font-size:10px;text-transform:uppercase;letter-spacing:.06em;color:#7a9abf}
+.speed-spark{width:100%;height:36px;display:block}
+.speed-flag{margin-top:10px;font-size:11px;border-radius:6px;padding:5px 8px}
+.speed-flag.slow{background:rgba(224,83,61,.14);color:#ff9b88}
+.speed-flag.stale{background:rgba(217,155,43,.14);color:#f0c369}
+.speed-flag.none{background:rgba(122,154,191,.12);color:#9ab6d6}
 /* Map view */
 .map-view{display:none;flex-direction:column;flex:1;height:calc(100vh - 64px);min-height:0}
 .map-view.active{display:flex}
@@ -1218,6 +1238,14 @@ html[data-theme="light"] .theme-icon-dark,html[data-theme="dark"] .theme-icon-li
   <div id="mapUnmapped" class="map-unmapped" style="display:none"></div>
 </div>
 
+<div id="speedView" class="speed-view">
+  <div class="speed-head">
+    <h2>Internet speed by location</h2>
+    <p class="speed-sub">Measured by each site's own gateway on its overnight schedule. Slowest first.</p>
+  </div>
+  <div id="speedGrid" class="speed-grid"></div>
+</div>
+
 <script>
 // -- Group context (injected from server)
 const GROUP_SLUG   = <%- JSON.stringify(groupSlug) %>;
@@ -1457,6 +1485,106 @@ function toggleMapView() {
   }
 }
 
+// ---- Omada WAN speed tests (logged-in only) --------------------------------
+// Richard's unit rule: Mbps, dropping to Kbps only below 1 Mbps.
+// "0.4 Mbps" reads as fine at a glance; "400 Kbps" reads as broken.
+// Values arrive already normalised to Mbps — formatting is a view concern only, because
+// storing mixed units would silently break trends, thresholds and rolling medians.
+function fmtSpeed(mbps) {
+  if (mbps == null || !isFinite(mbps)) return "—";
+  return mbps < 1 ? `${Math.round(mbps * 1000)} Kbps` : `${mbps.toFixed(1)} Mbps`;
+}
+
+let _speedActive = false;
+let _speedData   = null;
+
+function toggleSpeedView() {
+  _speedActive = !_speedActive;
+  const btn    = document.getElementById("topbarSpeedBtn");
+  const layout = document.querySelector(".layout");
+  const view   = document.getElementById("speedView");
+  if (_speedActive) {
+    if (layout) layout.style.display = "none";
+    if (view)   view.classList.add("active");
+    if (btn)   { btn.textContent = "📋 List"; btn.classList.add("active"); }
+    loadSpeedTests();
+  } else {
+    if (layout) layout.style.display = "";
+    if (view)   view.classList.remove("active");
+    if (btn)   { btn.innerHTML = `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 20a8 8 0 1 1 8-8"/><line x1="12" y1="12" x2="17" y2="9"/></svg> Speed`; btn.classList.remove("active"); }
+  }
+}
+
+async function loadSpeedTests() {
+  try {
+    const r = await fetch("/api/omada/speedtests?days=30");
+    if (!r.ok) return;
+    _speedData = await r.json();
+    renderSpeedCards();
+  } catch(e) { /* silent — the section simply stays empty */ }
+}
+
+// Sparkline over the site's own history. Scaled to that site's own range, not a global
+// maximum — a 100 Mbps store and a 1 Gbps store should both show a readable shape.
+function speedSparkline(history) {
+  const pts = history.filter(h => h.download_mbps != null).slice(-30);
+  if (pts.length < 2) return "";
+  const vals = pts.map(p => p.download_mbps);
+  const min = Math.min(...vals), max = Math.max(...vals);
+  const span = (max - min) || 1;
+  const w = 240, h = 36;
+  const d = pts.map((p, i) => {
+    const x = (i / (pts.length - 1)) * w;
+    const y = h - ((p.download_mbps - min) / span) * (h - 4) - 2;
+    return `${i ? "L" : "M"}${x.toFixed(1)},${y.toFixed(1)}`;
+  }).join(" ");
+  return `<svg class="speed-spark" viewBox="0 0 ${w} ${h}" preserveAspectRatio="none" aria-hidden="true"><path d="${d}" fill="none" stroke="#4da3ff" stroke-width="1.6"/></svg>`;
+}
+
+function renderSpeedCards() {
+  const grid = document.getElementById("speedGrid");
+  if (!grid || !_speedData) return;
+  const sites = _speedData.sites || [];
+  if (!sites.length) {
+    grid.innerHTML = `<div class="speed-flag none">No speed-test results yet. Results appear once a site's gateway has run its scheduled test.</div>`;
+    return;
+  }
+
+  grid.innerHTML = sites.map(s => {
+    const l = s.latest;
+    const thr = s.threshold;
+    const ageH = l ? (Date.now() - new Date(l.tested_at).getTime()) / 36e5 : Infinity;
+    const staleLimit = thr?.stale_hours || 36;
+    const isStale = ageH > staleLimit;
+    const isSlow  = l && thr?.min_down_mbps != null && Number(l.download_mbps) < Number(thr.min_down_mbps);
+
+    const cls = ["speed-card", isSlow ? "is-slow" : "", isStale ? "is-stale" : ""].filter(Boolean).join(" ");
+    const when = l ? new Date(l.tested_at).toLocaleString() : "never";
+    const via  = l && (l.isp || l.server_location)
+      ? `${l.isp || ""}${l.isp && l.server_location ? " · " : ""}${l.server_location || ""}`
+      : "";
+
+    let flag = "";
+    if (isStale) {
+      flag = `<div class="speed-flag stale">No result in ${isFinite(ageH) ? Math.floor(ageH) + "h" : "—"} (limit ${staleLimit}h). The test may have stopped running.</div>`;
+    } else if (isSlow) {
+      flag = `<div class="speed-flag slow">Below this site's ${thr.min_down_mbps} Mbps floor.</div>`;
+    }
+
+    return `<div class="${cls}">
+      <div class="speed-site">${s.site_name || s.site_id}</div>
+      <div class="speed-meta">${when}${via ? " · " + via : ""}${l && l.port_name ? " · " + l.port_name : ""}</div>
+      <div class="speed-nums">
+        <div class="speed-num"><div class="v">${fmtSpeed(l?.download_mbps)}</div><div class="l">Down</div></div>
+        <div class="speed-num"><div class="v">${fmtSpeed(l?.upload_mbps)}</div><div class="l">Up</div></div>
+        <div class="speed-num"><div class="v">${l?.latency_ms != null ? l.latency_ms + " ms" : "—"}</div><div class="l">Latency</div></div>
+      </div>
+      ${speedSparkline(s.history || [])}
+      ${flag}
+    </div>`;
+  }).join("");
+}
+
 async function _initMainMap() {
   _loadMapLibre(async () => {
     const style = _getMapStyle();
@@ -1604,6 +1732,15 @@ async function loadDashboardGroups(){
   } catch(e) { /* silent — fall back to flat rendering */ }
 
   if (sidebarSession.loggedIn) loadDbPins().then(() => { if (servers.length) renderSidebar(); });
+
+  // Speed button appears only for logged-in users who actually have speed-test data.
+  // Anyone without an Omada controller should never see a button that opens an empty page.
+  if (sidebarSession.loggedIn) {
+    loadSpeedTests().then(() => {
+      const btn = document.getElementById("topbarSpeedBtn");
+      if (btn && _speedData && (_speedData.sites || []).length) btn.style.display = "";
+    });
+  }
 
   // Render login/logout button in topbar
   const authEl = document.getElementById("topbarAuthBtn");

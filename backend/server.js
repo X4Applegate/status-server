@@ -1208,6 +1208,49 @@ async function initDB() {
     await db.query("ALTER TABLE status_omada_controllers ADD COLUMN mode VARCHAR(16) NOT NULL DEFAULT 'standard'");
   } catch(e) { /* column already exists, ignore */ }
 
+  // Gateway WAN speed-test history, harvested from the controller's own scheduled tests.
+  // The controller keeps only ~2 rows per port, so this table is the ONLY long-term history.
+  // Speeds are stored in Mbps (the API returns bits/sec); rendering as Kbps is a view concern.
+  // tested_at is the result's own timestamp, never insert time, so the UNIQUE KEY dedupes the
+  // same result being polled repeatedly through the day. port_id is in the key because a
+  // dual-WAN gateway produces one row per port at nearly the same second.
+  await db.query(`
+    CREATE TABLE IF NOT EXISTS status_omada_speedtests (
+      id              INT AUTO_INCREMENT PRIMARY KEY,
+      controller_id   INT           NOT NULL,
+      site_id         VARCHAR(64)   NOT NULL,
+      site_name       VARCHAR(150)  DEFAULT NULL,
+      gateway_mac     VARCHAR(32)   NOT NULL,
+      port_id         INT           NOT NULL,
+      port_name       VARCHAR(64)   DEFAULT NULL,
+      tested_at       TIMESTAMP     NOT NULL,
+      download_mbps   DECIMAL(10,2) DEFAULT NULL,
+      upload_mbps     DECIMAL(10,2) DEFAULT NULL,
+      latency_ms      INT           DEFAULT NULL,
+      isp             VARCHAR(150)  DEFAULT NULL,
+      server_name     VARCHAR(150)  DEFAULT NULL,
+      server_location VARCHAR(150)  DEFAULT NULL,
+      created_at      TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+      UNIQUE KEY uniq_result (controller_id, site_id, gateway_mac, port_id, tested_at),
+      INDEX idx_site (controller_id, site_id, tested_at),
+      INDEX idx_tested (tested_at)
+    )
+  `);
+
+  // Per-site alert floor for Alert A. Absolute Mbps rather than one global number, because these
+  // sites sit on different ISPs and tiers — a shared threshold would be meaningless.
+  await db.query(`
+    CREATE TABLE IF NOT EXISTS status_omada_speedtest_thresholds (
+      controller_id  INT           NOT NULL,
+      site_id        VARCHAR(64)   NOT NULL,
+      min_down_mbps  DECIMAL(10,2) DEFAULT NULL,
+      min_up_mbps    DECIMAL(10,2) DEFAULT NULL,
+      stale_hours    INT           NOT NULL DEFAULT 36,
+      enabled        TINYINT(1)    NOT NULL DEFAULT 1,
+      updated_at     TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+      PRIMARY KEY (controller_id, site_id)
+    )
+  `);
 
   await db.query(`
     CREATE TABLE IF NOT EXISTS status_unifi_controllers (
@@ -1895,6 +1938,29 @@ async function omadaApiGet(controller, path) {
   return data.result;
 }
 
+// Authenticated POST, same URL shape and sanitizing as omadaApiGet.
+// Needed because a few Omada read endpoints are POST-with-a-query-body rather than GET —
+// notably speedTestResult/dateList, which takes the WAN portUuid in the body.
+async function omadaApiPost(controller, path, body) {
+  const safeBase  = await sanitizeBaseUrl(controller.base_url);
+  const safeId    = sanitizePathSegment(controller.omadac_id);
+  const [pathOnly, queryString] = path.split("?");
+  const safePath  = pathOnly.split("/").map(seg => seg.replace(/[^A-Za-z0-9\-_.:@!$&'()*+,;=~]/g, "")).join("/");
+  const token = await omadaGetToken(controller);
+  const url   = `${safeBase}/openapi/v1/${safeId}${safePath}${queryString ? "?" + queryString : ""}`;
+  const r = await fetch(url, {
+    method:     "POST",
+    headers:    { Authorization: `AccessToken=${token}`, "Content-Type": "application/json" },
+    body:       JSON.stringify(body || {}),
+    dispatcher: omadaDispatcher(controller.verify_tls),
+    signal:     AbortSignal.timeout(8000)
+  });
+  if (!r.ok) throw new Error(`${path} HTTP ${r.status}`);
+  const data = await r.json();
+  if (data.errorCode !== 0) throw new Error(data.msg || `${path} error`);
+  return data.result;
+}
+
 // Authenticated GET to /openapi/v1/msp/{mspId}<path>  (MSP mode — different URL shape)
 // mspId is the same value as omadacId in practice; if your controller exposes a separate
 // mspId, we'll switch to that field, but for now they're equal.
@@ -2547,6 +2613,286 @@ function tlsCertCheck(host, port = 443, warnDays = 14, timeout = 8000) {
     });
     socket.on("error", e => finish({ type:"tls_cert", ok:false, response_ms: Date.now()-t0, detail: e.message }));
     const timer = setTimeout(() => finish({ type:"tls_cert", ok:false, response_ms: Date.now()-t0, detail:"timeout" }), timeout);
+  });
+}
+
+// ---------------------------------------------------------------------------
+// Omada gateway WAN speed tests
+//
+// The CONTROLLER runs the tests on its own schedule (Anthem: daily 04:00, moved off 06:00
+// because that is store opening rush and a test saturates the site WAN for ~30s). This server
+// only ever READS the stored results — it must never POST /speedTest, which would fire a test
+// at an unpredictable moment on a live retail WAN.
+//
+// Two API traps, both of which previously looked like "the feature is broken":
+//   1. GET  .../speedTestResult          is the LIVE result. It returns an empty array whenever
+//                                        a test is not currently running. Empty is NOT evidence
+//                                        that scheduled tests never ran.
+//   2. POST .../speedTestResult/dateList is the history, and REQUIRES a portUuid. Without one it
+//                                        returns -33488 "The gateway is offline", which is
+//                                        misleading — it means "no port specified".
+// Port UUIDs come from GET /sites/{id}/wan-lan-status → wanList[].portId ("2_<uuid>").
+// ---------------------------------------------------------------------------
+
+// Result row `status`: 1 = valid measurement, 3 = test failed (dead WAN reports 0/0 with an
+// empty isp). The scheduler tests every configured WAN port including down ones, so without
+// this filter a site with one dead WAN has its average download halved by phantom zeros.
+const OMADA_SPEEDTEST_OK = 1;
+
+// The API reports throughput in bits per second (945036656 ≈ 945 Mbps).
+// Stored as Mbps; Kbps rendering is a view concern only (see fmtSpeed in the frontend).
+const bpsToMbps = (bps) =>
+  Number.isFinite(bps) && bps > 0 ? Math.round((bps / 1e6) * 100) / 100 : null;
+
+// Is this gateway capable of running a speed test at all?
+// featureState: 0 = supported · 1 = not supported but pre-configured · 2 = not supported.
+// Only the ER7412-M2 supports it across Anthem's fleet; three sites run ER7206/ER706W-4G and
+// will never produce data until the hardware is swapped. A POST returns errorCode 0 and reads
+// back as enabled even on unsupported hardware, so featureState is the only honest signal.
+// This distinction keeps the "no data" sites from alarming forever (Alert B).
+async function omadaSpeedTestSupported(controller, siteId) {
+  try {
+    const cfg = await omadaApiGet(controller, `/sites/${siteId}/setting/speedTest`);
+    const feats = cfg?.featureDescription || [];
+    if (!feats.length) return { supported: true, state: null };   // older firmware omits it
+    const state = feats[0]?.featureState;
+    return { supported: state === 0, state: state ?? null };
+  } catch(e) {
+    return { supported: false, state: null, error: e.message };
+  }
+}
+
+// Harvest new speed-test rows for every site on one controller.
+// Returns { inserted, sites, skipped } for logging.
+async function omadaSpeedTestHarvest(controller) {
+  let inserted = 0, sites = 0, skipped = 0;
+  const siteList = await omadaListSites(controller);
+
+  for (const site of siteList) {
+    const siteId = site.siteId;
+    if (!siteId) continue;
+
+    const cap = await omadaSpeedTestSupported(controller, siteId);
+    if (!cap.supported) { skipped++; continue; }
+
+    let gatewayMac = null, ports = [];
+    try {
+      const devices = await omadaListDevices(controller, siteId, site.customerId, site.name, site.customerName);
+      const gw = devices.find(d => {
+        const t = (d.type || d.deviceType || "").toString().toLowerCase();
+        const m = (d.model || d.modelName || d.product || "").toString().toUpperCase();
+        return t === "gateway" || t.includes("gateway") || /^ER\d/.test(m);
+      });
+      if (!gw?.mac) { skipped++; continue; }
+      gatewayMac = gw.mac;
+
+      // wanList[].portId is already "<portNumber>_<uuid>" — exactly what dateList wants.
+      const st = await omadaApiGet(controller, `/sites/${siteId}/wan-lan-status`);
+      const names = st?.portName || {};
+      ports = (st?.wanList || [])
+        .map(w => w.portId)
+        .filter(Boolean)
+        .map(uuid => ({ uuid, name: names[uuid] || null }));
+    } catch(e) {
+      addLog({ level:"warn", server:"omada", message:`Speed test: ${site.name || siteId} port discovery failed: ${e.message}` });
+      continue;
+    }
+
+    if (!ports.length) { skipped++; continue; }
+    sites++;
+
+    for (const port of ports) {
+      let rows = [];
+      try {
+        const res = await omadaApiPost(
+          controller,
+          `/sites/${siteId}/gateways/${gatewayMac}/speedTestResult/dateList`,
+          { portUuid: port.uuid, currentPage: 1, currentPageSize: 30 }
+        );
+        rows = res?.data || [];
+      } catch(e) {
+        addLog({ level:"warn", server:"omada", message:`Speed test: ${site.name || siteId} port ${port.uuid} history failed: ${e.message}` });
+        continue;
+      }
+
+      for (const r of rows) {
+        if (r.status !== OMADA_SPEEDTEST_OK) continue;      // drop failed-port rows
+        if (!r.time) continue;
+        try {
+          // INSERT IGNORE + the UNIQUE KEY does the dedupe: the controller returns the same
+          // result all day, and we poll far more often than once a day.
+          const [out] = await db.query(
+            `INSERT IGNORE INTO status_omada_speedtests
+               (controller_id, site_id, site_name, gateway_mac, port_id, port_name, tested_at,
+                download_mbps, upload_mbps, latency_ms, isp, server_name, server_location)
+             VALUES (?,?,?,?,?,?,FROM_UNIXTIME(?),?,?,?,?,?,?)`,
+            [ controller.id, siteId, site.name || null, gatewayMac,
+              r.portId ?? 0, port.name, r.time,
+              bpsToMbps(r.down), bpsToMbps(r.up),
+              Number.isFinite(r.latency) ? r.latency : null,
+              r.isp || null, r.serverName || null, r.serverLocation || null ]
+          );
+          if (out.affectedRows) inserted++;
+        } catch(e) {
+          addLog({ level:"warn", server:"omada", message:`Speed test insert failed for ${site.name || siteId}: ${e.message}` });
+        }
+      }
+    }
+  }
+  return { inserted, sites, skipped };
+}
+
+// Run the harvest across every configured controller. Scheduled, not per-check: results change
+// once a day, so there is nothing to gain from polling at check cadence.
+async function omadaSpeedTestHarvestAll() {
+  let controllers = [];
+  try {
+    const [rows] = await db.query("SELECT * FROM status_omada_controllers");
+    controllers = rows;
+  } catch(e) { return; }
+
+  for (const ctrl of controllers) {
+    try {
+      const { inserted, sites, skipped } = await omadaSpeedTestHarvest(ctrl);
+      if (inserted) {
+        addLog({ level:"info", server:"omada", message:`Speed test: +${inserted} result(s) from ${sites} site(s) on ${ctrl.name}${skipped ? ` (${skipped} without speed-test support)` : ""}` });
+      }
+    } catch(e) {
+      addLog({ level:"warn", server:"omada", message:`Speed test harvest failed on ${ctrl.name}: ${e.message}` });
+    }
+  }
+}
+
+// Alerting. Two distinct conditions, and B matters more than it looks:
+//   A. Speed degraded — latest download below this site's own floor. Per-site because these
+//      stores sit on different ISPs and tiers; one global number would be meaningless.
+//   B. No result in N hours — the test STOPPED. Controller offline, schedule disabled, gateway
+//      swapped. Silence is a failure mode: without B, a dead collector looks exactly like a
+//      healthy site whose number simply has not changed.
+//
+// Sites whose gateway cannot speed-test at all are never eligible for B — otherwise the three
+// ER7206/ER706W-4G stores would alarm forever for working as designed.
+//
+// State is persisted rather than held in memory so a restart does not re-fire an alert that is
+// already open, and so recovery can be detected.
+async function omadaSpeedTestAlertScan() {
+  try {
+    await db.query(`
+      CREATE TABLE IF NOT EXISTS status_omada_speedtest_alert_state (
+        controller_id INT         NOT NULL,
+        site_id       VARCHAR(64) NOT NULL,
+        kind          VARCHAR(16) NOT NULL,
+        active        TINYINT(1)  NOT NULL DEFAULT 1,
+        fired_at      TIMESTAMP   DEFAULT CURRENT_TIMESTAMP,
+        PRIMARY KEY (controller_id, site_id, kind)
+      )
+    `);
+  } catch(e) { return; }
+
+  let controllers = [];
+  try {
+    const [rows] = await db.query("SELECT * FROM status_omada_controllers");
+    controllers = rows;
+  } catch(e) { return; }
+
+  for (const ctrl of controllers) {
+    let thresholds = new Map();
+    try {
+      const [ts] = await db.query(
+        "SELECT * FROM status_omada_speedtest_thresholds WHERE controller_id=? AND enabled=1",
+        [ctrl.id]
+      );
+      thresholds = new Map(ts.map(t => [t.site_id, t]));
+    } catch(e) { continue; }
+    if (!thresholds.size) continue;      // nothing configured for this controller yet
+
+    // Latest successful result per site (across ports — the best WAN represents the site).
+    let latest = [];
+    try {
+      const [rows] = await db.query(
+        `SELECT s.site_id, s.site_name, s.download_mbps, s.upload_mbps, s.tested_at
+           FROM status_omada_speedtests s
+           JOIN (SELECT site_id, MAX(tested_at) AS mx
+                   FROM status_omada_speedtests
+                  WHERE controller_id=? GROUP BY site_id) m
+             ON m.site_id = s.site_id AND m.mx = s.tested_at
+          WHERE s.controller_id=?
+          ORDER BY s.download_mbps DESC`,
+        [ctrl.id, ctrl.id]
+      );
+      latest = rows;
+    } catch(e) { continue; }
+
+    const bySite = new Map();
+    for (const r of latest) if (!bySite.has(r.site_id)) bySite.set(r.site_id, r);
+
+    for (const [siteId, cfg] of thresholds) {
+      const row = bySite.get(siteId);
+      const siteLabel = row?.site_name || siteId;
+
+      // --- Alert B: staleness -------------------------------------------------
+      const staleHours = cfg.stale_hours || 36;
+      const ageHours = row ? (Date.now() - new Date(row.tested_at).getTime()) / 36e5 : Infinity;
+      const staleNow = ageHours > staleHours;
+      await omadaSpeedTestAlertTransition(ctrl, siteId, "stale", staleNow, {
+        server: `${siteLabel} speed test`,
+        host:   ctrl.name,
+        status: "degraded",
+        cause:  row
+          ? `No speed-test result in ${Math.floor(ageHours)}h (limit ${staleHours}h). Last result ${new Date(row.tested_at).toISOString()}.`
+          : `No speed-test result has ever been recorded for this site.`
+      });
+
+      // --- Alert A: degraded speed -------------------------------------------
+      // Skipped while stale — a missing result is Alert B's job, not a speed failure.
+      if (!row || staleNow || cfg.min_down_mbps == null) continue;
+      const down = Number(row.download_mbps);
+      const floor = Number(cfg.min_down_mbps);
+      const slowNow = Number.isFinite(down) && down < floor;
+      await omadaSpeedTestAlertTransition(ctrl, siteId, "slow", slowNow, {
+        server: `${siteLabel} internet speed`,
+        host:   ctrl.name,
+        status: "degraded",
+        cause:  `Download ${down} Mbps is below the ${floor} Mbps floor for this site (tested ${new Date(row.tested_at).toISOString()}).`
+      });
+    }
+  }
+}
+
+// Fire only on a state CHANGE — going bad, or recovering. An hourly scan that alerted every
+// pass on a still-slow site would train everyone to ignore it.
+async function omadaSpeedTestAlertTransition(ctrl, siteId, kind, badNow, evtBase) {
+  let wasActive = false;
+  try {
+    const [rows] = await db.query(
+      "SELECT active FROM status_omada_speedtest_alert_state WHERE controller_id=? AND site_id=? AND kind=?",
+      [ctrl.id, siteId, kind]
+    );
+    wasActive = rows.length ? !!rows[0].active : false;
+  } catch(e) { return; }
+
+  if (badNow === wasActive) return;     // no change
+
+  try {
+    await db.query(
+      `INSERT INTO status_omada_speedtest_alert_state (controller_id, site_id, kind, active)
+       VALUES (?,?,?,?) ON DUPLICATE KEY UPDATE active=VALUES(active), fired_at=CURRENT_TIMESTAMP`,
+      [ctrl.id, siteId, kind, badNow ? 1 : 0]
+    );
+  } catch(e) { return; }
+
+  fireWebhooks({
+    ...evtBase,
+    time: new Date(),
+    isRecovery: !badNow,
+    checks: [{ type: kind === "stale" ? "speedtest_stale" : "speedtest_slow", ok: !badNow, detail: evtBase.cause }],
+    serverGroupIds: []
+  }).catch(() => {});
+
+  addLog({
+    level: badNow ? "warn" : "info",
+    server: "omada",
+    message: `Speed test ${kind} ${badNow ? "ALERT" : "recovered"}: ${evtBase.server} — ${evtBase.cause}`
   });
 }
 
@@ -3946,6 +4292,107 @@ app.get("/api/status", requireAuth, async (req, res) => {
         && server.group_ids.some(groupId => allowedSet.has(Number(groupId))));
     }
     res.json(servers);
+  } catch (e) {
+    res.status(500).json({ error: "Server error" });
+  }
+});
+
+// Omada WAN speed tests — logged-in users only (Richard: not on the public page).
+// Returns one entry per site: the latest successful result plus `days` of history for a
+// sparkline, and a `supported` flag so the UI can say "this gateway can't speed-test" instead
+// of showing an alarming blank.
+app.get("/api/omada/speedtests", requireAuth, async (req, res) => {
+  try {
+    const days = Math.min(Math.max(parseInt(req.query.days || "30", 10) || 30, 1), 365);
+
+    // Scope to the controllers this user's groups can see, matching /api/status behaviour.
+    const allowed = await getUserAllowedGroupIds(req.session.userId, req.session.role);
+    let controllerIds = null;
+    if (allowed !== null) {
+      if (!allowed.length) return res.json({ days, sites: [] });
+      const [rows] = await db.query(
+        "SELECT DISTINCT controller_id FROM status_omada_controller_groups WHERE group_id IN (?)",
+        [allowed.map(Number)]
+      );
+      controllerIds = rows.map(r => r.controller_id);
+      if (!controllerIds.length) return res.json({ days, sites: [] });
+    }
+
+    const where = controllerIds ? "AND controller_id IN (?)" : "";
+    const args  = controllerIds ? [days, controllerIds] : [days];
+    const [rows] = await db.query(
+      `SELECT controller_id, site_id, site_name, port_id, port_name, tested_at,
+              download_mbps, upload_mbps, latency_ms, isp, server_name, server_location
+         FROM status_omada_speedtests
+        WHERE tested_at >= DATE_SUB(NOW(), INTERVAL ? DAY) ${where}
+        ORDER BY tested_at ASC`,
+      args
+    );
+
+    const [thr] = await db.query("SELECT * FROM status_omada_speedtest_thresholds");
+    const thrMap = new Map(thr.map(t => [`${t.controller_id}:${t.site_id}`, t]));
+
+    const sites = new Map();
+    for (const r of rows) {
+      const key = `${r.controller_id}:${r.site_id}`;
+      if (!sites.has(key)) {
+        sites.set(key, {
+          controller_id: r.controller_id, site_id: r.site_id, site_name: r.site_name,
+          latest: null, history: [], threshold: thrMap.get(key) || null
+        });
+      }
+      const entry = sites.get(key);
+      entry.history.push({
+        tested_at: r.tested_at, port_id: r.port_id, port_name: r.port_name,
+        download_mbps: r.download_mbps == null ? null : Number(r.download_mbps),
+        upload_mbps:   r.upload_mbps   == null ? null : Number(r.upload_mbps),
+        latency_ms: r.latency_ms
+      });
+      // Rows arrive oldest-first, so the last write wins as "latest". Where a site has two
+      // WANs the faster port represents the site — a backup leg should not drag the headline
+      // number down.
+      if (!entry.latest
+          || new Date(r.tested_at) > new Date(entry.latest.tested_at)
+          || (String(r.tested_at) === String(entry.latest.tested_at)
+              && Number(r.download_mbps) > Number(entry.latest.download_mbps))) {
+        entry.latest = {
+          tested_at: r.tested_at, port_id: r.port_id, port_name: r.port_name,
+          download_mbps: r.download_mbps == null ? null : Number(r.download_mbps),
+          upload_mbps:   r.upload_mbps   == null ? null : Number(r.upload_mbps),
+          latency_ms: r.latency_ms, isp: r.isp,
+          server_name: r.server_name, server_location: r.server_location
+        };
+      }
+    }
+
+    // Worst-first, so a degraded store surfaces without hunting for it.
+    const out = Array.from(sites.values()).sort((a, b) => {
+      const av = a.latest?.download_mbps ?? Infinity;
+      const bv = b.latest?.download_mbps ?? Infinity;
+      return av - bv;
+    });
+    res.json({ days, sites: out });
+  } catch (e) {
+    res.status(500).json({ error: "Server error" });
+  }
+});
+
+// Per-site alert floors. Admin-only: these numbers decide what pages people.
+app.post("/api/omada/speedtests/threshold", requireAdmin, async (req, res) => {
+  try {
+    const { controller_id, site_id, min_down_mbps, min_up_mbps, stale_hours, enabled } = req.body || {};
+    if (!controller_id || !site_id) return res.status(400).json({ error: "controller_id and site_id are required" });
+    const num = (v) => (v === "" || v == null ? null : Number(v));
+    await db.query(
+      `INSERT INTO status_omada_speedtest_thresholds
+         (controller_id, site_id, min_down_mbps, min_up_mbps, stale_hours, enabled)
+       VALUES (?,?,?,?,?,?)
+       ON DUPLICATE KEY UPDATE min_down_mbps=VALUES(min_down_mbps), min_up_mbps=VALUES(min_up_mbps),
+                               stale_hours=VALUES(stale_hours), enabled=VALUES(enabled)`,
+      [Number(controller_id), String(site_id), num(min_down_mbps), num(min_up_mbps),
+       Number(stale_hours) || 36, enabled === false || enabled === 0 ? 0 : 1]
+    );
+    res.json({ ok: true });
   } catch (e) {
     res.status(500).json({ error: "Server error" });
   }
@@ -7679,6 +8126,13 @@ app.use((err, req, res, next) => {
   // History retention: batched prune shortly after boot, then hourly.
   setTimeout(() => { pruneHistoryBatched().catch(() => {}); }, 90 * 1000);
   setInterval(() => { pruneHistoryBatched().catch(() => {}); }, 60 * 60 * 1000);
+  // Omada speed tests: the controller runs them once a day and keeps only ~2 rows per port,
+  // so this harvest is the only thing that builds long-term history — it must not miss a day.
+  // Every 30 min is ample to notice the new 04:00 result; INSERT IGNORE makes re-reads free.
+  setTimeout(() => { omadaSpeedTestHarvestAll().catch(() => {}); }, 45 * 1000);
+  setInterval(() => { omadaSpeedTestHarvestAll().catch(() => {}); }, 30 * 60 * 1000);
+  setTimeout(() => { omadaSpeedTestAlertScan().catch(() => {}); }, 120 * 1000);
+  setInterval(() => { omadaSpeedTestAlertScan().catch(() => {}); }, 60 * 60 * 1000);
   // Graceful shutdown. Container orchestrators send SIGTERM; Ctrl-C sends
   // SIGINT. We stop accepting new connections, end SSE streams, close the
   // DB pool, then exit. A 10s hard-kill guards against hung drains.
