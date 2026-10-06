@@ -27,7 +27,7 @@
     "undici": "^8.10.2"
   },
   "overrides": {
-    "ip-address": "^10.4.0",
+    "ip-address": "^10.7.3",
     "mysql2": "$mysql2"
   }
 }
