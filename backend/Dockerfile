@@ -9,7 +9,7 @@ FROM node:26-alpine
 # in Scout. Runs before we add our own packages so the cache invalidates
 # whenever upstream publishes new patches.
 RUN apk upgrade --no-cache \
- && apk add --no-cache iputils wget \
+ && apk add --no-cache iputils wget tini \
  && rm -rf /var/cache/apk/*
 
 # Writable config directory owned by the built-in non-root `node` user.
@@ -43,4 +43,9 @@ USER node
 HEALTHCHECK --interval=30s --timeout=5s --start-period=20s --retries=3 \
   CMD wget -qO- http://127.0.0.1:3000/healthz || exit 1
 
+# tini runs as PID 1 instead of node. Node as PID 1 ignores SIGTERM until its
+# own handler is installed (so `docker stop` during boot waited for SIGKILL)
+# and never reaps orphaned children — timed-out healthcheck wgets and ping
+# children were left behind as zombies. tini forwards signals and reaps them.
+ENTRYPOINT ["/sbin/tini", "--"]
 CMD ["node", "server.js"]

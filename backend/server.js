@@ -1250,17 +1250,6 @@ async function initDB() {
   try {
     await db.query("ALTER TABLE status_square_accounts ADD COLUMN created_by INT DEFAULT NULL");
   } catch(e) { /* column already exists */ }
-  // Many-to-many: Square accounts can be assigned to multiple groups, and viewers assigned
-  // to any of those groups can see/use the account in their server checks.
-  await db.query(`
-    CREATE TABLE IF NOT EXISTS status_square_account_groups (
-      account_id INT NOT NULL,
-      group_id   INT NOT NULL,
-      PRIMARY KEY (account_id, group_id),
-      FOREIGN KEY (account_id) REFERENCES status_square_accounts(id) ON DELETE CASCADE,
-      FOREIGN KEY (group_id)   REFERENCES status_groups(id)          ON DELETE CASCADE
-    )
-  `);
 
   await db.query(`
     CREATE TABLE IF NOT EXISTS status_groups (
@@ -1321,6 +1310,20 @@ async function initDB() {
   try {
     await db.query("ALTER TABLE status_groups ADD COLUMN layout ENUM('default','minimal','grid') NOT NULL DEFAULT 'default'");
   } catch(e) { /* column already exists */ }
+
+  // Many-to-many: Square accounts can be assigned to multiple groups, and viewers assigned
+  // to any of those groups can see/use the account in their server checks.
+  // Must be created after status_groups: on a fresh database the FK below fails
+  // with errno 150 if the referenced table does not exist yet.
+  await db.query(`
+    CREATE TABLE IF NOT EXISTS status_square_account_groups (
+      account_id INT NOT NULL,
+      group_id   INT NOT NULL,
+      PRIMARY KEY (account_id, group_id),
+      FOREIGN KEY (account_id) REFERENCES status_square_accounts(id) ON DELETE CASCADE,
+      FOREIGN KEY (group_id)   REFERENCES status_groups(id)          ON DELETE CASCADE
+    )
+  `);
 
   // Beta: email subscriptions — allow public visitors to opt in to down/recovery alerts
   await db.query(`
@@ -7709,4 +7712,11 @@ app.use((err, req, res, next) => {
   }
   process.on("SIGTERM", () => shutdown("SIGTERM"));
   process.on("SIGINT",  () => shutdown("SIGINT"));
-})();
+})().catch((err) => {
+  // A failed boot (schema error, DB still unreachable after initDB's retries)
+  // must exit so the container restart policy retries it. The global
+  // unhandledRejection handler only logs, which left the process running
+  // without ever binding its port.
+  logger.fatal({ err }, "Startup failed");
+  process.exit(1);
+});

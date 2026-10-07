@@ -8,7 +8,10 @@ All notable changes to this project are documented here.
 
 ## [Unreleased]
 
-_Nothing yet._
+### Fixed
+- **Fresh installs never finished booting (since 3.1.8).** `initDB()` created `status_square_account_groups`, whose foreign key references `status_groups`, before `status_groups` existed — so on an empty database MariaDB/MySQL rejected it with errno 150 and the server never bound its port. Existing databases were unaffected because `status_groups` was already present. The table is now created after `status_groups`, and `v31611-fresh-install-boot.test.js` asserts that every `REFERENCES` target is created earlier in `initDB()`.
+- **A failed boot left a running process that never served.** The startup sequence had no error handling and the global `unhandledRejection` handler only logs, so a schema error — or a database still unreachable after `initDB()`'s retries — left the container `Up (unhealthy)` indefinitely; Docker's restart policy only acts on exit. Startup failures now log at `fatal` and exit 1, so the restart policy retries and the server recovers on its own once a remote database comes back.
+- **The image now runs `tini` as PID 1.** Node as PID 1 ignores SIGTERM until its own handler is installed — which only happens once startup completes — so `docker stop` during boot always waited out the grace period and was SIGKILLed. Node as PID 1 also never reaps orphaned children: healthcheck `wget`s killed on timeout (and `ping` children) were left as zombies — a production container was found holding 38. `tini` forwards signals to node (graceful shutdown is unchanged) and reaps orphans.
 
 ## [3.16.10] — 2026-09-25
 
