@@ -481,6 +481,93 @@ app.use(session({ // codeql[js/missing-token-validation] - CSRF mitigated via Cl
   }
 }));
 
+// -- Session revalidation ------------------------------------------------------
+// The session holds a copy of the user's role taken at login. Re-check it
+// against status_users on every request that carries a session userId, so a
+// demotion, promotion, deletion or password reset applies on the next request
+// instead of when the 24h cookie expires. Lookups go through a per-user cache
+// (TTL 5 s; the DB may be remote) that this process clears whenever it updates
+// or deletes a user, so its own changes are visible immediately. Changes made
+// by another process or directly in the DB take effect within the TTL.
+const SESSION_USER_TTL_MS = 5000;
+const sessionUserCache    = new Map(); // userId -> { at, user }  (user null = deleted)
+const sessionUserInflight = new Map(); // userId -> { gen, promise }  (dedupes concurrent lookups)
+const sessionUserGen      = new Map(); // userId -> invalidation counter
+let   sessionUserFailLogAt = 0;
+
+// Short digest of the stored bcrypt hash. Kept in the session (as `pwv`) so a
+// password change invalidates every session created with the old password.
+function passwordFingerprint(hash) {
+  return crypto.createHash("sha256").update(String(hash || "")).digest("base64url").slice(0, 16);
+}
+
+function invalidateSessionUser(userId) {
+  const id = Number(userId);
+  sessionUserCache.delete(id);
+  sessionUserInflight.delete(id);
+  sessionUserGen.set(id, (sessionUserGen.get(id) || 0) + 1);
+}
+
+function loadSessionUser(userId) {
+  const id = Number(userId);
+  const hit = sessionUserCache.get(id);
+  if (hit && Date.now() - hit.at < SESSION_USER_TTL_MS) return Promise.resolve(hit.user);
+  const pending = sessionUserInflight.get(id);
+  if (pending) return pending.promise;
+  const gen = sessionUserGen.get(id) || 0;
+  const entry = { gen, promise: null };
+  entry.promise = (async () => {
+    try {
+      const [rows] = await db.query("SELECT username, role, password_hash FROM status_users WHERE id=?", [id]);
+      const user = rows.length
+        ? { username: rows[0].username, role: rows[0].role, pwv: passwordFingerprint(rows[0].password_hash) }
+        : null;
+      // Don't cache a result that an invalidation raced past while the query ran.
+      if ((sessionUserGen.get(id) || 0) === gen) sessionUserCache.set(id, { at: Date.now(), user });
+      return user;
+    } finally {
+      if (sessionUserInflight.get(id) === entry) sessionUserInflight.delete(id);
+    }
+  })();
+  sessionUserInflight.set(id, entry);
+  return entry.promise;
+}
+
+app.use(async function revalidateSessionUser(req, res, next) {
+  const s = req.session;
+  if (!s || !s.userId) return next();
+  let user;
+  try {
+    if (!db) throw new Error("database not initialised");
+    user = await loadSessionUser(s.userId);
+  } catch (err) {
+    // DB unavailable: keep the session exactly as it is (its last known role)
+    // rather than logging everyone out on a blip. This never grants more than
+    // the session already had. Logged at most once a minute.
+    if (Date.now() - sessionUserFailLogAt > 60000) {
+      sessionUserFailLogAt = Date.now();
+      addLog({ level:"warn", server:"auth", message:`Session revalidation skipped (DB lookup failed): ${err.message}` });
+    }
+    return next();
+  }
+  if (!user || (s.pwv && s.pwv !== user.pwv)) {
+    // User deleted or password changed since this session was created: log
+    // the session out. regenerate() destroys it in the store and leaves an
+    // empty session, so the request continues as anonymous (401 / redirect).
+    return s.regenerate(err => {
+      if (err && req.session) {
+        delete req.session.userId; delete req.session.role;
+        delete req.session.username; delete req.session.pwv;
+      }
+      next();
+    });
+  }
+  if (!s.pwv) s.pwv = user.pwv;  // sessions created before this check existed
+  if (s.role !== user.role) s.role = user.role;
+  if (s.username !== user.username) s.username = user.username;
+  next();
+});
+
 // Apply general rate limiting to all /api/* routes.
 app.use("/api/", apiLimiter);
 
@@ -3622,13 +3709,16 @@ async function computeLoginRedirect(userId, role) {
 // identity to the fresh session. This prevents session fixation: any session id
 // the client held before logging in (which an attacker could have planted) is
 // discarded and replaced with a new one bound to the authenticated user.
-function establishSession(req, { userId, username, role }) {
+// passwordHash (when known) pins the session to the current password so that a
+// later password change revokes it; see revalidateSessionUser.
+function establishSession(req, { userId, username, role, passwordHash }) {
   return new Promise((resolve, reject) => {
     req.session.regenerate(err => {
       if (err) return reject(err);
       req.session.userId   = userId;
       req.session.username = username;
       req.session.role     = role;
+      if (passwordHash !== undefined) req.session.pwv = passwordFingerprint(passwordHash);
       req.session.save(saveErr => (saveErr ? reject(saveErr) : resolve()));
     });
   });
@@ -3656,7 +3746,7 @@ app.post("/api/login", loginLimiter, async (req, res) => {
       addAuditLog({ userId: rows[0].id, username, action:"login.failed", detail:"wrong password", ip: req.ip });
       return res.status(401).json({ error:"Invalid credentials" });
     }
-    await establishSession(req, { userId: rows[0].id, username: rows[0].username, role: rows[0].role });
+    await establishSession(req, { userId: rows[0].id, username: rows[0].username, role: rows[0].role, passwordHash: rows[0].password_hash });
     addLog({ level:"info", server:"auth", message:`Login: ${username} (${rows[0].role})` });
     addAuditLog({ userId: rows[0].id, username, action:"login", detail: rows[0].role, ip: req.ip });
     const redirect = await computeLoginRedirect(rows[0].id, rows[0].role);
@@ -3685,7 +3775,7 @@ app.post("/api/setup", setupLimiter, async (req, res) => {
     if (users[0].cnt > 0) return res.status(403).json({ error: "Setup already completed — use the login form" });
     const hash = await bcrypt.hash(password, 10);
     const [result] = await db.query("INSERT INTO status_users (username, password_hash, role) VALUES (?, ?, 'admin')", [username, hash]);
-    await establishSession(req, { userId: result.insertId, username, role: "admin" });
+    await establishSession(req, { userId: result.insertId, username, role: "admin", passwordHash: hash });
     addLog({ level:"info", server:"system", message:`First admin account created: ${username}` });
     addAuditLog({ userId: result.insertId, username, action:"user.setup", detail:"initial admin created", ip: req.ip });
     res.json({ ok: true, redirect: "/admin?welcome=1" });
@@ -3787,7 +3877,7 @@ app.get("/auth/google/callback", loginLimiter, async (req, res) => {
       addAuditLog({ userId: user.id, username, action:"user.create", resourceType:"user", resourceId: user.id, resourceName: username, detail:"google-oauth auto-created", ip: req.ip });
     }
 
-    await establishSession(req, { userId: user.id, username: user.username, role: user.role });
+    await establishSession(req, { userId: user.id, username: user.username, role: user.role, passwordHash: user.password_hash });
     addLog({ level:"info", server:"auth", message:`Google OAuth login: ${user.username} (${user.role})` });
     addAuditLog({ userId: user.id, username: user.username, action:"login", detail:`google-oauth / ${user.role}`, ip: req.ip });
     const redirect = await computeLoginRedirect(user.id, user.role);
@@ -3927,6 +4017,9 @@ app.post("/api/admin/change-password", requireAdmin, async (req, res) => {
     if (!valid) return res.status(401).json({ error:"Current password incorrect" });
     const hash = await bcrypt.hash(newPassword, 10);
     await db.query("UPDATE status_users SET password_hash = ? WHERE id = ?", [hash, req.session.userId]);
+    // Keep this session, revoke the user's other sessions (see revalidateSessionUser).
+    invalidateSessionUser(req.session.userId);
+    req.session.pwv = passwordFingerprint(hash);
     addLog({ level:"info", server:"auth", message:`Password changed: ${rows[0].username}` });
     addAuditLog({ userId: req.session.userId, username: req.session.username, action:"password.change", resourceType:"user", resourceId: req.session.userId, resourceName: rows[0].username, ip: req.ip });
     res.json({ ok:true });
@@ -4986,9 +5079,14 @@ app.put("/api/admin/users/:id", requireAdmin, async (req, res) => {
       if (password.length < 8) return res.status(400).json({ error:"Password must be at least 8 characters" });
       const hash = await bcrypt.hash(password, 10);
       await db.query("UPDATE status_users SET username=?, role=?, password_hash=?, first_name=?, last_name=?, email=? WHERE id=?", [username, role, hash, fn, ln, em, req.params.id]);
+      // A password reset revokes the user's sessions; an admin resetting their
+      // own password keeps the session they are using.
+      if (parseInt(req.params.id) === req.session.userId) req.session.pwv = passwordFingerprint(hash);
     } else {
       await db.query("UPDATE status_users SET username=?, role=?, first_name=?, last_name=?, email=? WHERE id=?", [username, role, fn, ln, em, req.params.id]);
     }
+    // Role/username/password changes apply to the user's sessions on their next request.
+    invalidateSessionUser(req.params.id);
     // Only viewers can have explicit group restrictions; admins always see all
     if (role === "viewer" && Array.isArray(allowed_group_ids)) {
       await setUserGroupGrants(parseInt(req.params.id), allowed_group_ids);
@@ -5020,6 +5118,7 @@ app.delete("/api/admin/users/:id", requireAdmin, async (req, res) => {
     }
     await db.query("DELETE FROM status_user_groups WHERE user_id=?", [req.params.id]);
     await db.query("DELETE FROM status_users WHERE id=?", [req.params.id]);
+    invalidateSessionUser(req.params.id);  // their sessions are logged out on the next request
     addLog({ level:"warn", server:"admin", message:`Deleted user: ${rows[0].username}` });
     addAuditLog({ userId: req.session.userId, username: req.session.username, action:"user.delete", resourceType:"user", resourceId: req.params.id, resourceName: rows[0].username, ip: req.ip });
     res.json({ ok:true });
@@ -6187,6 +6286,9 @@ app.post("/api/change-password", requireAuth, loginLimiter, async (req, res) => 
     if (!valid) return res.status(401).json({ error:"Current password incorrect" });
     const hash = await bcrypt.hash(newPassword, 10);
     await db.query("UPDATE status_users SET password_hash = ? WHERE id = ?", [hash, req.session.userId]);
+    // Keep this session, revoke the user's other sessions (see revalidateSessionUser).
+    invalidateSessionUser(req.session.userId);
+    req.session.pwv = passwordFingerprint(hash);
     addLog({ level:"info", server:"auth", message:`Password changed: ${rows[0].username}` });
     addAuditLog({ userId: req.session.userId, username: req.session.username, action:"password.change", resourceType:"user", resourceId: req.session.userId, resourceName: rows[0].username, ip: req.ip });
     res.json({ ok:true });
