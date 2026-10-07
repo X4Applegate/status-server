@@ -6,7 +6,7 @@ All notable changes to this project are documented here.
 
 ---
 
-## [Unreleased]
+## [3.16.11] — 2026-10-07
 
 ### Fixed
 - **Fresh installs never finished booting (since 3.1.8).** `initDB()` created `status_square_account_groups`, whose foreign key references `status_groups`, before `status_groups` existed — so on an empty database MariaDB/MySQL rejected it with errno 150 and the server never bound its port. Existing databases were unaffected because `status_groups` was already present. The table is now created after `status_groups`, and `v31611-fresh-install-boot.test.js` asserts that every `REFERENCES` target is created earlier in `initDB()`.
