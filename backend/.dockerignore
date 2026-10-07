@@ -32,5 +32,6 @@ build
 # Tests (not needed at runtime)
 test
 tests
+test-support
 *.test.js
 coverage
