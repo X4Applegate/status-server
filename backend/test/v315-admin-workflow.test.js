@@ -52,7 +52,8 @@ test("quick-status endpoint broadcasts via SSE", () => {
     'app.patch("/api/admin/servers/:id/status"',
     "// -- User Management"
   );
-  assert.match(route, /sseClients/);
+  // Through the per-client filtered broadcaster (see live-anon-exposure.test.js).
+  assert.match(route, /broadcastToSseClients\(\)/);
 });
 
 test("quick-status endpoint records an audit log entry", () => {
