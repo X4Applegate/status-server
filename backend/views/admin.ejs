@@ -2300,9 +2300,10 @@ async function renderTopbarDashboards(){
     const r = await fetch("/api/admin/groups");
     if (!r.ok) return;
     const groups = await r.json();
+    // Group names and colours are set by managers: escape them, admins see these pills.
     const makePill = (dot, href, label, extra="") =>
-      `<a class="dash-nav ${extra}" href="${href}">
-        <span class="dash-nav-dot" style="background:${dot}"></span>${label}</a>`;
+      `<a class="dash-nav ${extra}" href="${_escHtml(href)}">
+        <span class="dash-nav-dot" style="background:${_escHtml(dot)}"></span>${_escHtml(label)}</a>`;
     const pills = groups.map(g => {
       const dot  = g.accent_color || "var(--blue)";
       const href = g.custom_domain ? `https://${g.custom_domain}` : `/dashboard/${g.slug}`;
