@@ -2743,18 +2743,26 @@ async function recordHistory(def, checks, overall) {
         "INSERT INTO status_incident_updates (incident_id, status, message) VALUES (?,?,?)",
         [ins.insertId, "investigating", detectionMsg]
       );
-    } else if (overall === "up" && open.length > 0) {
+    } else if (overall === "up" && open.length > 0 && checks.length > 0 && checks.every(c => c.ok)) {
       // Auto-close open incident. If an operator hasn't manually moved the status
       // past "investigating" we still mark it resolved and append a recovery update.
+      // Only a real passing check result may do this: during the failure-threshold
+      // grace period (e.g. the first polls after a restart) `overall` can read
+      // "up" while every check is still failing, which once resolved a live
+      // incident and then reopened a duplicate (2026-10-07).
       const dur = Math.round((now - new Date(open[0].started_at)) / 1000);
-      await db.query(
-        "UPDATE status_incidents SET ended_at=?, duration_s=?, status='resolved' WHERE id=?",
+      // Conditional on still being open, so this and autoResolveIncidents()
+      // can't both append a "resolved" update for the same recovery.
+      const [upd] = await db.query(
+        "UPDATE status_incidents SET ended_at=?, duration_s=?, status='resolved' WHERE id=? AND ended_at IS NULL",
         [now, dur, open[0].id]
       );
-      await db.query(
-        "INSERT INTO status_incident_updates (incident_id, status, message) VALUES (?,?,?)",
-        [open[0].id, "resolved", `Automated checks are passing again. Service restored after ${fmtDuration(dur)}.`]
-      );
+      if (upd.affectedRows) {
+        await db.query(
+          "INSERT INTO status_incident_updates (incident_id, status, message) VALUES (?,?,?)",
+          [open[0].id, "resolved", `Automated checks are passing again. Service restored after ${fmtDuration(dur)}.`]
+        );
+      }
     }
 
     // Retention (deleting rows older than 90 days) is no longer done here on
@@ -3489,6 +3497,49 @@ async function fireSubscriberEmails(evt) {
 }
 
 // -- Poll ----------------------------------------------------------------------
+// `cause` written on incidents an operator opens by hand (POST /api/admin/incidents).
+// It is the only thing that tells them apart from auto-created ones.
+const MANUAL_INCIDENT_CAUSE = "manually opened by operator";
+
+// Boot-time restore of the committed monitor state. serverStatus lives only in
+// memory, so after a restart every server starts "pending" with no fail streak.
+// For a server that was already down, the first polls then fall into the
+// failure-threshold grace period, which reads as "up": that resolved its open
+// incident, and once the threshold was reached again it looked like a fresh
+// UP -> DOWN transition (duplicate incident + second DOWN alert; 2026-10-07).
+// An open auto-created incident means the previous process had committed the
+// server as down, so resume from there: further failures change nothing and the
+// first real passing check is a normal DOWN -> UP recovery (alert + resolve).
+async function seedStatusFromOpenIncidents() {
+  try {
+    const [rows] = await db.query(
+      "SELECT DISTINCT server_id FROM status_incidents WHERE ended_at IS NULL AND status <> 'resolved' AND (cause IS NULL OR cause <> ?)",
+      [MANUAL_INCIDENT_CAUSE]
+    );
+    let seeded = 0;
+    for (const { server_id } of rows) {
+      const sid = String(server_id);
+      const def = serverConfig.find(s => s.id === sid);
+      const st  = Object.hasOwn(serverStatus, sid) ? serverStatus[sid] : null;
+      if (!def || !st || def.enabled === false || (st.overall && st.overall !== "pending")) continue;
+      // Down vs degraded comes from the last stored batch of check results
+      // (all checks of one poll share checked_at). If that batch passed, the
+      // incident is stale rather than live; let the next poll decide.
+      const [last] = await db.query(
+        "SELECT ok FROM status_history WHERE server_id=? AND checked_at=(SELECT MAX(checked_at) FROM status_history WHERE server_id=?)",
+        [sid, sid]
+      );
+      if (last.length && last.every(r => r.ok)) continue;
+      st.overall    = last.some(r => r.ok) ? "degraded" : "down";
+      st.failStreak = Math.max(1, def.failure_threshold || 1);
+      seeded++;
+    }
+    if (seeded) addLog({ level:"info", server:"system", message:`Restored DOWN state for ${seeded} server(s) with open incidents` });
+  } catch(e) {
+    addLog({ level:"warn", server:"system", message:`Restoring monitor state from open incidents failed: ${e.message}` });
+  }
+}
+
 // Auto-resolve open incidents when a service recovers.
 // Adds a system recovery update and marks the incident resolved.
 async function autoResolveIncidents(serverId, nowIso) {
@@ -3498,13 +3549,16 @@ async function autoResolveIncidents(serverId, nowIso) {
   );
   for (const inc of open) {
     const durationS = Math.round((new Date(nowIso) - new Date(inc.started_at)) / 1000);
+    // Claim the incident first; recordHistory() may be resolving it concurrently,
+    // and only the writer that actually closes it appends the "resolved" update.
+    const [upd] = await db.query(
+      "UPDATE status_incidents SET status='resolved', ended_at=?, duration_s=? WHERE id=? AND status <> 'resolved'",
+      [new Date(nowIso), durationS, inc.id]
+    );
+    if (!upd.affectedRows) continue;
     await db.query(
       "INSERT INTO status_incident_updates (incident_id, status, message, created_at) VALUES (?,?,?,?)",
       [inc.id, "resolved", `Service recovered — automatically detected at ${new Date(nowIso).toUTCString()}.`, new Date(nowIso)]
-    );
-    await db.query(
-      "UPDATE status_incidents SET status='resolved', ended_at=?, duration_s=? WHERE id=?",
-      [new Date(nowIso), durationS, inc.id]
     );
   }
 }
@@ -6580,7 +6634,7 @@ app.post("/api/admin/incidents", requireAdmin, async (req, res) => {
   try {
     const [result] = await db.query(
       "INSERT INTO status_incidents (server_id, server_name, started_at, cause, title, status, impact, public) VALUES (?,?,NOW(),?,?,?,?,?)",
-      [server_id, def.name, "manually opened by operator", cleanTitle, status, impact, is_public ? 1 : 0]
+      [server_id, def.name, MANUAL_INCIDENT_CAUSE, cleanTitle, status, impact, is_public ? 1 : 0]
     );
     const incidentId = result.insertId;
     await db.query(
@@ -7831,6 +7885,7 @@ app.use((err, req, res, next) => {
 (async () => {
   await initDB();
   await loadConfig();
+  await seedStatusFromOpenIncidents();
   await refreshMaintenanceCache();
   // Start serving as soon as core state is ready; slow first-poll checks should
   // not block the health endpoint or the dashboard from binding its port.
