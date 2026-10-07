@@ -384,6 +384,8 @@ const UNSAFE_OBJECT_KEYS = new Set(["__proto__", "constructor", "prototype"]);
 function isSafeObjectKey(key) { return typeof key === "string" && !UNSAFE_OBJECT_KEYS.has(key); }
 let sseClients   = [];
 let logClients   = [];
+// Ids of groups with public_enabled=1, refreshed by loadConfig(); see canReadGroup().
+let publicGroupIds = new Set();
 // Alert debounce: hold DOWN alerts for 5 min; cancel if server recovers first
 const pendingDownAlerts = new Map(); // serverId → { timer, evt }
 const sentDownAlerts    = new Set(); // serverIds whose down-alert was actually fired
@@ -1509,6 +1511,9 @@ async function loadConfig() {
     for (const m of mapRows) {
       (groupsByServer[m.server_id] ||= []).push(m.group_id);
     }
+    // Snapshot for the anonymous-visibility checks (see canReadGroup below).
+    const [publicRows] = await db.query("SELECT id FROM status_groups WHERE public_enabled=1");
+    publicGroupIds = new Set(publicRows.map(g => Number(g.id)));
     serverConfig = rows.map(r => ({
       id:                r.id,
       name:              r.name,
@@ -3580,15 +3585,7 @@ async function pollAll(force = false) {
     recordHistory(def, checks, overall).catch(() => {});
   }));
 
-  // Each SSE client gets a payload filtered to what they're allowed to see —
-  // admins get everything, viewers get their granted groups, and anonymous
-  // visitors get an allowlisted payload for their exact dashboard group.
-  const all = Object.values(serverStatus);
-  sseClients = sseClients.filter(r => !r.writableEnded);
-  sseClients.forEach(r => {
-    const subset = filterServersForSseClient(r, all);
-    r.write(`data: ${JSON.stringify(subset)}\n\n`);
-  });
+  broadcastToSseClients();
   lastPollAt = Date.now();
 }
 
@@ -3983,18 +3980,17 @@ app.get("/api/events", async (req, res) => {
   }
   // A public status page always connects with its group slug. Resolve it once
   // so both this initial event and later broadcasts stay within that dashboard.
-  // Anonymous connections without a valid slug intentionally receive no rows.
+  // Anonymous connections without the slug of a public group receive no rows.
   res._publicGroupId = null;
   if (!res._authed && res._slug) {
     try {
-      const [groups] = await db.query("SELECT id FROM status_groups WHERE slug=? LIMIT 1", [res._slug]);
-      res._publicGroupId = groups.length ? Number(groups[0].id) : null;
+      const [groups] = await db.query("SELECT id, public_enabled FROM status_groups WHERE slug=? LIMIT 1", [res._slug]);
+      res._publicGroupId = groups.length && groups[0].public_enabled ? Number(groups[0].id) : null;
     } catch(e) {
       res._publicGroupId = null;
     }
   }
-  const initial = filterServersForSseClient(res, Object.values(serverStatus));
-  res.write(`data: ${JSON.stringify(initial)}\n\n`);
+  sendServersToSseClient(res);
   sseClients.push(res);
   req.on("close", () => { sseClients = sseClients.filter(c=>c!==res); });
 });
@@ -4008,11 +4004,28 @@ function filterServersForSseClient(res, all) {
   if (res._authed) {
     return all.filter(s => Array.isArray(s.group_ids) && s.group_ids.some(gid => res._allowed.has(gid)));
   }
-  return serializePublicServers(all, {
-    // NaN is deliberate when no valid slug was resolved: the serializer then
-    // returns an empty list instead of exposing every public dashboard at once.
-    groupId: res._publicGroupId === null ? Number.NaN : res._publicGroupId,
-  });
+  // Anonymous: exactly what /api/public/group/:slug shows for the one public
+  // dashboard being viewed. Re-checked on every write, so a group made private
+  // stops streaming at the next loadConfig() even to connected visitors.
+  const gid = res._publicGroupId;
+  if (gid === null || !publicGroupIds.has(gid)) return [];
+  all = all.filter(s => s.enabled !== false);
+  return serializePublicServers(all, { groupId: gid });
+}
+
+// Every server-list write to /api/events must go through these two functions,
+// never straight to sseClients: each client may only receive its own
+// filterServersForSseClient() view, so anonymous visitors never see hosts,
+// runbooks, check details or private groups.
+function sendServersToSseClient(res, all = Object.values(serverStatus)) {
+  if (res.writableEnded) return;
+  try { res.write(`data: ${JSON.stringify(filterServersForSseClient(res, all))}\n\n`); } catch(_) {}
+}
+
+function broadcastToSseClients() {
+  sseClients = sseClients.filter(r => !r.writableEnded);
+  const all = Object.values(serverStatus);
+  sseClients.forEach(r => sendServersToSseClient(r, all));
 }
 
 // Logs reveal internal system state — admin only
@@ -4487,11 +4500,7 @@ app.delete("/api/admin/servers/:id", requireAdmin, async (req, res) => {
     await loadConfig();
     addLog({ level:"warn", server:"admin", message:`Removed: ${rows[0].name}` });
     addAuditLog({ userId: req.session.userId, username: req.session.username, action:"server.delete", resourceType:"server", resourceId: req.params.id, resourceName: rows[0].name, ip: req.ip });
-    // Each client gets their own filtered subset (same per-client filter as pollAll)
-    const all = Object.values(serverStatus);
-    sseClients.filter(r=>!r.writableEnded).forEach(r => {
-      r.write(`data: ${JSON.stringify(filterServersForSseClient(r, all))}\n\n`);
-    });
+    broadcastToSseClients();
     res.json({ ok:true });
   } catch(err) {
     res.status(500).json({ error:err.message });
@@ -4567,8 +4576,7 @@ app.post("/api/admin/servers/bulk", requireManager, async (req, res) => {
         serverStatus[id] = { ...(Object.hasOwn(serverStatus, id) ? serverStatus[id] : {}), overall: status, checks: [result], lastChecked: now };
         await recordHistory(def, [result], status).catch(() => {});
       }
-      const all = Object.values(serverStatus);
-      sseClients.filter(r => !r.writableEnded).forEach(r => { try { r.write(`data: ${JSON.stringify(all)}\n\n`); } catch(_) {} });
+      broadcastToSseClients();
     }
     await loadConfig();
     addLog({ level:"info", server:"admin", message:`Bulk ${action}: ${safeIds.length} server(s) by ${req.session.username}` });
@@ -4587,8 +4595,7 @@ app.patch("/api/admin/servers/:id/status", requireManager, async (req, res) => {
   const result = { type:"external", ok: status === "up", detail: `set by ${req.session.username} via admin`, response_ms: null };
   serverStatus[def.id] = { ...(serverStatus[def.id] || {}), overall: status, checks: [result], lastChecked: new Date().toISOString() };
   await recordHistory(def, [result], status).catch(() => {});
-  const all = Object.values(serverStatus);
-  sseClients.filter(r => !r.writableEnded).forEach(r => { try { r.write(`data: ${JSON.stringify(all)}\n\n`); } catch(_) {} });
+  broadcastToSseClients();
   addAuditLog({ userId: req.session.userId, username: req.session.username, action:"server.status", resourceType:"server", resourceId: def.id, resourceName: def.name, detail: status, ip: req.ip });
   res.json({ ok: true });
 });
@@ -6198,10 +6205,28 @@ app.post("/api/change-password", requireAuth, loginLimiter, async (req, res) => 
 
 // -- Public Status API ---------------------------------------------------------
 
+// Group visibility, shared by the dashboard pages, feeds, icon, manifest,
+// custom domains, badges, SSE stream and /api/public routes: a group with
+// public_enabled=1 is readable by anyone, any other group only by admins and
+// by the users it is granted to. Callers answer exactly as they do for a group
+// that does not exist, so private groups cannot be discovered anonymously.
+// The group row must include id and public_enabled. Per-server routes and the
+// SSE stream use the publicGroupIds snapshot instead, which loadConfig()
+// refreshes on every 5 s tick.
+async function canReadGroup(req, group) {
+  if (!group) return false;
+  if (group.public_enabled) return true;
+  if (!(req.session && req.session.userId)) return false;
+  if (req.session.role === "admin") return true;
+  const allowed = await getUserAllowedGroupIds(req.session.userId, req.session.role);
+  return Array.isArray(allowed) && allowed.map(Number).includes(Number(group.id));
+}
+
 // Gate per-server endpoints with three tiers (many-to-many aware):
 //   admin     → always allowed
 //   viewer    → allowed iff the server's group set intersects their granted groups
-//   public    → allowed iff the server belongs to ANY group (visible on a public dashboard)
+//   anonymous → allowed iff the server belongs to at least one PUBLIC group;
+//               otherwise 404, the same answer as for an unknown server id
 async function allowGroupedOrAuth(req, res, next) {
   const id = req.params.id;
   const s  = serverStatus[id];
@@ -6219,9 +6244,9 @@ async function allowGroupedOrAuth(req, res, next) {
       return res.status(500).json({ error: e.message });
     }
   }
-  // Public: server must be in any group
-  if (serverGroupIds.length) return next();
-  res.status(401).json({ error: "Unauthorized" });
+  // Anonymous: server must be on at least one public dashboard
+  if (serverGroupIds.some(gid => publicGroupIds.has(Number(gid)))) return next();
+  res.status(404).json({ error: "Not found" });
 }
 
 // Private incident details are operator data. The per-server history endpoint is
@@ -6402,8 +6427,8 @@ async function getPublicMaintenance(groupId, { includeRecent = false } = {}) {
 // /dashboard/:slug/incidents page and can be polled by external integrations.
 app.get("/api/public/group/:slug/incidents", async (req, res) => {
   try {
-    const [groups] = await db.query("SELECT id FROM status_groups WHERE slug=?", [req.params.slug]);
-    if (!groups.length) return res.status(404).json({ error: "Group not found" });
+    const [groups] = await db.query("SELECT id, public_enabled FROM status_groups WHERE slug=?", [req.params.slug]);
+    if (!(await canReadGroup(req, groups[0]))) return res.status(404).json({ error: "Group not found" });
     res.json(await getPublicIncidentFeed(groups[0].id));
   } catch(e) { res.status(500).json({ error: e.message }); }
 });
@@ -6412,8 +6437,8 @@ app.get("/api/public/group/:slug/incidents", async (req, res) => {
 // services are grouped into one visitor-facing event with an affected-services list.
 app.get("/api/public/group/:slug/maintenance", async (req, res) => {
   try {
-    const [groups] = await db.query("SELECT id FROM status_groups WHERE slug=?", [req.params.slug]);
-    if (!groups.length) return res.status(404).json({ error: "Group not found" });
+    const [groups] = await db.query("SELECT id, public_enabled FROM status_groups WHERE slug=?", [req.params.slug]);
+    if (!(await canReadGroup(req, groups[0]))) return res.status(404).json({ error: "Group not found" });
     const includeRecent = req.query.include === "recent";
     res.json(await getPublicMaintenance(groups[0].id, { includeRecent }));
   } catch(e) { res.status(500).json({ error: e.message }); }
@@ -6582,8 +6607,8 @@ app.delete("/api/admin/incidents/:id", requireAdmin, async (req, res) => {
 // when loading a public dashboard. Does not require auth.
 app.get("/api/public/group/:slug/banners", async (req, res) => {
   try {
-    const [groups] = await db.query("SELECT id FROM status_groups WHERE slug=?", [req.params.slug]);
-    if (!groups.length) return res.status(404).json({ error: "Group not found" });
+    const [groups] = await db.query("SELECT id, public_enabled FROM status_groups WHERE slug=?", [req.params.slug]);
+    if (!(await canReadGroup(req, groups[0]))) return res.status(404).json({ error: "Group not found" });
     const groupId = groups[0].id;
     // NOW() BETWEEN starts_at AND ends_at, but NULL on either end = unbounded.
     const [rows] = await db.query(
@@ -6770,6 +6795,8 @@ app.get("/api/public/group/:slug", async (req, res) => {
       const allowed = await getUserAllowedGroupIds(req.session.userId, req.session.role);
       canViewInternal = Array.isArray(allowed) && allowed.map(Number).includes(Number(g.id));
     }
+    // Same rule as canReadGroup(): a private group exists only for its admins and members.
+    if (!g.public_enabled && !canViewInternal) return res.status(404).json({ error: "Group not found" });
     const matchingServers = Object.values(serverStatus)
       .filter(s => s.enabled !== false && Array.isArray(s.group_ids) && s.group_ids.includes(g.id));
     const servers = canViewInternal
@@ -6929,13 +6956,14 @@ self.addEventListener("activate", e => e.waitUntil(clients.claim()));`);
 app.get("/api/icon/:slug", async (req, res) => {
   try {
     const [rows] = await db.query(
-      "SELECT logo_image, logo_text, name, accent_color, bg_color FROM status_groups WHERE slug=?",
+      "SELECT id, public_enabled, logo_image, logo_text, name, accent_color, bg_color FROM status_groups WHERE slug=?",
       [req.params.slug]
     );
-    if (!rows.length) return res.status(404).send("Not found");
+    if (!(await canReadGroup(req, rows[0]))) return res.status(404).send("Not found");
     const g = rows[0];
     res.setHeader("Content-Type", "image/svg+xml");
-    res.setHeader("Cache-Control", "public, max-age=3600");
+    // A private group's icon was served to a signed-in member: keep it out of shared caches.
+    res.setHeader("Cache-Control", g.public_enabled ? "public, max-age=3600" : "private, max-age=3600");
     if (g.logo_image && g.logo_image.startsWith("data:")) {
       // Wrap raster in an SVG envelope — keeps the image, forces SVG MIME type
       // so manifest sizes:"any" is correct and Chrome PWA validation passes.
@@ -6962,11 +6990,11 @@ app.get("/api/icon/:slug", async (req, res) => {
 app.get("/dashboard/:slug/manifest.json", pageLimiter, async (req, res) => {
   try {
     const [rows] = await db.query("SELECT * FROM status_groups WHERE slug=?", [req.params.slug]);
-    if (!rows.length) return res.status(404).json({ error: "Not found" });
+    if (!(await canReadGroup(req, rows[0]))) return res.status(404).json({ error: "Not found" });
     const g = rows[0];
     const shortName = g.name.length > 14 ? g.name.substring(0, 14).trimEnd() + "…" : g.name;
     res.setHeader("Content-Type", "application/manifest+json");
-    res.setHeader("Cache-Control", "public, max-age=300");
+    res.setHeader("Cache-Control", g.public_enabled ? "public, max-age=300" : "private, max-age=300");
     res.json({
       name:             g.name,
       short_name:       shortName,
@@ -7055,9 +7083,10 @@ app.post("/api/public/subscribe", pageLimiter, async (req, res) => {
     if (!email || !group_id) return res.status(400).json({ error: "email and group_id required" });
     if (!isValidEmail(email))
       return res.status(400).json({ error: "Invalid email address" });
-    // Verify group exists
-    const [gRows] = await db.query("SELECT id, name FROM status_groups WHERE id=?", [group_id]);
-    if (!gRows.length)
+    // Verify the group exists and the caller may read it: alert emails name the
+    // group's services, so a private group cannot take anonymous subscribers.
+    const [gRows] = await db.query("SELECT id, name, public_enabled FROM status_groups WHERE id=?", [group_id]);
+    if (!(await canReadGroup(req, gRows[0])))
       return res.status(404).json({ error: "Group not found" });
     const token = crypto.randomBytes(32).toString("hex");
     await db.query(
@@ -7214,7 +7243,7 @@ async function sendStatusRss(req, res, group) {
     feedUrl,
     items,
   });
-  res.set("Cache-Control", "public, max-age=60");
+  res.set("Cache-Control", group.public_enabled ? "public, max-age=60" : "private, max-age=60");
   res.type("application/rss+xml").send(rss);
 }
 
@@ -7236,6 +7265,8 @@ const DEFAULT_BRANDING = {
 // Custom-domain middleware: if the request's Host header matches any group's custom_domain,
 // render that dashboard as if /dashboard/<slug> was requested. Runs BEFORE the auth gates
 // so visitors to e.g. status.myanthemcoffee.com see the Anthem dashboard without a login redirect.
+// A private group's domain is served only to its admins and members (canReadGroup); anyone
+// else falls through to normal routing, exactly like a host with no custom domain.
 app.use(async (req, res, next) => {
   // Only intercept top-level page GETs — never API routes, never /dashboard/<slug> (already works),
   // never /admin / /login / /static.
@@ -7245,7 +7276,7 @@ app.use(async (req, res, next) => {
   if (!host) return next();
   try {
     const [rows] = await db.query("SELECT * FROM status_groups WHERE LOWER(custom_domain)=?", [host]);
-    if (rows.length) {
+    if (await canReadGroup(req, rows[0])) {
       const g = rows[0];
       // Serve group-specific privacy/terms pages on the custom domain.
       // Must render directly (not redirect) — redirecting to /privacy on the same custom
@@ -7335,7 +7366,7 @@ app.get("/terms",   (req, res) => res.render("terms"));
 app.get("/dashboard/:slug/feed.rss", pageLimiter, async (req, res) => {
   try {
     const [rows] = await db.query("SELECT * FROM status_groups WHERE slug=?", [req.params.slug]);
-    if (!rows.length) return res.status(404).type("text/plain").send("Dashboard not found");
+    if (!(await canReadGroup(req, rows[0]))) return res.status(404).type("text/plain").send("Dashboard not found");
     return await sendStatusRss(req, res, rows[0]);
   } catch(e) {
     req.log.error({ err: e }, "Failed to build status RSS feed");
@@ -7378,7 +7409,7 @@ app.get("/status/:slug", pageLimiter, async (req, res) => {
 app.get("/dashboard/:slug", pageLimiter, async (req, res) => {
   try {
     const [rows] = await db.query("SELECT * FROM status_groups WHERE slug=?", [req.params.slug]);
-    if (!rows.length) return res.status(404).render("404", { slug: req.params.slug });
+    if (!(await canReadGroup(req, rows[0]))) return res.status(404).render("404", { slug: req.params.slug });
     const g = rows[0];
     res.render("index", {
       // Same-domain dashboard: relative /admin works (shared cookie scope with /admin)
@@ -7409,7 +7440,7 @@ app.get("/dashboard/:slug", pageLimiter, async (req, res) => {
 app.get("/dashboard/:slug/privacy", pageLimiter, async (req, res) => {
   try {
     const [rows] = await db.query("SELECT * FROM status_groups WHERE slug=?", [req.params.slug]);
-    if (!rows.length) return res.status(404).render("404", { slug: req.params.slug });
+    if (!(await canReadGroup(req, rows[0]))) return res.status(404).render("404", { slug: req.params.slug });
     const g = rows[0];
     return g.privacy_text
       ? res.render("group-legal", { g, type: "privacy", content: g.privacy_text })
@@ -7422,7 +7453,7 @@ app.get("/dashboard/:slug/privacy", pageLimiter, async (req, res) => {
 app.get("/dashboard/:slug/incidents", pageLimiter, async (req, res) => {
   try {
     const [rows] = await db.query("SELECT * FROM status_groups WHERE slug=?", [req.params.slug]);
-    if (!rows.length) return res.status(404).render("404", { slug: req.params.slug });
+    if (!(await canReadGroup(req, rows[0]))) return res.status(404).render("404", { slug: req.params.slug });
     const g = rows[0];
     res.render("incidents", {
       groupSlug:    g.slug,
@@ -7445,7 +7476,7 @@ app.get("/dashboard/:slug/incidents", pageLimiter, async (req, res) => {
 app.get("/dashboard/:slug/terms", pageLimiter, async (req, res) => {
   try {
     const [rows] = await db.query("SELECT * FROM status_groups WHERE slug=?", [req.params.slug]);
-    if (!rows.length) return res.status(404).render("404", { slug: req.params.slug });
+    if (!(await canReadGroup(req, rows[0]))) return res.status(404).render("404", { slug: req.params.slug });
     const g = rows[0];
     return g.terms_text
       ? res.render("group-legal", { g, type: "terms", content: g.terms_text })
@@ -7586,8 +7617,7 @@ app.post("/api/v1/servers/:id/push-status", requireApiKey("write"), async (req, 
   const result = { type:"external", ok: status==="up", detail: (detail||`pushed via API: ${status}`).slice(0,255), response_ms:null };
   serverStatus[def.id] = { ...(serverStatus[def.id]||{}), overall:status, checks:[result], lastChecked: new Date().toISOString() };
   await recordHistory(def, [result], status).catch(() => {});
-  const all = Object.values(serverStatus);
-  sseClients.filter(r => !r.writableEnded).forEach(r => { try { r.write(`data: ${JSON.stringify(all)}\n\n`); } catch(_) {} });
+  broadcastToSseClients();
   res.json({ ok:true });
 });
 
