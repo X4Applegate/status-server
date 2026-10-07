@@ -425,7 +425,13 @@ html[data-theme="dark"] .history-theme-icon--moon{display:none}
 </footer>
 
 <script>
-const GROUP_SLUG = <%- JSON.stringify(groupSlug) %>;
+<%
+  // JSON for this inline script; see index.ejs. Escaping "<", ">", "&", U+2028 and
+  // U+2029 keeps a stored value from ending the <script> element.
+  const jsonForScript = v => (JSON.stringify(v) ?? "null")
+    .replace(/[<>&\p{Zl}\p{Zp}]/gu, c => "\\u" + c.charCodeAt(0).toString(16).padStart(4, "0"));
+%>
+const GROUP_SLUG = <%- jsonForScript(groupSlug) %>;
 
 function escapeHtml(s) {
   return String(s || "").replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));

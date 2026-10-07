@@ -700,6 +700,7 @@ body::before{
 function _hexParse(hex) {
   let h = String(hex||"").replace("#","");
   if (h.length === 3) h = h.split("").map(c => c+c).join("");
+  if (h.length === 8) h = h.slice(0, 6); // #rrggbbaa accent: tints ignore the alpha
   if (h.length !== 6) return null;
   return {
     r: parseInt(h.substring(0,2), 16),
@@ -1083,7 +1084,8 @@ html[data-theme="light"] .theme-icon-dark,html[data-theme="dark"] .theme-icon-li
   .public-resource-grid{grid-template-columns:1fr}.public-resource-head{display:block}
 }
 </style>
-<% if (typeof customCss !== 'undefined' && customCss) { %><style id="group-custom-css"><%- customCss %></style><% } %>
+<%# custom_css is raw CSS. Group save strips "<", but older rows may still hold "</style>"; the CSS escape \3c keeps "<" meaning the same inside CSS strings. %>
+<% if (typeof customCss !== 'undefined' && customCss) { %><style id="group-custom-css"><%- String(customCss).replace(/</g, '\\3c ') %></style><% } %>
 <% if (typeof pageLayout !== 'undefined' && pageLayout === 'minimal') { %>
 <style id="layout-minimal">
 /* Minimal layout: sidebar stretches full width, detail panel hidden */
@@ -1220,9 +1222,17 @@ html[data-theme="light"] .theme-icon-dark,html[data-theme="dark"] .theme-icon-li
 
 <script>
 // -- Group context (injected from server)
-const GROUP_SLUG   = <%- JSON.stringify(groupSlug) %>;
-const HERO_TITLE   = <%- JSON.stringify((typeof heroTitle !== 'undefined' && heroTitle) ? heroTitle : null) %>;
-const PAGE_LAYOUT  = <%- JSON.stringify((typeof pageLayout !== 'undefined' && pageLayout) ? pageLayout : 'default') %>;
+<%
+  // JSON for this inline script. JSON.stringify leaves "<", ">" and "&" alone, so a
+  // manager-set hero title holding "</script>" or "<!--" ended the element and
+  // injected markup. Those and U+2028/U+2029 become \uXXXX escapes, which JavaScript
+  // parses back to the same string.
+  const jsonForScript = v => (JSON.stringify(v) ?? "null")
+    .replace(/[<>&\p{Zl}\p{Zp}]/gu, c => "\\u" + c.charCodeAt(0).toString(16).padStart(4, "0"));
+%>
+const GROUP_SLUG   = <%- jsonForScript(groupSlug) %>;
+const HERO_TITLE   = <%- jsonForScript((typeof heroTitle !== 'undefined' && heroTitle) ? heroTitle : null) %>;
+const PAGE_LAYOUT  = <%- jsonForScript((typeof pageLayout !== 'undefined' && pageLayout) ? pageLayout : 'default') %>;
 let   currentGroupId = null; // populated from /api/public/group/:slug response
 let   statusFilter = "all";
 
@@ -1506,10 +1516,10 @@ function _renderMainMarkers() {
       const c = colorMap[s.overall] || colorMap.pending;
       const lastMs = (s.checks||[]).reduce((b,ck) => (ck.response_ms&&(b===null||ck.response_ms<b))?ck.response_ms:b, null);
       return `<div style="padding:${idx===0?"2px 0 6px":"6px 0"};${idx>0?"border-top:1px solid #1e2d45":""}">
-        <div style="font-weight:600;font-size:13px;color:#ffffff;margin-bottom:3px;line-height:1.3">${s.name}</div>
+        <div style="font-weight:600;font-size:13px;color:#ffffff;margin-bottom:3px;line-height:1.3">${escapeHtml(s.name)}</div>
         <div style="display:flex;align-items:center;gap:10px">
           <span style="color:${c};font-weight:700;font-size:11px;letter-spacing:.04em">${(s.overall||"pending").toUpperCase()}</span>
-          ${sidebarSession.loggedIn && s.host ? `<span style="font-size:11px;color:#7a9abf">${s.host}</span>` : ""}
+          ${sidebarSession.loggedIn && s.host ? `<span style="font-size:11px;color:#7a9abf">${escapeHtml(s.host)}</span>` : ""}
           ${lastMs!=null?`<span style="font-size:11px;color:#7a9abf">${lastMs}ms</span>`:""}
         </div>
       </div>`;
@@ -1567,7 +1577,7 @@ async function _initDetailMap(lat, lng, name, status) {
       el.style.cssText = `width:18px;height:18px;border-radius:50%;background:${color};border:2px solid #0d1829;box-shadow:0 0 8px ${color}99`;
       new maplibregl.Marker({ element: el })
         .setLngLat([lng, lat])
-        .setPopup(new maplibregl.Popup({ offset: 14 }).setHTML(`<div style="font-family:sans-serif;font-weight:600;padding:4px">${name}</div>`))
+        .setPopup(new maplibregl.Popup({ offset: 14 }).setHTML(`<div style="font-family:sans-serif;font-weight:600;padding:4px">${escapeHtml(name)}</div>`))
         .addTo(_detailMap);
       setTimeout(() => _detailMap.resize(), 100);
     });
@@ -1613,7 +1623,7 @@ async function loadDashboardGroups(){
     } else {
       // Show username + logout; admin button (if present) is already in the topbar
       authEl.innerHTML = `<div class="topbar-user">
-        <span class="topbar-username">${sidebarSession.username || ""}</span>
+        <span class="topbar-username">${escapeHtml(sidebarSession.username || "")}</span>
         <button class="topbar-logout" onclick="doLogout()">Sign Out</button>
       </div>`;
     }
@@ -1660,8 +1670,8 @@ function renderTopbarDashboards(){
     const dot = g.accent_color || "var(--blue)";
     const isCurrent = GROUP_SLUG === g.slug;
     const href = g.custom_domain ? `https://${g.custom_domain}` : `/dashboard/${g.slug}`;
-    return `<a class="dash-nav ${isCurrent ? 'active' : ''}" href="${href}">
-      <span class="dash-nav-dot" style="background:${dot}"></span>${g.name}</a>`;
+    return `<a class="dash-nav ${isCurrent ? 'active' : ''}" href="${escapeHtml(href)}">
+      <span class="dash-nav-dot" style="background:${escapeHtml(dot)}"></span>${escapeHtml(g.name)}</a>`;
   });
   el.innerHTML = pills.join("");
   if (popup) popup.innerHTML = pills.join("");
@@ -2151,7 +2161,7 @@ function renderSidebar(){
         <div class="srv-subgroup ${isCatC ? 'collapsed' : ''}">
           <div class="srv-subgroup-head" onclick="toggleGroup('${catId}')">
             <span class="srv-subgroup-bar" style="background:${dotC}"></span>
-            <span class="srv-subgroup-name">${cat}</span>
+            <span class="srv-subgroup-name">${escapeHtml(cat)}</span>
             <span class="srv-subgroup-count">${allItems.length}</span>
             <span class="srv-subgroup-chevron"><svg width="9" height="9" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"/></svg></span>
           </div>
@@ -2184,8 +2194,8 @@ function renderSidebar(){
     sections.push(`
       <div class="srv-group ${isCollapsed ? 'collapsed' : ''}">
         <div class="srv-group-head" onclick="toggleGroup('g${g.id}')">
-          <span class="srv-group-dot" style="background:${dotColor}"></span>
-          <span class="srv-group-name">${g.name}</span>
+          <span class="srv-group-dot" style="background:${escapeHtml(dotColor)}"></span>
+          <span class="srv-group-name">${escapeHtml(g.name)}</span>
           <span class="srv-group-count">${groupServers.length}</span>
           <span class="srv-group-chevron"><svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"/></svg></span>
         </div>
@@ -2857,8 +2867,12 @@ function renderAdminBanners(list){
   host.innerHTML = visible.map(b => {
     const key = bannerKey(b);
     const titleHtml = b.title ? `<div class="admin-banner-title">${bannerEscape(b.title)}</div>` : "";
-    const linkHtml  = (b.link_url && b.link_text)
-      ? `<a class="admin-banner-link" href="${bannerEscape(b.link_url)}" target="_blank" rel="noopener">${bannerEscape(b.link_text)} →</a>`
+    // Only http(s), mailto and same-site links: escaping alone leaves a stored
+    // "javascript:" URL runnable on click. The API rejects those now, but older
+    // rows may still hold one.
+    const linkUrl   = String(b.link_url || "").trim();
+    const linkHtml  = (b.link_text && /^(?:https?:\/\/|mailto:|\/(?![\/\\]))/i.test(linkUrl))
+      ? `<a class="admin-banner-link" href="${bannerEscape(linkUrl)}" target="_blank" rel="noopener">${bannerEscape(b.link_text)} →</a>`
       : "";
     const closeHtml = b.dismissible
       ? `<button class="admin-banner-close" onclick="dismissBanner(${b.id})" title="Dismiss" aria-label="Dismiss banner">×</button>`

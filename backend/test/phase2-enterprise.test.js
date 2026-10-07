@@ -117,7 +117,8 @@ test("customCss is passed to all public status page renders", () => {
 test("public index.ejs injects custom CSS inside a conditional style block", () => {
   assert.match(indexSource, /group-custom-css/);
   assert.match(indexSource, /typeof customCss !== 'undefined' && customCss/);
-  assert.match(indexSource, /<%- customCss %>/);
+  // "<" is CSS-escaped on output so rows saved before the input filter cannot close <style>.
+  assert.match(indexSource, /<style id="group-custom-css"><%- String\(customCss\)\.replace\(\/<\/g, '\\\\3c '\) %><\/style>/);
 });
 
 // -- Delete from edit form --

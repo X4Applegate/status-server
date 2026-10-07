@@ -5304,12 +5304,24 @@ app.get("/api/admin/groups", requireAuth, async (req, res) => {
   } catch(e) { res.status(500).json({ error: e.message }); }
 });
 
-// Validate a logo data URL: must start with data:image/, must be under 256KB
+// Validate a group logo: a base64 data URL of a raster image, or an https URL.
+// The whole value is matched, so it cannot carry quotes or angle brackets into
+// the <img src> and SVG href it is written to (the old check only tested the
+// prefix). image/svg+xml is refused: SVG is an active format (script, event
+// handlers, external references) that is inert only while a browser treats it
+// as an image, and the admin UI's file picker never produces it. SVG logos
+// stored earlier still render in <img>; they must be replaced on the next edit.
+const LOGO_DATA_URL  = /^data:image\/(?:png|jpe?g|gif|webp);base64,[A-Za-z0-9+/]+={0,2}$/i;
+const LOGO_HTTPS_URL = /^https:\/\/[A-Za-z0-9\-._~:/?#[\]@!$&'()*+,;=%]+$/;
 function validateLogoImage(s) {
   if (!s) return null;
   if (typeof s !== "string") return null;
-  if (!/^data:image\/(png|jpeg|jpg|svg\+xml|webp|gif);base64,/i.test(s)) {
-    throw new Error("logo_image must be a data:image/* base64 URL");
+  let ok = LOGO_DATA_URL.test(s);
+  if (!ok && s.length <= 2048 && LOGO_HTTPS_URL.test(s)) {
+    try { ok = !!new URL(s).hostname; } catch { ok = false; }
+  }
+  if (!ok) {
+    throw new Error("logo_image must be a base64 data:image/(png|jpeg|gif|webp) URL or an https:// URL");
   }
   if (s.length > 256 * 1024) {
     throw new Error("logo_image too large (max 256 KB; please resize the image)");
@@ -5317,13 +5329,15 @@ function validateLogoImage(s) {
   return s;
 }
 
-// Validate a hex color string. Accepts "#RRGGBB" or "#RGB". Empty/null returns null.
-function cleanHexColor(s) {
+// Validate a hex color string. Accepts "#RGB" or "#RRGGBB", plus "#RRGGBBAA"
+// when alpha is allowed. Empty/null returns null.
+function cleanHexColor(s, { alpha = false } = {}) {
   if (!s) return null;
   if (typeof s !== "string") return null;
   const trimmed = s.trim();
   if (!trimmed) return null;
-  if (!/^#([0-9a-fA-F]{3}|[0-9a-fA-F]{6})$/.test(trimmed)) {
+  const re = alpha ? /^#([0-9a-fA-F]{3}|[0-9a-fA-F]{6}|[0-9a-fA-F]{8})$/ : /^#([0-9a-fA-F]{3}|[0-9a-fA-F]{6})$/;
+  if (!re.test(trimmed)) {
     throw new Error("Color must be a hex value like #ff0000");
   }
   return trimmed;
@@ -5354,9 +5368,11 @@ app.post("/api/admin/groups", requireManager, async (req, res) => {
   if (!name) return res.status(400).json({ error: "Name is required" });
   const finalSlug = slugify(slug || name);
   if (!finalSlug) return res.status(400).json({ error: "Slug is required" });
-  let cleanLogo, cleanBg, cleanDomain;
+  let cleanLogo, cleanAccent, cleanBg, cleanDomain;
   try { cleanLogo = validateLogoImage(logo_image); }
   catch(e) { return res.status(400).json({ error: e.message }); }
+  try { cleanAccent = cleanHexColor(accent_color, { alpha: true }); }
+  catch(e) { return res.status(400).json({ error: "Accent color: " + e.message }); }
   try { cleanBg = cleanHexColor(bg_color); }
   catch(e) { return res.status(400).json({ error: "Background color: " + e.message }); }
   try { cleanDomain = cleanCustomDomain(custom_domain); }
@@ -5367,7 +5383,7 @@ app.post("/api/admin/groups", requireManager, async (req, res) => {
   try {
     const [result] = await db.query(
       "INSERT INTO status_groups (slug, name, description, logo_text, logo_image, logo_size, accent_color, bg_color, default_theme, custom_domain, privacy_text, terms_text, public_enabled, custom_css, hero_title, kicker_text, layout) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
-      [finalSlug, name, description || "", logo_text || "", cleanLogo, cleanLogoSize, accent_color || "#2a7fff", cleanBg, cleanTheme, cleanDomain, privacy_text || null, terms_text || null, public_enabled, cleanCustomCss, cleanHeroTitle, cleanKickerText, cleanLayout]
+      [finalSlug, name, description || "", logo_text || "", cleanLogo, cleanLogoSize, cleanAccent || "#2a7fff", cleanBg, cleanTheme, cleanDomain, privacy_text || null, terms_text || null, public_enabled, cleanCustomCss, cleanHeroTitle, cleanKickerText, cleanLayout]
     );
     const newId = result.insertId;
     if (Array.isArray(server_ids) && server_ids.length) {
@@ -5415,7 +5431,9 @@ app.put("/api/admin/groups/:id", requireAuth, async (req, res) => {
     try { cleanLogo = validateLogoImage(logo_image); }
     catch(e) { return res.status(400).json({ error: e.message }); }
   }
-  let cleanBg, cleanDomain;
+  let cleanAccent, cleanBg, cleanDomain;
+  try { cleanAccent = cleanHexColor(accent_color, { alpha: true }); }
+  catch(e) { return res.status(400).json({ error: "Accent color: " + e.message }); }
   try { cleanBg = cleanHexColor(bg_color); }
   catch(e) { return res.status(400).json({ error: "Background color: " + e.message }); }
   try { cleanDomain = cleanCustomDomain(custom_domain); }
@@ -5425,7 +5443,7 @@ app.put("/api/admin/groups/:id", requireAuth, async (req, res) => {
   try {
     const [result] = await db.query(
       "UPDATE status_groups SET slug=?, name=?, description=?, logo_text=?, logo_image=?, logo_size=?, accent_color=?, bg_color=?, default_theme=?, custom_domain=?, privacy_text=?, terms_text=?, public_enabled=?, custom_css=?, hero_title=?, kicker_text=?, layout=? WHERE id=?",
-      [finalSlug, name, description || "", logo_text || "", cleanLogo, cleanLogoSize, accent_color || "#2a7fff", cleanBg, cleanTheme, cleanDomain, privacy_text || null, terms_text || null, public_enabled, cleanCustomCss, cleanHeroTitle, cleanKickerText, cleanLayout, gid]
+      [finalSlug, name, description || "", logo_text || "", cleanLogo, cleanLogoSize, cleanAccent || "#2a7fff", cleanBg, cleanTheme, cleanDomain, privacy_text || null, terms_text || null, public_enabled, cleanCustomCss, cleanHeroTitle, cleanKickerText, cleanLayout, gid]
     );
     if (result.affectedRows === 0) return res.status(404).json({ error: "Group not found" });
     if (Array.isArray(server_ids)) {
@@ -6617,6 +6635,16 @@ app.get("/api/admin/banners", requireAdmin, async (req, res) => {
 });
 
 // Admin — create banner.
+// Banner links render as <a href> on public dashboards that admins also open.
+// Allow http(s), mailto and same-site paths only, so a manager cannot store a
+// "javascript:" (or data:) link that runs script when clicked.
+function cleanBannerLink(s) {
+  const v = String(s == null ? "" : s).trim();
+  if (!v) return null;
+  if (v.length <= 2048 && /^(?:https?:\/\/|mailto:|\/(?![\/\\]))[^\s\p{Cc}]*$/iu.test(v)) return v;
+  throw new Error("link_url must be an http(s)://, mailto: or /path URL");
+}
+
 app.post("/api/admin/banners", requireManager, async (req, res) => {
   const { group_id, title, message, severity = "info", link_url, link_text,
           active = 1, dismissible = 1, starts_at, ends_at } = req.body;
@@ -6624,6 +6652,9 @@ app.post("/api/admin/banners", requireManager, async (req, res) => {
   if (!["info","warning","critical","success"].includes(severity)) {
     return res.status(400).json({ error: "severity must be info|warning|critical|success" });
   }
+  let cleanLink;
+  try { cleanLink = cleanBannerLink(link_url); }
+  catch(e) { return res.status(400).json({ error: e.message }); }
   try {
     const [r] = await db.query(
       `INSERT INTO status_banners
@@ -6635,7 +6666,7 @@ app.post("/api/admin/banners", requireManager, async (req, res) => {
         (title || "").trim() || null,
         String(message).trim().slice(0, 2000),
         severity,
-        (link_url || "").trim() || null,
+        cleanLink,
         (link_text || "").trim() || null,
         active ? 1 : 0,
         dismissible ? 1 : 0,
@@ -6665,7 +6696,13 @@ app.put("/api/admin/banners/:id", requireManager, async (req, res) => {
     if (title !== undefined)       { fields.push("title=?");       params.push((title||"").trim() || null); }
     if (message !== undefined)     { fields.push("message=?");     params.push(String(message).trim().slice(0,2000)); }
     if (severity !== undefined)    { fields.push("severity=?");    params.push(severity); }
-    if (link_url !== undefined)    { fields.push("link_url=?");    params.push((link_url||"").trim() || null); }
+    if (link_url !== undefined) {
+      let cleanLink;
+      try { cleanLink = cleanBannerLink(link_url); }
+      catch(e) { return res.status(400).json({ error: e.message }); }
+      fields.push("link_url=?");
+      params.push(cleanLink);
+    }
     if (link_text !== undefined)   { fields.push("link_text=?");   params.push((link_text||"").trim() || null); }
     if (active !== undefined)      { fields.push("active=?");      params.push(active ? 1 : 0); }
     if (dismissible !== undefined) { fields.push("dismissible=?"); params.push(dismissible ? 1 : 0); }
@@ -6923,6 +6960,12 @@ app.get("/sw.js", (req, res) => {
 self.addEventListener("activate", e => e.waitUntil(clients.claim()));`);
 });
 
+// Escape a value for XML/SVG text content or a quoted attribute.
+function escXml(s) {
+  return String(s == null ? "" : s).replace(/[&<>"']/g, c =>
+    ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&apos;" })[c]);
+}
+
 // Group icon — used by manifest.json and as apple-touch-icon.
 // Always returns image/svg+xml so manifest sizes:"any" is valid for Chrome PWA
 // install. Raster logo_images are embedded inside an SVG <image> wrapper.
@@ -6936,11 +6979,15 @@ app.get("/api/icon/:slug", async (req, res) => {
     const g = rows[0];
     res.setHeader("Content-Type", "image/svg+xml");
     res.setHeader("Cache-Control", "public, max-age=3600");
+    // Opened directly, an SVG is a document that can run script; it never needs to.
+    res.setHeader("Content-Security-Policy", "default-src 'none'; img-src data:; style-src 'unsafe-inline'");
+    // Every value is XML-escaped: rows saved before group input validation
+    // existed can hold markup, e.g. accent_color '#f" data-a="1'.
     if (g.logo_image && g.logo_image.startsWith("data:")) {
       // Wrap raster in an SVG envelope — keeps the image, forces SVG MIME type
       // so manifest sizes:"any" is correct and Chrome PWA validation passes.
       const svg = `<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" viewBox="0 0 512 512" width="512" height="512">
-  <image href="${g.logo_image}" width="512" height="512" preserveAspectRatio="xMidYMid meet"/>
+  <image href="${escXml(g.logo_image)}" width="512" height="512" preserveAspectRatio="xMidYMid meet"/>
 </svg>`;
       return res.end(svg);
     }
@@ -6949,9 +6996,9 @@ app.get("/api/icon/:slug", async (req, res) => {
     const accent   = g.accent_color || "#2a7fff";
     const bg       = g.bg_color     || "#060c18";
     const svg = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512">
-  <rect width="512" height="512" rx="96" fill="${bg}"/>
-  <rect x="24" y="24" width="464" height="464" rx="72" fill="${accent}" opacity="0.18"/>
-  <text x="256" y="348" font-family="-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif" font-size="240" font-weight="700" fill="${accent}" text-anchor="middle">${initials}</text>
+  <rect width="512" height="512" rx="96" fill="${escXml(bg)}"/>
+  <rect x="24" y="24" width="464" height="464" rx="72" fill="${escXml(accent)}" opacity="0.18"/>
+  <text x="256" y="348" font-family="-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif" font-size="240" font-weight="700" fill="${escXml(accent)}" text-anchor="middle">${escXml(initials)}</text>
 </svg>`;
     res.end(svg);
   } catch(e) { res.status(500).send("Error"); }
