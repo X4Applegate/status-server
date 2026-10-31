@@ -20,7 +20,7 @@
     "google-auth-library": "^11.1.0",
     "helmet": "^8.3.0",
     "mysql2": "^3.24.4",
-    "nodemailer": "^10.0.10",
+    "nodemailer": "^10.1.4",
     "pino": "^10.3.1",
     "pino-http": "^11.0.0",
     "pino-pretty": "^13.1.3",
