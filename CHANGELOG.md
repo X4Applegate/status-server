@@ -6,6 +6,28 @@ All notable changes to this project are documented here.
 
 ---
 
+## [3.16.12] — 2026-11-03
+
+Two incident data-quality fixes, both found while triaging the 2026-10-26 → 2026-11-02 weekly uptime report.
+
+### Fixed
+- **Deleting a monitor left its in-flight incident open forever.** The incident auto-resolve path is driven by a *successful check* from the monitor, so a deleted monitor could never produce one: its open incident stayed `investigating` indefinitely, showing on the public status page and in every subsequent weekly report as an active outage for a service that no longer existed. Both monitor-delete paths (`DELETE /api/admin/servers/:id` and the `delete` action of `POST /api/admin/servers/bulk`) now call a new `closeIncidentsForDeletedServer()` *before* removing the monitor row. Incidents are **resolved and annotated, not deleted** — the historical record of a real outage survives the monitor — and the timeline gets an explicit "Monitor removed" update naming the monitor and how long the incident had been open. A regression test asserts that every `DELETE FROM status_servers` site is covered, so a future third delete path cannot silently reintroduce the orphan.
+- **A service at 0.00% uptime for a whole week could render as "0 incidents · longest 0s".** The weekly report counted incidents by `started_at` falling inside the window, so an outage that began *before* the window was invisible — one service showed 1,899 consecutive failed checks, 0.00% uptime and zero incidents in the same row, which makes a total outage read as a non-event. Incidents are now counted by **overlap** (`started_at < window_end AND (ended_at IS NULL OR ended_at > window_start)`), so an ongoing outage keeps being reported until it actually resolves.
+
+### Changed
+- **The weekly report calls out still-open incidents.** Per-server `openIncidents` / `openAgeS` / `openSince` and a report-wide `totalOpenIncidents` are now computed; the HTML report shows a red "● Still open — *N* and counting" line under the server name plus an "*N* still open" note on the Incidents tile, and the text report appends "· STILL OPEN (*N* and counting)". A long-running outage now reads as "open, 16 d and counting" instead of a quiet zero — the signal that would have prompted someone to look much sooner.
+- **"Longest outage" is clamped to the reporting window.** `longest_s` is measured between `GREATEST(started_at, window_start)` and `LEAST(COALESCE(ended_at, NOW()), window_end)`, so a 16-day-old incident reports at most 7 days against a 7-day report instead of overstating the window's outage time.
+
+- **A closed incident could be stamped with a duration of 0.** `ended_at` was written from a JS `Date` through the `timezone: "local"` connection pool while `started_at` had been written by the database, so the two values did not share a clock: with `TZ=America/Los_Angeles` the stored `ended_at` landed ~8 hours *before* `started_at`, making the duration negative and the stored `duration_s` meaningless. `ended_at` and `duration_s` are now both computed by the database (`NOW()` / `GREATEST(0, TIMESTAMPDIFF(SECOND, started_at, NOW()))`), so the arithmetic happens in one clock. Found by the live-database test, which a source-level test could not have caught.
+
+### Notes
+- 12 new unit tests in `test/v31612-incident-data-quality.test.js` plus 4 live-database tests in `test/live-delete-monitor-incidents.test.js`, including the exact 0.00%-with-0-incidents scenario that motivated the fix and an end-to-end `DELETE /api/admin/servers/:id` against real MariaDB.
+- **Existing orphaned incidents are not cleaned up by this release.** The code change prevents new orphans; any incident already stranded by a past monitor deletion must be closed manually. Review the matching rows first:
+  `SELECT i.id, i.server_name, i.started_at FROM status_incidents i WHERE i.ended_at IS NULL AND i.server_id NOT IN (SELECT id FROM status_servers);`
+  then close them with
+  `UPDATE status_incidents SET status='resolved', ended_at=NOW(), duration_s=GREATEST(0, TIMESTAMPDIFF(SECOND, started_at, NOW())) WHERE ended_at IS NULL AND server_id NOT IN (SELECT id FROM status_servers);`
+- **Incidents resolved before this release may carry a wrong `duration_s`.** The timezone fix above applies to new closures only; historical rows are left as they are. To find affected rows: `SELECT id, server_name, started_at, ended_at, duration_s FROM status_incidents WHERE ended_at IS NOT NULL AND ended_at < started_at;`
+
 ## [3.16.11] — 2026-10-07
 
 ### Fixed

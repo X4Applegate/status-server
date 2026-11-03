@@ -1573,6 +1573,58 @@ async function getServerGroupIds(serverId) {
   return rows.map(r => r.group_id);
 }
 
+// Close any in-flight incidents belonging to a monitor that is being deleted.
+//
+// The normal resolve path (recordHistory / autoResolveIncidents) is driven by a
+// SUCCESSFUL check from the monitor. A deleted monitor is never polled again, so
+// it can never produce one — leaving the incident stuck in 'investigating'
+// forever. It then keeps showing on the public page and in the weekly report as
+// an open outage for a service that no longer exists.
+//
+// Incidents are deliberately KEPT (not deleted) so the historical record of a
+// real outage survives the monitor; they are just resolved and annotated.
+// Returns the number of incidents closed.
+async function closeIncidentsForDeletedServer(serverId, serverName) {
+  if (!db) return 0;
+  const [open] = await db.query(
+    "SELECT id FROM status_incidents WHERE server_id=? AND ended_at IS NULL",
+    [serverId]
+  );
+  let closed = 0;
+  for (const inc of open) {
+    // ended_at and duration_s are computed by the DATABASE (NOW() /
+    // TIMESTAMPDIFF) rather than from a JS Date. started_at may have been
+    // written DB-side, and binding a JS Date through a `timezone: "local"` pool
+    // shifts it by the local UTC offset — which can store an ended_at BEFORE
+    // started_at and a nonsense duration. Letting the DB do the arithmetic
+    // keeps both values in one clock.
+    //
+    // The `ended_at IS NULL` predicate also claims the incident: the poller may
+    // be resolving it concurrently, and only the writer that actually closes it
+    // appends the update.
+    const [upd] = await db.query(
+      `UPDATE status_incidents
+          SET status='resolved',
+              ended_at=NOW(),
+              duration_s=GREATEST(0, TIMESTAMPDIFF(SECOND, started_at, NOW()))
+        WHERE id=? AND ended_at IS NULL`,
+      [inc.id]
+    );
+    if (!upd.affectedRows) continue;
+    closed += 1;
+    const [[row]] = await db.query("SELECT duration_s FROM status_incidents WHERE id=?", [inc.id]);
+    const durationS = row ? Number(row.duration_s || 0) : 0;
+    await db.query(
+      "INSERT INTO status_incident_updates (incident_id, status, message, created_at) VALUES (?,?,?,NOW())",
+      [inc.id, "resolved", `Monitor removed — this incident was closed automatically because the monitor for ${serverName || serverId} no longer exists. Open for ${fmtDuration(durationS)} before removal.`]
+    );
+  }
+  if (closed) {
+    addLog({ level:"info", server:"admin", message:`Closed ${closed} open incident(s) for removed monitor: ${serverName || serverId}` });
+  }
+  return closed;
+}
+
 // Atomically replace the set of groups a server belongs to with the given list.
 // Empty/null clears the server out of all groups.
 async function setServerGroupIds(serverId, groupIds) {
@@ -3140,15 +3192,34 @@ async function buildWeeklyReport() {
     [periodStart, periodEnd]
   );
 
-  // Per-server incident summary
+  // Per-server incident summary.
+  //
+  // Count incidents that OVERLAP the window, not just those that STARTED in it.
+  // Counting by started_at hides any outage that began before the window — the
+  // exact case that let a service sit at 0.00% uptime for a full week and still
+  // render as "0 incidents · longest 0s", which makes a total outage read as a
+  // non-event. An ongoing incident (ended_at IS NULL) overlaps every later
+  // window, so it keeps being reported until it actually resolves.
+  //
+  // longest_s is the duration INSIDE the window, so a 16-day-old incident does
+  // not report 16 days of outage against a 7-day report; open_age_s carries the
+  // full running age for the "still open, N and counting" annotation.
   const [incRows] = await db.query(
     `SELECT server_id,
             COUNT(*) AS incidents,
-            MAX(COALESCE(duration_s, TIMESTAMPDIFF(SECOND, started_at, NOW()))) AS longest_s
+            MAX(TIMESTAMPDIFF(
+                  SECOND,
+                  GREATEST(started_at, ?),
+                  LEAST(COALESCE(ended_at, NOW()), ?)
+                )) AS longest_s,
+            SUM(ended_at IS NULL) AS open_count,
+            MAX(CASE WHEN ended_at IS NULL
+                     THEN TIMESTAMPDIFF(SECOND, started_at, NOW()) END) AS open_age_s,
+            MIN(CASE WHEN ended_at IS NULL THEN started_at END) AS open_since
      FROM status_incidents
-     WHERE started_at >= ? AND started_at <= ?
+     WHERE started_at < ? AND (ended_at IS NULL OR ended_at > ?)
      GROUP BY server_id`,
-    [periodStart, periodEnd]
+    [periodStart, periodEnd, periodEnd, periodStart]
   );
 
   const incById = {};
@@ -3168,13 +3239,19 @@ async function buildWeeklyReport() {
       uptime,
       avgMs:     u && u.avg_ms != null ? Math.round(Number(u.avg_ms)) : null,
       incidents: i ? Number(i.incidents) : 0,
-      longestS:  i ? Number(i.longest_s || 0) : 0
+      longestS:  i ? Math.max(0, Number(i.longest_s || 0)) : 0,
+      // Still-open incidents get called out explicitly, so a long-running outage
+      // reads as "open, N and counting" instead of a quiet zero.
+      openIncidents: i ? Number(i.open_count || 0) : 0,
+      openAgeS:      i && i.open_age_s != null ? Number(i.open_age_s) : null,
+      openSince:     i && i.open_since ? new Date(i.open_since) : null
     };
   });
 
   // Overall metrics
   const totalChecks   = servers.reduce((a, s) => a + s.total, 0);
   const totalIncidents = servers.reduce((a, s) => a + s.incidents, 0);
+  const totalOpenIncidents = servers.reduce((a, s) => a + s.openIncidents, 0);
   const weightedUp = servers.reduce((a, s) => s.total > 0 ? a + (s.uptime * s.total) : a, 0);
   const overallUptime = totalChecks > 0 ? (weightedUp / totalChecks) : null;
 
@@ -3187,7 +3264,7 @@ async function buildWeeklyReport() {
     .sort((a, b) => b.avgMs - a.avgMs)
     .slice(0, 5);
 
-  return { periodStart, periodEnd, servers, totalChecks, totalIncidents, overallUptime, worst, slowest };
+  return { periodStart, periodEnd, servers, totalChecks, totalIncidents, totalOpenIncidents, overallUptime, worst, slowest };
 }
 
 function fmtReportDuration(s) {
@@ -3204,7 +3281,7 @@ function renderWeeklyReportHtml(rep) {
 
   const worstRows = rep.worst.length ? rep.worst.map(s => `
     <tr>
-      <td style="padding:8px 10px;border-bottom:1px solid #21262d">${escAttrServer(s.name)}</td>
+      <td style="padding:8px 10px;border-bottom:1px solid #21262d">${escAttrServer(s.name)}${s.openIncidents ? `<div style="font-size:11px;color:#ef3d5a;margin-top:2px">● Still open — ${fmtReportDuration(s.openAgeS)} and counting</div>` : ""}</td>
       <td style="padding:8px 10px;border-bottom:1px solid #21262d;color:${upColor(s.uptime)};font-weight:600">${fmtPct(s.uptime)}</td>
       <td style="padding:8px 10px;border-bottom:1px solid #21262d;text-align:right">${s.incidents}</td>
       <td style="padding:8px 10px;border-bottom:1px solid #21262d;text-align:right">${fmtReportDuration(s.longestS)}</td>
@@ -3233,6 +3310,7 @@ function renderWeeklyReportHtml(rep) {
           <div style="flex:1;min-width:140px">
             <div style="font-size:11px;color:#8b949e;text-transform:uppercase;letter-spacing:.05em">Incidents</div>
             <div style="font-size:26px;font-weight:700;color:#f0f6fc;margin-top:2px">${rep.totalIncidents}</div>
+            ${rep.totalOpenIncidents ? `<div style="font-size:11px;color:#ef3d5a;margin-top:2px">${rep.totalOpenIncidents} still open</div>` : ""}
           </div>
           <div style="flex:1;min-width:140px">
             <div style="font-size:11px;color:#8b949e;text-transform:uppercase;letter-spacing:.05em">Checks Run</div>
@@ -3283,13 +3361,18 @@ function renderWeeklyReportText(rep) {
     `Weekly Uptime Report — ${periodLabel}`,
     ``,
     `Overall uptime: ${fmtPct(rep.overallUptime)}`,
-    `Incidents: ${rep.totalIncidents}`,
+    `Incidents: ${rep.totalIncidents}${rep.totalOpenIncidents ? ` (${rep.totalOpenIncidents} still open)` : ""}`,
     `Checks run: ${rep.totalChecks.toLocaleString()}`,
     ``,
     `Lowest uptime:`
   ];
   if (rep.worst.length) {
-    for (const s of rep.worst) lines.push(`  - ${s.name}: ${fmtPct(s.uptime)} · ${s.incidents} incidents · longest ${fmtReportDuration(s.longestS)}`);
+    for (const s of rep.worst) {
+      const open = s.openIncidents
+        ? ` · STILL OPEN (${fmtReportDuration(s.openAgeS)} and counting)`
+        : "";
+      lines.push(`  - ${s.name}: ${fmtPct(s.uptime)} · ${s.incidents} incidents · longest ${fmtReportDuration(s.longestS)}${open}`);
+    }
   } else {
     lines.push(`  (no data)`);
   }
@@ -4641,6 +4724,9 @@ app.delete("/api/admin/servers/:id", requireAdmin, async (req, res) => {
   try {
     const [rows] = await db.query("SELECT name FROM status_servers WHERE id=?", [req.params.id]);
     if (!rows.length) return res.status(404).json({ error:"Server not found" });
+    // Close in-flight incidents BEFORE the monitor row goes away: once it is
+    // deleted it is never polled again, so nothing can ever resolve them.
+    await closeIncidentsForDeletedServer(req.params.id, rows[0].name);
     await db.query("DELETE FROM status_server_group_map WHERE server_id=?", [req.params.id]);
     await db.query("DELETE FROM status_servers WHERE id=?", [req.params.id]);
     delete serverStatus[req.params.id];
@@ -4701,6 +4787,7 @@ app.post("/api/admin/servers/bulk", requireManager, async (req, res) => {
       for (const id of safeIds) {
         const [rows] = await db.query("SELECT name FROM status_servers WHERE id=?", [id]);
         if (!rows.length) continue;
+        await closeIncidentsForDeletedServer(id, rows[0].name);
         await db.query("DELETE FROM status_server_group_map WHERE server_id=?", [id]);
         await db.query("DELETE FROM status_servers WHERE id=?", [id]);
         delete serverStatus[id];

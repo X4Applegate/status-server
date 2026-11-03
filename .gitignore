@@ -5,6 +5,11 @@ servers.json
 .claude/
 docker-compose.yml
 backups/*.sql.gz
+# Pre-change snapshots of live rows taken during maintenance; these contain
+# production data and must never be committed.
+backups/*.json
+backups/*.txt
+.openclaw-cli-images/
 grafana.db
 # Stray root-level npm files (e.g. @openai/codex); the app lives in backend/
 /package.json
