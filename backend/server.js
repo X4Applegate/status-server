@@ -1991,7 +1991,7 @@ const omadaTokens = {}; // { controllerId: { accessToken, expiresAt, refreshAt }
 // These are the shapes it uses to reject a token. It answers an expired token with
 // an errorCode body rather than HTTP 401, which is how the bursts actually presented.
 const OMADA_EXPIRED_TOKEN_RE =
-  /access token has expired|re-?initiate the refreshToken|invalid access token|token.*(expired|invalid)|unauthoriz|HTTP 401|-?4411[12]\b/i;
+  /access token has expired|re-?initiate the refreshToken|invalid access token|\baccess token\b.*\b(expired|invalid)\b|(?:^|[\s:(\[])unauthorized(?:$|[\s:,.)\]])|\bHTTP 401\b|-?4411[12]\b/i;
 
 class OmadaPlaneError extends Error {
   constructor(message, kind) {
@@ -2011,7 +2011,12 @@ function isOmadaPlaneError(e) {
   const m = String(e.message || e);
   return OMADA_EXPIRED_TOKEN_RE.test(m)
       || /\bHTTP\s+(4\d\d|5\d\d)\b/i.test(m)
-      || /aborted due to timeout|operation was aborted|ETIMEDOUT|ECONNREFUSED|ECONNRESET|EAI_AGAIN|ENOTFOUND|socket hang up|fetch failed|self.signed|certificate/i.test(m);
+      // Error-code-shaped tokens only. A bare /certificate/ or /self.signed/ would also
+      // match a DEVICE NAME ("Certificate-Office-AP"), silently reclassifying that
+      // device's real outage as indeterminate and dropping it from alerting entirely.
+      || /aborted due to timeout|operation was aborted|\bETIMEDOUT\b|\bECONNREFUSED\b|\bECONNRESET\b|\bEAI_AGAIN\b|\bENOTFOUND\b|socket hang up|fetch failed/i.test(m)
+      || /\bself[- ]signed certificate\b|\bDEPTH_ZERO_SELF_SIGNED_CERT\b|\bERR_TLS|\bCERT_HAS_EXPIRED\b|\bUNABLE_TO_VERIFY_LEAF_SIGNATURE\b|certificate has expired|unable to get local issuer certificate/i.test(m)
+      || /invalid JSON response/i.test(m);
 }
 
 // Drop a cached token so the next call is forced to re-authenticate.
@@ -2069,6 +2074,13 @@ function omadaNoteControllerUnreadable(controllerId, msg, kind) {
   if (typeof db !== "undefined" && db && db.query) {
     db.query("UPDATE status_omada_controllers SET last_error=? WHERE id=?", [msg, controllerId]).catch(() => {});
   }
+}
+
+// Forget all cached monitoring-plane state for a controller. Called on delete so a
+// removed controller cannot leave a permanent unreadable-warning entry behind.
+function omadaForgetController(controllerId) {
+  if (controllerId == null) return;
+  delete _omadaUnreadable[String(controllerId)];
 }
 
 // Called after any successful controller read so the warning state closes.
@@ -2346,7 +2358,10 @@ async function omadaListDevices(controller, siteId, customerId, siteName, custom
       addLog({ level:"info", server:"omada", message:`MSP device path ${c.key} → ${e.message}` });
     }
   }
-  throw lastErr || new Error("All MSP device path variants failed");
+  // Preserve the plane classification: this only runs when no device path could be
+  // read, which is a controller-read failure, not a device state. A plain Error here
+  // would be classified as a device outage and reinstate the T-0487 false outage.
+  throw lastErr || new OmadaPlaneError("All MSP device path variants failed", "api");
 }
 
 // Tracks which controllers we've already logged a "device shape diagnostic" for,
@@ -2509,6 +2524,13 @@ async function omadaLteCheck(controllerId, siteId, customerId, siteName, custome
         if (obj && obj.mac === mac) gw = obj;
       } catch(e) {
         if (logOnce) addLog({ level:"info", server:"omada", message:`LTE probe ${path}: ${e.message}` });
+        // These 8 probes exist to discover which path a given firmware exposes, so a
+        // per-path failure is expected and swallowed. But if the CONTROLLER itself is
+        // unreadable, every remaining probe will fail the same way, and each one carries
+        // its own re-auth retry -- up to 16 token POSTs per poll against a controller
+        // that is already rejecting us. Stop at the first plane fault and let the caller
+        // report it as indeterminate.
+        if (isOmadaPlaneError(e)) throw e;
       }
     }
 
@@ -3939,7 +3961,7 @@ async function pollAll(force = false) {
             status:         overall,
             previous:       prev.overall,
             cause:          checks.filter(c => !c.ok && !c.indeterminate).map(c => c.detail).join(", ") || null,
-            checks:         checks.map(c => ({ type:c.type, port:c.port, ok:c.ok, detail:c.detail, response_ms:c.response_ms })),
+            checks:         checks.filter(c => !c.indeterminate).map(c => ({ type:c.type, port:c.port, ok:c.ok, detail:c.detail, response_ms:c.response_ms })),
             time:           now,
             isRecovery:     false,
             serverGroupIds: def.group_ids || []
@@ -3961,7 +3983,7 @@ async function pollAll(force = false) {
             status:         overall,
             previous:       prev.overall,
             cause:          checks.filter(c => !c.ok && !c.indeterminate).map(c => c.detail).join(", ") || null,
-            checks:         checks.map(c => ({ type:c.type, port:c.port, ok:c.ok, detail:c.detail, response_ms:c.response_ms })),
+            checks:         checks.filter(c => !c.indeterminate).map(c => ({ type:c.type, port:c.port, ok:c.ok, detail:c.detail, response_ms:c.response_ms })),
             time:           now,
             isRecovery:     false,
             serverGroupIds: def.group_ids || []
@@ -3986,7 +4008,7 @@ async function pollAll(force = false) {
             status:         overall,
             previous:       prev.overall,
             cause:          null,
-            checks:         checks.map(c => ({ type:c.type, port:c.port, ok:c.ok, detail:c.detail, response_ms:c.response_ms })),
+            checks:         checks.filter(c => !c.indeterminate).map(c => ({ type:c.type, port:c.port, ok:c.ok, detail:c.detail, response_ms:c.response_ms })),
             time:           now,
             isRecovery:     true,
             serverGroupIds: def.group_ids || []
@@ -4001,7 +4023,7 @@ async function pollAll(force = false) {
             status:         overall,
             previous:       prev.overall,
             cause:          null,
-            checks:         checks.map(c => ({ type:c.type, port:c.port, ok:c.ok, detail:c.detail, response_ms:c.response_ms })),
+            checks:         checks.filter(c => !c.indeterminate).map(c => ({ type:c.type, port:c.port, ok:c.ok, detail:c.detail, response_ms:c.response_ms })),
             time:           now,
             isRecovery:     true,
             serverGroupIds: def.group_ids || []
@@ -6115,6 +6137,7 @@ app.delete("/api/admin/omada-controllers/:id", requireAuth, async (req, res) => 
     await db.query("DELETE FROM status_omada_controller_groups WHERE controller_id=?", [id]);
     await db.query("DELETE FROM status_omada_controllers WHERE id=?", [id]);
     delete omadaTokens[id];
+    omadaForgetController(id);   // drop cached unreadable-state for a controller that no longer exists
     addLog({ level:"warn", server:"omada", message:`Controller removed: ${rows[0].name} by ${req.session.username}` });
     res.json({ ok:true });
   } catch(e) { res.status(500).json({ error: e.message }); }

@@ -105,7 +105,7 @@ function buildOmadaClient() {
      return { omadaGetToken, omadaApiGet, omadaMspApiGet, omadaAuthedGet,
               omadaInvalidateToken, isOmadaPlaneError, OmadaPlaneError,
               omadaCheckFailure, omadaNoteControllerUnreadable,
-              omadaNoteControllerReadable,
+              omadaNoteControllerReadable, omadaForgetController,
               OMADA_EXPIRED_TOKEN_RE, omadaTokens };`
   );
 
@@ -488,4 +488,123 @@ test("regression: a real device outage still opens an incident after the fix", a
     "a device reporting offline must still produce a decisive ok:false result");
   assert.doesNotMatch(gw, /indeterminate: true/,
     "the offline path must not be tagged indeterminate, or real outages go unreported");
+});
+
+// -- 6. Review findings (code review + two security passes on ec022d2) ------
+//
+// Five defects were found after the first commit. Each is pinned here so it cannot
+// regress. The first is the most consequential: the fix stopped the false INCIDENT
+// but the alert channels still rendered the indeterminate check as a red failure,
+// so an operator would have seen "AP down" anyway.
+
+test("review-1: alert payloads exclude indeterminate checks entirely", () => {
+  // `cause` was filtered, but the `checks` array passed into the event was not, and it
+  // drops the `indeterminate` flag. Every alert renderer then does `filter(c => !c.ok)`
+  // and `c.ok ? "✅" : "❌"` — and ok:null is falsy, so an unreadable controller was
+  // shown to the operator as a failed check, in all five alert channels.
+  const unfiltered = serverSource.match(
+    /checks:\s+checks\.map\(c => \(\{ type:c\.type/g
+  ) || [];
+  assert.equal(unfiltered.length, 0,
+    `every alert payload must filter indeterminate checks; ${unfiltered.length} unfiltered site(s) remain`);
+
+  const filtered = serverSource.match(
+    /checks:\s+checks\.filter\(c => !c\.indeterminate\)\.map\(c => \(\{ type:c\.type/g
+  ) || [];
+  assert.ok(filtered.length >= 4,
+    `expected at least 4 filtered alert payload sites, found ${filtered.length}`);
+});
+
+test("review-1b: the renderers' !c.ok predicate is why filtering at the source matters", () => {
+  // Documents the coupling: the renderers treat any falsy ok as a failure, so the
+  // payload is the only correct place to drop an indeterminate check.
+  assert.match(serverSource, /c\.ok \? "✅" : "❌"/,
+    "renderers still use a binary ok -> icon mapping, so ok:null must never reach them");
+});
+
+test("review-2: omadaListDevices' final throw preserves the plane classification", () => {
+  const fn = namedFunction("omadaListDevices");
+  assert.match(fn, /throw lastErr \|\| new OmadaPlaneError\("All MSP device path variants failed", "api"\)/,
+    "a plain Error here classifies as a DEVICE failure, reinstating the false outage " +
+    "for the one path that only runs when the controller could not be read");
+});
+
+test("review-3: the transport matcher cannot match inside a device name", () => {
+  const { api } = buildOmadaClient();
+  // Bare /certificate/ and /self.signed/ matched any device whose NAME contained them,
+  // silently reclassifying that device's real outage as indeterminate — i.e. dropping
+  // it from status, history, incidents and alerting.
+  const deviceNames = [
+    "Certificate-Office-AP offline (status 0)",
+    "AP-Certificates not found in site",
+    "self-signed-cert-lab-AP offline (status 0)",
+    "Token-Expired-Test-AP offline (status 0)",
+    "Unauthorized-Zone-AP not found in site",
+    "ER605-Unauthorized-VLAN offline (status 0)",
+  ];
+  for (const m of deviceNames) {
+    assert.equal(api.isOmadaPlaneError(new Error(m)), false,
+      `a device name must not trigger plane classification: ${m}`);
+  }
+});
+
+test("review-3b: narrowing did not break any real controller error", () => {
+  const { api } = buildOmadaClient();
+  // Every string below is either verbatim from the three bursts or constructed by this
+  // code. Narrowing the matchers must not lose any of them.
+  const realErrors = [
+    TOKEN_EXPIRED_MSG,
+    "/sites/69c17da8/devices?pageSize=100&page=1 HTTP 502",
+    "The operation was aborted due to timeout",
+    "token HTTP 500",
+    "MSP /sites HTTP 403",
+    "fetch failed",
+    "connect ECONNREFUSED 10.0.0.1:443",
+    "connect ETIMEDOUT 10.8.0.2:443",
+    "self signed certificate in certificate chain",
+    "token request: connect ETIMEDOUT 10.0.0.1:443",
+    "/x: invalid JSON response: Unexpected token <",
+    "Invalid access token",
+    "MSP /sites: unauthorized",
+  ];
+  for (const m of realErrors) {
+    assert.equal(api.isOmadaPlaneError(new Error(m)), true,
+      `must still be classified as a controller-read failure: ${m}`);
+  }
+  // And the real Omada error code still matches.
+  for (const code of ["-44112", "-44111", "44112"]) {
+    assert.equal(api.OMADA_EXPIRED_TOKEN_RE.test(code), true,
+      `the real expired-token errorCode must match: ${code}`);
+  }
+});
+
+test("review-4: deleting a controller drops its cached unreadable state", () => {
+  const { api } = buildOmadaClient();
+  api.omadaCheckFailure("omada_device", new api.OmadaPlaneError(TOKEN_EXPIRED_MSG, "auth"), 99);
+  api.omadaForgetController(99);
+  // Proven by behaviour: after forgetting, the next failure logs as a FIRST failure
+  // again rather than incrementing a stale entry for a controller that no longer exists.
+  const { calls } = (() => {
+    const h = buildOmadaClient();
+    h.api.omadaCheckFailure("omada_device", new h.api.OmadaPlaneError(TOKEN_EXPIRED_MSG, "auth"), 99);
+    h.api.omadaForgetController(99);
+    h.calls.logs.length = 0;
+    h.api.omadaCheckFailure("omada_device", new h.api.OmadaPlaneError(TOKEN_EXPIRED_MSG, "auth"), 99);
+    return h;
+  })();
+  assert.equal(calls.logs.filter(l => l.check === "CONTROLLER").length, 1,
+    "after forgetting, a new failure must log as a first failure, not increment a stale entry");
+
+  assert.match(serverSource, /omadaForgetController\(id\);/,
+    "the controller DELETE handler must prune the unreadable-state entry");
+});
+
+test("review-5: the LTE probe loop stops at the first plane fault", () => {
+  const fn = namedFunction("omadaLteCheck");
+  assert.match(fn, /if \(isOmadaPlaneError\(e\)\) throw e;/,
+    "8 discovery probes each carrying a re-auth retry is up to 16 token POSTs per poll " +
+    "against a controller already rejecting us; it must abort on the first plane fault");
+  // The per-path failure must still be swallowed — that is what the probes are for.
+  assert.match(fn, /LTE probe \$\{path\}: \$\{e\.message\}/,
+    "an ordinary per-path probe failure must still be logged and tolerated");
 });
