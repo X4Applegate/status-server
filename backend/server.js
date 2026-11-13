@@ -1976,7 +1976,115 @@ function dnsCheck(hostname, recordType = "A", expected = "", timeout = 5000) {
 }
 
 // -- Omada Open API client -----------------------------------------------------
-const omadaTokens = {}; // { controllerId: { accessToken, expiresAt } }
+const omadaTokens = {}; // { controllerId: { accessToken, expiresAt, refreshAt } }
+
+// An Omada API failure can mean two very different things:
+//   - the monitored DEVICE is down       -> a real outage
+//   - we could not READ the controller   -> a monitoring-plane fault
+// Conflating them opened N device incidents for one unreadable controller. T-0487:
+// six Joe monitors "failed" and recovered in the SAME SECOND, three times
+// (2026-10-26, 2026-10-28, 2026-11-06), inflating the uptime deficit in the weekly
+// report and training everyone to ignore AP alerts. OmadaPlaneError marks the second
+// kind so the check layer reports controller health instead of inventing an outage.
+//
+// The controller -- not our cached expiry -- is the authority on token validity.
+// These are the shapes it uses to reject a token. It answers an expired token with
+// an errorCode body rather than HTTP 401, which is how the bursts actually presented.
+const OMADA_EXPIRED_TOKEN_RE =
+  /access token has expired|re-?initiate the refreshToken|invalid access token|token.*(expired|invalid)|unauthoriz|HTTP 401|-?4411[12]\b/i;
+
+class OmadaPlaneError extends Error {
+  constructor(message, kind) {
+    super(message);
+    this.name       = "OmadaPlaneError";
+    this.omadaPlane = true;           // duck-typed so it survives any re-wrapping
+    this.kind       = kind || "api";  // "auth" | "http" | "timeout" | "api"
+  }
+}
+
+// True when an error means "we could not read the controller", not "the device is down".
+// Structural check first, then message, so an error re-thrown as a plain Error (e.g.
+// through omadaListDevices' variant loop) is still classified correctly.
+function isOmadaPlaneError(e) {
+  if (!e) return false;
+  if (e.omadaPlane === true) return true;
+  const m = String(e.message || e);
+  return OMADA_EXPIRED_TOKEN_RE.test(m)
+      || /\bHTTP\s+(4\d\d|5\d\d)\b/i.test(m)
+      || /aborted due to timeout|operation was aborted|ETIMEDOUT|ECONNREFUSED|ECONNRESET|EAI_AGAIN|ENOTFOUND|socket hang up|fetch failed|self.signed|certificate/i.test(m);
+}
+
+// Drop a cached token so the next call is forced to re-authenticate.
+function omadaInvalidateToken(controllerId) {
+  delete omadaTokens[controllerId];
+}
+
+// Turn a thrown Omada error into a check result. A monitoring-plane failure is reported
+// as INDETERMINATE (ok:null) rather than a device outage: we did not learn anything about
+// the device, so claiming it is down is a fabrication. Only a successful controller read
+// that reports the device offline may mark a monitor down.
+//
+// Indeterminate results are excluded from overall status, the uptime rollup and incident
+// open/close, and instead raise one controller-health warning for the controller.
+function omadaCheckFailure(type, e, controllerId) {
+  const msg = e && e.message ? e.message : String(e);
+  if (!isOmadaPlaneError(e)) {
+    // A genuine device-level failure (e.g. "not found in site", "no gateway in site").
+    return { type, ok:false, detail: msg };
+  }
+  const kind = e && e.kind ? e.kind : "api";
+  omadaNoteControllerUnreadable(controllerId, msg, kind);
+  return {
+    type,
+    ok: null,
+    indeterminate: true,
+    plane: "omada",
+    planeKind: kind,
+    controllerId: controllerId != null ? controllerId : null,
+    detail: `Controller unreadable (${kind}) - device state unknown: ${msg}`
+  };
+}
+
+// One warning per controller per unreadable window, not one per monitor per poll.
+// Six monitors on one controller previously produced six "outages"; they now produce a
+// single controller-health warning that names the real fault.
+const _omadaUnreadable = {}; // controllerId -> { since, lastMsg, loggedAt }
+const OMADA_UNREADABLE_RELOG_MS = 10 * 60_000;
+
+function omadaNoteControllerUnreadable(controllerId, msg, kind) {
+  if (controllerId == null) return;
+  const key = String(controllerId);
+  const now = Date.now();
+  const prev = _omadaUnreadable[key];
+  if (!prev) {
+    _omadaUnreadable[key] = { since: now, lastMsg: msg, loggedAt: now };
+    addLog({ level:"error", server:"omada", check:"CONTROLLER",
+      message:`Omada controller ${key} unreadable (${kind}): ${msg} - monitors on this controller are INDETERMINATE, not down` });
+  } else if (prev.lastMsg !== msg || now - prev.loggedAt >= OMADA_UNREADABLE_RELOG_MS) {
+    prev.lastMsg = msg; prev.loggedAt = now;
+    const mins = Math.round((now - prev.since) / 60000);
+    addLog({ level:"error", server:"omada", check:"CONTROLLER",
+      message:`Omada controller ${key} still unreadable after ${mins} min (${kind}): ${msg}` });
+  }
+  if (typeof db !== "undefined" && db && db.query) {
+    db.query("UPDATE status_omada_controllers SET last_error=? WHERE id=?", [msg, controllerId]).catch(() => {});
+  }
+}
+
+// Called after any successful controller read so the warning state closes.
+function omadaNoteControllerReadable(controllerId) {
+  if (controllerId == null) return;
+  const key = String(controllerId);
+  const prev = _omadaUnreadable[key];
+  if (!prev) return;
+  delete _omadaUnreadable[key];
+  const mins = Math.round((Date.now() - prev.since) / 60000);
+  addLog({ level:"info", server:"omada", check:"CONTROLLER",
+    message:`Omada controller ${key} readable again after ${mins} min - monitor states are authoritative again` });
+  if (typeof db !== "undefined" && db && db.query) {
+    db.query("UPDATE status_omada_controllers SET last_error=NULL WHERE id=?", [controllerId]).catch(() => {});
+  }
+}
 
 // Returns an undici dispatcher that skips TLS verification for self-signed
 // Omada controller certs, or undefined (default dispatcher = verify TLS).
@@ -1995,10 +2103,20 @@ async function omadaGetInfo(baseUrl, verifyTls) {
   return data.result; // { omadacId, controllerVer, ... }
 }
 
-// Get a (cached) access token for a controller. Re-auths if missing or near expiry.
-async function omadaGetToken(controller) {
+// Renew once a token is this far through its lifetime instead of waiting for it to be
+// nearly expired. The old margin was a flat 30s, so a 2h token was reused until its last
+// half-minute and any clock skew against the controller put us on the wrong side of
+// expiry. Proactive renewal alone does NOT fix early server-side invalidation -- the
+// retry path in omadaAuthedGet() does that -- but it removes the skew window.
+const OMADA_TOKEN_REFRESH_RATIO = 0.75;
+const OMADA_TOKEN_MIN_MARGIN_MS = 60_000;
+
+// Get a (cached) access token for a controller. Re-auths if missing, past the proactive
+// refresh point, or near expiry. `force` skips the cache entirely -- used by the retry
+// path after the controller has told us the cached token is dead.
+async function omadaGetToken(controller, force = false) {
   const cached = omadaTokens[controller.id];
-  if (cached && cached.expiresAt > Date.now() + 30_000) return cached.accessToken;
+  if (!force && cached && cached.refreshAt > Date.now()) return cached.accessToken;
   if (!controller.omadac_id) throw new Error("omadacId not set on controller");
   const safeBase = await sanitizeBaseUrl(controller.base_url);
   const url = `${safeBase}/openapi/authorize/token?grant_type=client_credentials`;
@@ -2007,19 +2125,93 @@ async function omadaGetToken(controller) {
     client_id:     controller.client_id,
     client_secret: controller.client_secret
   });
-  const r = await fetch(url, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body, dispatcher: omadaDispatcher(controller.verify_tls), signal: AbortSignal.timeout(8000)
-  });
-  if (!r.ok) throw new Error(`token HTTP ${r.status}`);
+  let r;
+  try {
+    r = await fetch(url, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body, dispatcher: omadaDispatcher(controller.verify_tls), signal: AbortSignal.timeout(8000)
+    });
+  } catch(e) {
+    // Could not even reach the controller to authenticate — a monitoring-plane
+    // fault, not a statement about any monitored device.
+    throw new OmadaPlaneError(`token request: ${e.message}`, "timeout");
+  }
+  if (!r.ok) throw new OmadaPlaneError(`token HTTP ${r.status}`, "auth");
   const data = await r.json();
-  if (data.errorCode !== 0) throw new Error(data.msg || "auth error");
+  if (data.errorCode !== 0) throw new OmadaPlaneError(data.msg || "auth error", "auth");
   const accessToken = data.result?.accessToken;
   const expiresIn   = data.result?.expiresIn || 7200;
-  if (!accessToken) throw new Error("no accessToken in response");
-  omadaTokens[controller.id] = { accessToken, expiresAt: Date.now() + expiresIn * 1000 };
+  if (!accessToken) throw new OmadaPlaneError("no accessToken in response", "auth");
+  const lifetimeMs = expiresIn * 1000;
+  // Refresh at 75% of the lifetime, and always at least a minute before our own expiry.
+  const refreshAt  = Date.now() + Math.max(
+    0,
+    Math.min(lifetimeMs * OMADA_TOKEN_REFRESH_RATIO, lifetimeMs - OMADA_TOKEN_MIN_MARGIN_MS)
+  );
+  omadaTokens[controller.id] = { accessToken, expiresAt: Date.now() + lifetimeMs, refreshAt };
   return accessToken;
+}
+
+// Shared authed GET with exactly one forced re-auth retry, used by both the standard and
+// MSP clients so recovery behaviour cannot drift between them.
+//
+// Before this, each client called omadaGetToken() once and threw on any error. When the
+// controller invalidated a token earlier than our cached expiry, the cache still looked
+// valid, so every later poll resent the dead token until our own timer lapsed -- which is
+// why six monitors sharing one cache entry recovered at the identical second, and why the
+// stall ran 30 min in October but 114 min in November (it lasts for whatever remained of
+// the cached lifetime). Now the controller's rejection clears the cache immediately.
+async function omadaAuthedGet(controller, url, path, label) {
+  const tag = label ? `${label} ${path}` : path;
+  for (let attempt = 0; attempt < 2; attempt++) {
+    const token = await omadaGetToken(controller, attempt > 0);
+    let r;
+    try {
+      r = await fetch(url, {
+        headers:    { Authorization: `AccessToken=${token}` },
+        dispatcher: omadaDispatcher(controller.verify_tls),
+        signal:     AbortSignal.timeout(8000)
+      });
+    } catch(e) {
+      // Transport-level failure (timeout, DNS, refused, TLS). The controller is
+      // unreachable, which says nothing about the monitored device.
+      throw new OmadaPlaneError(`${tag}: ${e.message}`, "timeout");
+    }
+
+    if (r.status === 401 || r.status === 403) {
+      if (attempt === 0) {
+        omadaInvalidateToken(controller.id);
+        addLog({ level:"warn", server:"omada", message:`${tag}: HTTP ${r.status} - token rejected, re-authenticating and retrying once` });
+        continue;
+      }
+      throw new OmadaPlaneError(`${tag} HTTP ${r.status} after re-auth`, "auth");
+    }
+    if (!r.ok) throw new OmadaPlaneError(`${tag} HTTP ${r.status}`, "http");
+
+    let data;
+    try { data = await r.json(); }
+    catch(e) { throw new OmadaPlaneError(`${tag}: invalid JSON response: ${e.message}`, "api"); }
+
+    if (data.errorCode !== 0) {
+      const msg = data.msg || `${tag} error`;
+      // The controller rejects a token with HTTP 200 + an errorCode body, which is how
+      // the T-0487 bursts presented. Match the body, not just the status.
+      if (OMADA_EXPIRED_TOKEN_RE.test(msg) || OMADA_EXPIRED_TOKEN_RE.test(String(data.errorCode))) {
+        if (attempt === 0) {
+          omadaInvalidateToken(controller.id);
+          addLog({ level:"warn", server:"omada", message:`${tag}: ${msg} - token rejected, re-authenticating and retrying once` });
+          continue;
+        }
+        throw new OmadaPlaneError(`${msg} (after re-auth)`, "auth");
+      }
+      // A non-auth API error is still a controller read failure, not a device state.
+      throw new OmadaPlaneError(msg, "api");
+    }
+    omadaNoteControllerReadable(controller.id);
+    return data.result;
+  }
+  throw new OmadaPlaneError(`${tag}: exhausted re-auth retry`, "auth");
 }
 
 // Authenticated GET to /openapi/v1/{omadacId}<path>  (standard mode)
@@ -2029,17 +2221,8 @@ async function omadaApiGet(controller, path) {
   // Sanitize each path segment to prevent traversal; preserve query string as-is
   const [pathOnly, queryString] = path.split("?");
   const safePath  = pathOnly.split("/").map(seg => seg.replace(/[^A-Za-z0-9\-_.:@!$&'()*+,;=~]/g, "")).join("/");
-  const token = await omadaGetToken(controller);
   const url   = `${safeBase}/openapi/v1/${safeId}${safePath}${queryString ? "?" + queryString : ""}`;
-  const r = await fetch(url, {
-    headers:    { Authorization: `AccessToken=${token}` },
-    dispatcher: omadaDispatcher(controller.verify_tls),
-    signal:     AbortSignal.timeout(8000)
-  });
-  if (!r.ok) throw new Error(`${path} HTTP ${r.status}`);
-  const data = await r.json();
-  if (data.errorCode !== 0) throw new Error(data.msg || `${path} error`);
-  return data.result;
+  return await omadaAuthedGet(controller, url, path);
 }
 
 // Authenticated GET to /openapi/v1/msp/{mspId}<path>  (MSP mode — different URL shape)
@@ -2051,17 +2234,8 @@ async function omadaMspApiGet(controller, path) {
   // Sanitize each path segment to prevent traversal; preserve query string as-is
   const [pathOnly, queryString] = path.split("?");
   const safePath = pathOnly.split("/").map(seg => seg.replace(/[^A-Za-z0-9\-_.:@!$&'()*+,;=~]/g, "")).join("/");
-  const token = await omadaGetToken(controller);
   const url   = `${safeBase}/openapi/v1/msp/${mspId}${safePath}${queryString ? "?" + queryString : ""}`;
-  const r = await fetch(url, {
-    headers:    { Authorization: `AccessToken=${token}` },
-    dispatcher: omadaDispatcher(controller.verify_tls),
-    signal:     AbortSignal.timeout(8000)
-  });
-  if (!r.ok) throw new Error(`MSP ${path} HTTP ${r.status}`);
-  const data = await r.json();
-  if (data.errorCode !== 0) throw new Error(data.msg || `MSP ${path} error`);
-  return data.result;
+  return await omadaAuthedGet(controller, url, path, "MSP");
 }
 
 // Detect MSP vs standard mode by probing the actual MSP path documented for v6:
@@ -2253,7 +2427,7 @@ async function omadaGatewayCheck(controllerId, siteId, customerId, siteName, cus
 
     return { type:"omada_gateway", ok, detail, response_ms: apiResponseMs };
   } catch(e) {
-    return { type:"omada_gateway", ok:false, detail: e.message };
+    return omadaCheckFailure("omada_gateway", e, controllerId);
   }
 }
 
@@ -2285,7 +2459,7 @@ async function omadaDeviceCheck(controllerId, siteId, customerId, siteName, cust
 
     return { type:"omada_device", ok, detail, response_ms: apiResponseMs };
   } catch(e) {
-    return { type:"omada_device", ok:false, detail: e.message };
+    return omadaCheckFailure("omada_device", e, controllerId);
   }
 }
 
@@ -2391,7 +2565,7 @@ async function omadaLteCheck(controllerId, siteId, customerId, siteName, custome
     const detail = `${netType} ${stateStr}${signalStr}${carrierStr}${ipStr}`;
     return { type:"omada_lte", ok, detail };
   } catch(e) {
-    return { type:"omada_lte", ok:false, detail: e.message };
+    return omadaCheckFailure("omada_lte", e, controllerId);
   }
 }
 
@@ -2719,6 +2893,12 @@ async function runChecks(def) {
       if (c.type==="tls_cert")     return await tlsCertCheck(c.host || def.host, c.port, c.warn_days, c.timeout);
       return { type:c.type, ok:false, detail:"unknown check type" };
     } catch(e) {
+      // An Omada monitoring-plane fault must stay indeterminate even if it escapes
+      // as a raw throw (e.g. re-thrown by omadaListDevices' variant loop), otherwise
+      // the ok:false default would reinstate the fabricated device outage.
+      if (String(c.type || "").startsWith("omada_") && isOmadaPlaneError(e)) {
+        return omadaCheckFailure(c.type, e, c.controller_id);
+      }
       return { type:c.type, ok:false, detail:`check error: ${e.message}` };
     }
   }));
@@ -2759,6 +2939,13 @@ async function recordHistory(def, checks, overall) {
                   : ch.type === "script"        ? `script`
                   : ch.type === "tls_cert"      ? `tls_cert:${ch.cert && ch.cert.subject ? ch.cert.subject.replace(/[^a-z0-9.\-]/gi,"_").slice(0,30) : "cert"}`
                   : ch.type;
+      // An indeterminate check (Omada controller unreadable) is not recorded as a check
+      // result at all. `status_history.ok` is NOT NULL, and both available values are
+      // wrong here: 0 manufactures the uptime deficit this fixes, 1 would hide a real
+      // outage behind an unreadable controller. Skipping the row keeps the uptime
+      // denominator honest -- the window simply has fewer samples -- and the fault is
+      // recorded against the controller instead (omadaNoteControllerUnreadable).
+      if (ch.indeterminate) continue;
       await db.query(
         "INSERT INTO status_history (server_id, check_type, ok, response_ms, detail, checked_at) VALUES (?,?,?,?,?,?)",
         [sid, label, ch.ok ? 1 : 0, ms, ch.detail || null, now]
@@ -2779,11 +2966,17 @@ async function recordHistory(def, checks, overall) {
       [sid]
     );
 
+    // A poll in which every check was indeterminate must not open an incident, and must
+    // not close one either: we do not know the device's state. Guarding here as well as
+    // in pollAll() keeps the invariant if a future caller recomputes `overall`.
+    const decisiveChecks = checks.filter(c => !c.indeterminate);
+    if (!decisiveChecks.length) return;
+
     if (overall !== "up" && open.length === 0) {
       // New incident. status defaults to 'investigating', impact to 'minor'.
       // We seed the update timeline with the initial detection message so the
       // public page always has at least one entry to show.
-      const cause = checks.filter(c => !c.ok).map(c => c.detail).join(", ");
+      const cause = decisiveChecks.filter(c => !c.ok).map(c => c.detail).join(", ");
       const [ins] = await db.query(
         "INSERT INTO status_incidents (server_id, server_name, started_at, cause) VALUES (?,?,?,?)",
         [sid, def.name, now, cause]
@@ -2795,7 +2988,7 @@ async function recordHistory(def, checks, overall) {
         "INSERT INTO status_incident_updates (incident_id, status, message) VALUES (?,?,?)",
         [ins.insertId, "investigating", detectionMsg]
       );
-    } else if (overall === "up" && open.length > 0 && checks.length > 0 && checks.every(c => c.ok)) {
+    } else if (overall === "up" && open.length > 0 && decisiveChecks.every(c => c.ok)) {
       // Auto-close open incident. If an operator hasn't manually moved the status
       // past "investigating" we still mark it resolved and append a recovery update.
       // Only a real passing check result may do this: during the failure-threshold
@@ -3663,9 +3856,21 @@ async function pollAll(force = false) {
   due.forEach(def => { _lastPolled[def.id] = nowMs; });
   await Promise.all(due.map(async def => {
     const checks     = await runChecks(def);
-    const rawOverall = checks.every(c=>c.ok) ? "up" : checks.some(c=>c.ok) ? "degraded" : "down";
+    // Indeterminate checks (Omada controller unreadable) carry no device information, so
+    // they may neither mark the monitor down nor vouch that it is up. If EVERY check is
+    // indeterminate the monitor keeps its previous status instead of inventing one
+    // (T-0487: this is what turned one dead token into six synchronized "outages").
+    const decisive   = checks.filter(c => !c.indeterminate);
+    const rawOverall = !decisive.length
+      ? null
+      : decisive.every(c=>c.ok) ? "up" : decisive.some(c=>c.ok) ? "degraded" : "down";
     const prev       = serverStatus[def.id] || {};
-    const history    = [...(prev.uptimeHistory||[]), rawOverall==="up"].slice(-90);
+    // A blind poll (rawOverall === null) appends NOTHING: `null === "up"` is false, so
+    // recording it would push a false sample and deflate the uptime sparkline and flap
+    // detection exactly the way the incident rows were deflating the weekly report.
+    const history    = rawOverall === null
+      ? (prev.uptimeHistory || []).slice(-90)
+      : [...(prev.uptimeHistory||[]), rawOverall==="up"].slice(-90);
 
     // Flap detection: if status alternates ≥4 times in the last 10 checks, the
     // service is flapping. Downward alerts are suppressed while flapping to prevent
@@ -3675,9 +3880,15 @@ async function pollAll(force = false) {
     // Sticky status: suppress transitions to down/degraded until rawOverall has
     // stayed non-up for `failure_threshold` consecutive polls. Recovery is immediate.
     const threshold = Math.max(1, def.failure_threshold || 1);
-    const failStreak = rawOverall === "up" ? 0 : (prev.failStreak || 0) + 1;
+    // rawOverall === null means "we learned nothing this poll": hold the streak where it
+    // is so an unreadable controller neither escalates toward an incident nor clears one.
+    const failStreak = rawOverall === null ? (prev.failStreak || 0)
+                     : rawOverall === "up" ? 0
+                     : (prev.failStreak || 0) + 1;
     let overall;
-    if (rawOverall === "up") {
+    if (rawOverall === null) {
+      overall = (prev.overall && prev.overall !== "pending") ? prev.overall : "pending";
+    } else if (rawOverall === "up") {
       overall = "up";
     } else if (failStreak >= threshold) {
       overall = rawOverall;
@@ -3727,7 +3938,7 @@ async function pollAll(force = false) {
             host:           def.host,
             status:         overall,
             previous:       prev.overall,
-            cause:          checks.filter(c => !c.ok).map(c => c.detail).join(", ") || null,
+            cause:          checks.filter(c => !c.ok && !c.indeterminate).map(c => c.detail).join(", ") || null,
             checks:         checks.map(c => ({ type:c.type, port:c.port, ok:c.ok, detail:c.detail, response_ms:c.response_ms })),
             time:           now,
             isRecovery:     false,
@@ -3749,7 +3960,7 @@ async function pollAll(force = false) {
             host:           def.host,
             status:         overall,
             previous:       prev.overall,
-            cause:          checks.filter(c => !c.ok).map(c => c.detail).join(", ") || null,
+            cause:          checks.filter(c => !c.ok && !c.indeterminate).map(c => c.detail).join(", ") || null,
             checks:         checks.map(c => ({ type:c.type, port:c.port, ok:c.ok, detail:c.detail, response_ms:c.response_ms })),
             time:           now,
             isRecovery:     false,
