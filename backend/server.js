@@ -2024,6 +2024,44 @@ function omadaInvalidateToken(controllerId) {
   delete omadaTokens[controllerId];
 }
 
+// Per-controller authentication backoff.
+//
+// The retry in omadaAuthedGet() is bounded at one re-auth per call, but calls compose:
+// omadaLteCheck() runs 9 discovery probes and omadaListDevices() up to 3 MSP variants,
+// each with its own retry. Against a controller rejecting every token that is ~26
+// client_credentials POSTs per poll, replaying the real client_secret -- enough to trip
+// rate limiting or an IPS in front of the controller, and one more capture opportunity
+// per POST for a verify_tls=0 controller. While auth is known-failing, short-circuit
+// instead of re-POSTing; the indeterminate classification makes that safe, because a
+// backoff produces ok:null rather than a false device outage.
+const _omadaAuthBackoff = {}; // controllerId -> { until, fails, lastMsg }
+const OMADA_AUTH_BACKOFF_MAX_MS = 5 * 60_000;
+
+function omadaNoteAuthFailure(controllerId, msg) {
+  if (controllerId == null) return;
+  const key = String(controllerId);
+  const prev = _omadaAuthBackoff[key];
+  const fails = (prev ? prev.fails : 0) + 1;
+  // 2s, 4s, 8s ... capped at 5 min.
+  const delay = Math.min(OMADA_AUTH_BACKOFF_MAX_MS, Math.pow(2, Math.min(fails, 8)) * 1000);
+  _omadaAuthBackoff[key] = { until: Date.now() + delay, fails, lastMsg: msg };
+}
+
+function omadaClearAuthBackoff(controllerId) {
+  if (controllerId == null) return;
+  delete _omadaAuthBackoff[String(controllerId)];
+}
+
+// Returns the active backoff entry, or null when authentication may be attempted.
+function omadaAuthBackoffActive(controllerId) {
+  if (controllerId == null) return null;
+  const key = String(controllerId);
+  const bo = _omadaAuthBackoff[key];
+  if (!bo) return null;
+  if (bo.until <= Date.now()) { delete _omadaAuthBackoff[key]; return null; }
+  return bo;
+}
+
 // Turn a thrown Omada error into a check result. A monitoring-plane failure is reported
 // as INDETERMINATE (ok:null) rather than a device outage: we did not learn anything about
 // the device, so claiming it is down is a fabrication. Only a successful controller read
@@ -2056,23 +2094,42 @@ function omadaCheckFailure(type, e, controllerId) {
 const _omadaUnreadable = {}; // controllerId -> { since, lastMsg, loggedAt }
 const OMADA_UNREADABLE_RELOG_MS = 10 * 60_000;
 
-function omadaNoteControllerUnreadable(controllerId, msg, kind) {
+// Controller-supplied text is untrusted: it reaches the log stream, the admin UI and
+// status_omada_controllers.last_error. Strip control characters and angle brackets and
+// bound the length at ingress, so no downstream sink has to be the only line of defence
+// and a hostile controller cannot post an unbounded string into a TEXT column.
+function omadaSanitizeControllerText(msg) {
+  return String(msg == null ? "" : msg).replace(/[\x00-\x1f\x7f<>]/g, " ").trim().slice(0, 300);
+}
+
+function omadaNoteControllerUnreadable(controllerId, rawMsg, kind) {
   if (controllerId == null) return;
+  const msg = omadaSanitizeControllerText(rawMsg);
   const key = String(controllerId);
   const now = Date.now();
   const prev = _omadaUnreadable[key];
+  let wroteNew = false;
   if (!prev) {
     _omadaUnreadable[key] = { since: now, lastMsg: msg, loggedAt: now };
+    wroteNew = true;
     addLog({ level:"error", server:"omada", check:"CONTROLLER",
       message:`Omada controller ${key} unreadable (${kind}): ${msg} - monitors on this controller are INDETERMINATE, not down` });
   } else if (prev.lastMsg !== msg || now - prev.loggedAt >= OMADA_UNREADABLE_RELOG_MS) {
     prev.lastMsg = msg; prev.loggedAt = now;
+    wroteNew = true;
     const mins = Math.round((now - prev.since) / 60000);
     addLog({ level:"error", server:"omada", check:"CONTROLLER",
       message:`Omada controller ${key} still unreadable after ${mins} min (${kind}): ${msg}` });
   }
-  if (typeof db !== "undefined" && db && db.query) {
-    db.query("UPDATE status_omada_controllers SET last_error=? WHERE id=?", [msg, controllerId]).catch(() => {});
+  // Write only when the message actually changed. Previously this ran on EVERY failure,
+  // which is up to 24 writes per poll through the LTE probe loop, and it clobbered a
+  // value the admin UI had just written on save/test. The guard makes one unreadable
+  // window one write, and the WHERE clause stops us overwriting an identical value.
+  if (wroteNew && typeof db !== "undefined" && db && db.query) {
+    db.query(
+      "UPDATE status_omada_controllers SET last_error=? WHERE id=? AND (last_error IS NULL OR last_error <> ?)",
+      [msg, controllerId, msg]
+    ).catch(() => {});
   }
 }
 
@@ -2080,7 +2137,12 @@ function omadaNoteControllerUnreadable(controllerId, msg, kind) {
 // removed controller cannot leave a permanent unreadable-warning entry behind.
 function omadaForgetController(controllerId) {
   if (controllerId == null) return;
+  // Note the key types: _omadaUnreadable and _omadaAuthBackoff are keyed by String(),
+  // _deviceVariantById by the raw id. Deleting with the wrong type silently no-ops.
   delete _omadaUnreadable[String(controllerId)];
+  delete _omadaAuthBackoff[String(controllerId)];
+  delete _deviceVariantById[controllerId];
+  delete omadaTokens[controllerId];
 }
 
 // Called after any successful controller read so the warning state closes.
@@ -2129,6 +2191,16 @@ const OMADA_TOKEN_MIN_MARGIN_MS = 60_000;
 async function omadaGetToken(controller, force = false) {
   const cached = omadaTokens[controller.id];
   if (!force && cached && cached.refreshAt > Date.now()) return cached.accessToken;
+  // Authentication is known to be failing for this controller: fail fast instead of
+  // replaying the client_secret once per probe. A still-valid cached token above is
+  // unaffected -- only a NEW authentication is suppressed.
+  const backoff = omadaAuthBackoffActive(controller.id);
+  if (backoff) {
+    throw new OmadaPlaneError(
+      `auth backoff active for ${Math.ceil((backoff.until - Date.now()) / 1000)}s after ${backoff.fails} failure(s): ${backoff.lastMsg}`,
+      "auth"
+    );
+  }
   if (!controller.omadac_id) throw new Error("omadacId not set on controller");
   const safeBase = await sanitizeBaseUrl(controller.base_url);
   const url = `${safeBase}/openapi/authorize/token?grant_type=client_credentials`;
@@ -2149,19 +2221,25 @@ async function omadaGetToken(controller, force = false) {
     // fault, not a statement about any monitored device.
     throw new OmadaPlaneError(`token request: ${e.message}`, "timeout");
   }
-  if (!r.ok) throw new OmadaPlaneError(`token HTTP ${r.status}`, "auth");
+  if (!r.ok) { omadaNoteAuthFailure(controller.id, `token HTTP ${r.status}`); throw new OmadaPlaneError(`token HTTP ${r.status}`, "auth"); }
   const data = await r.json();
-  if (data.errorCode !== 0) throw new OmadaPlaneError(data.msg || "auth error", "auth");
+  if (data.errorCode !== 0) { const am = omadaSanitizeControllerText(data.msg || "auth error"); omadaNoteAuthFailure(controller.id, am); throw new OmadaPlaneError(am, "auth"); }
   const accessToken = data.result?.accessToken;
   const expiresIn   = data.result?.expiresIn || 7200;
-  if (!accessToken) throw new OmadaPlaneError("no accessToken in response", "auth");
+  if (!accessToken) { omadaNoteAuthFailure(controller.id, "no accessToken in response"); throw new OmadaPlaneError("no accessToken in response", "auth"); }
   const lifetimeMs = expiresIn * 1000;
   // Refresh at 75% of the lifetime, and always at least a minute before our own expiry.
+  // Floor the margin at half the lifetime rather than a flat minute: for expiresIn <= 60
+  // a flat 60s margin makes refreshAt == now, so the cache is defeated and EVERY call
+  // re-authenticates -- doubling request volume and meaning the "cached token" the retry
+  // is meant to replace was never cached at all.
   const refreshAt  = Date.now() + Math.max(
     0,
-    Math.min(lifetimeMs * OMADA_TOKEN_REFRESH_RATIO, lifetimeMs - OMADA_TOKEN_MIN_MARGIN_MS)
+    Math.min(lifetimeMs * OMADA_TOKEN_REFRESH_RATIO,
+             Math.max(lifetimeMs - OMADA_TOKEN_MIN_MARGIN_MS, lifetimeMs * 0.5))
   );
   omadaTokens[controller.id] = { accessToken, expiresAt: Date.now() + lifetimeMs, refreshAt };
+  omadaClearAuthBackoff(controller.id);   // authentication works again
   return accessToken;
 }
 
@@ -3929,7 +4007,12 @@ async function pollAll(force = false) {
         c.type === "omada_gateway" ? "OMADA-GW" :
         c.type === "omada_device"  ? `OMADA-DEV:${c.device_name||c.device_mac||"?"}` :
         c.type.toUpperCase();
-      addLog({ level:c.ok?"info":"error", server:def.name, serverId:def.id, check:label, message:`${label} - ${c.detail}`, ok:c.ok, detail:c.detail });
+      // An indeterminate check is a controller fault, not a device failure. Logging it
+      // at "error" against this monitor reinstates exactly the per-monitor-per-poll
+      // fan-out that the single controller warning exists to replace, and paints the
+      // monitor red in the event log while its status is correctly held (T-0487).
+      const lvl = c.indeterminate ? "warn" : (c.ok ? "info" : "error");
+      addLog({ level:lvl, server:def.name, serverId:def.id, check:label, message:`${label} - ${c.detail}`, ok:c.ok, indeterminate:!!c.indeterminate, detail:c.detail });
     });
 
     const inMaintenance = isUnderMaintenance(def.id);
@@ -6101,7 +6184,10 @@ app.put("/api/admin/omada-controllers/:id", requireAuth, async (req, res) => {
         [cleanGroupIds.map(gid => [id, gid])]
       );
     }
-    delete omadaTokens[id];
+    // Clear every cached per-controller state, not just the token: the admin may have
+    // supplied new credentials, and a stale auth backoff from the old ones would make
+    // the re-test below fail without attempting it.
+    omadaForgetController(id);
     const ctrlForAuth = { id, base_url:url, client_id, client_secret:finalSecret, omadac_id:omadacId, verify_tls:vtls };
     try {
       await omadaGetToken(ctrlForAuth);
@@ -6136,8 +6222,7 @@ app.delete("/api/admin/omada-controllers/:id", requireAuth, async (req, res) => 
     }
     await db.query("DELETE FROM status_omada_controller_groups WHERE controller_id=?", [id]);
     await db.query("DELETE FROM status_omada_controllers WHERE id=?", [id]);
-    delete omadaTokens[id];
-    omadaForgetController(id);   // drop cached unreadable-state for a controller that no longer exists
+    omadaForgetController(id);   // token, backoff, unreadable-state and variant cache
     addLog({ level:"warn", server:"omada", message:`Controller removed: ${rows[0].name} by ${req.session.username}` });
     res.json({ ok:true });
   } catch(e) { res.status(500).json({ error: e.message }); }
@@ -8119,7 +8204,7 @@ app.get("/api/v1/status", requireApiKey("read"), (req, res) => {
     name:         s.name,
     status:       s.overall,
     last_checked: s.lastChecked,
-    checks:       (s.checks||[]).map(c => ({ type:c.type, ok:c.ok, detail:c.detail||null, response_ms:c.response_ms||null }))
+    checks:       (s.checks||[]).map(c => ({ type:c.type, ok:c.ok, indeterminate:!!c.indeterminate, detail:c.detail||null, response_ms:c.response_ms||null }))
   }));
   res.json(out);
 });
@@ -8129,7 +8214,7 @@ app.get("/api/v1/status/:id", requireApiKey("read"), (req, res) => {
   const s = serverStatus[req.params.id];
   if (!s) return res.status(404).json({ error: "Server not found" });
   res.json({ id: req.params.id, name: s.name, status: s.overall, last_checked: s.lastChecked,
-    checks: (s.checks||[]).map(c => ({ type:c.type, ok:c.ok, detail:c.detail||null, response_ms:c.response_ms||null })) });
+    checks: (s.checks||[]).map(c => ({ type:c.type, ok:c.ok, indeterminate:!!c.indeterminate, detail:c.detail||null, response_ms:c.response_ms||null })) });
 });
 
 // v1 write endpoint — CI/CD pipelines push external status

