@@ -3077,9 +3077,18 @@ async function recordHistory(def, checks, overall) {
       // We seed the update timeline with the initial detection message so the
       // public page always has at least one entry to show.
       const cause = decisiveChecks.filter(c => !c.ok).map(c => c.detail).join(", ");
+      // started_at is NOW() for the same reason ended_at is (T-0836): every
+      // endpoint of an incident interval must come from one clock. ended_at is
+      // written DB-side, so a JS `now` here would put the two ends of the
+      // interval in different clock domains — the mysql2 `timezone: "local"`
+      // pool converts a bound Date into the process zone (TZ=America/Los_Angeles),
+      // which only matches NOW() while the MariaDB session zone agrees. If it
+      // ever does not, every duration_s is off by the offset. GREATEST(0, ...)
+      // keeps that from going negative, but the honest fix is for both ends to
+      // be stamped by the database.
       const [ins] = await db.query(
-        "INSERT INTO status_incidents (server_id, server_name, started_at, cause) VALUES (?,?,?,?)",
-        [sid, def.name, now, cause]
+        "INSERT INTO status_incidents (server_id, server_name, started_at, cause) VALUES (?,?,NOW(),?)",
+        [sid, def.name, cause]
       );
       const detectionMsg = cause
         ? `Automated check failed: ${cause}`
@@ -3095,14 +3104,36 @@ async function recordHistory(def, checks, overall) {
       // grace period (e.g. the first polls after a restart) `overall` can read
       // "up" while every check is still failing, which once resolved a live
       // incident and then reopened a duplicate (2026-10-07).
-      const dur = Math.round((now - new Date(open[0].started_at)) / 1000);
+      //
+      // ended_at and duration_s are computed by the DATABASE (NOW() /
+      // TIMESTAMPDIFF), never from this function's `now`. pollAll() reads the
+      // clock once at the top of the poll and autoResolveIncidents() closes with
+      // THAT timestamp, while `now` here is read later, after this monitor's
+      // checks have run. Two writers with two clocks wrote whichever value they
+      // held into the same column, so the loser could overwrite ended_at with a
+      // time BEFORE started_at and store a negative duration_s (T-0836: six live
+      // rows at -5 s to -35 s, exactly the duration of that monitor's checks).
+      // One clock, owned by the DB, is the only arrangement where no ordering of
+      // the two writers can produce a negative interval. GREATEST(0, ...) floors
+      // it so a future clock disagreement still cannot store one.
+      //
       // Conditional on still being open, so this and autoResolveIncidents()
-      // can't both append a "resolved" update for the same recovery.
+      // can't both append a "resolved" update for the same recovery. Both now
+      // claim on `ended_at IS NULL` — the column being written — so exactly one
+      // writer can ever close a given incident.
       const [upd] = await db.query(
-        "UPDATE status_incidents SET ended_at=?, duration_s=?, status='resolved' WHERE id=? AND ended_at IS NULL",
-        [now, dur, open[0].id]
+        `UPDATE status_incidents
+            SET ended_at=NOW(),
+                duration_s=GREATEST(0, TIMESTAMPDIFF(SECOND, started_at, NOW())),
+                status='resolved'
+          WHERE id=? AND ended_at IS NULL`,
+        [open[0].id]
       );
       if (upd.affectedRows) {
+        // Read the duration the DB stored rather than recomputing it here, so the
+        // timeline message and the row can never disagree.
+        const [[durRow]] = await db.query("SELECT duration_s FROM status_incidents WHERE id=?", [open[0].id]);
+        const dur = durRow ? Number(durRow.duration_s || 0) : 0;
         await db.query(
           "INSERT INTO status_incident_updates (incident_id, status, message) VALUES (?,?,?)",
           [open[0].id, "resolved", `Automated checks are passing again. Service restored after ${fmtDuration(dur)}.`]
@@ -3918,23 +3949,46 @@ async function seedStatusFromOpenIncidents() {
 
 // Auto-resolve open incidents when a service recovers.
 // Adds a system recovery update and marks the incident resolved.
+//
+// This runs from pollAll() on the DOWN -> UP transition, concurrently with
+// recordHistory(), which closes the same incident from the same recovery. Both
+// must therefore agree on two things, or they corrupt the row they are racing for
+// (T-0836):
+//
+//  - ONE CLOCK. Both write `ended_at=NOW()`, computed DB-side. This function used
+//    to bind pollAll()'s `nowIso`, read before any check ran, while recordHistory()
+//    bound its own later `new Date()`. Whichever writer landed second overwrote
+//    ended_at with its own value, so this one could push ended_at BEFORE started_at
+//    (started_at having come from the later clock on an earlier poll) and store a
+//    negative duration_s. The six live rows were -5 s to -35 s, i.e. exactly how
+//    long that monitor's checks took that poll.
+//  - ONE GUARD. Both claim on `ended_at IS NULL`, the column being written. The old
+//    pair of predicates were on DIFFERENT columns (`ended_at IS NULL` in
+//    recordHistory vs `status <> 'resolved'` here), so they did not mutually
+//    exclude and both writers could "win".
+//
+// `nowIso` is still accepted and still used for the human-readable detection time
+// in the timeline message, which is a label, not an interval endpoint.
 async function autoResolveIncidents(serverId, nowIso) {
   const [open] = await db.query(
-    "SELECT id, started_at FROM status_incidents WHERE server_id=? AND status NOT IN ('resolved')",
+    "SELECT id FROM status_incidents WHERE server_id=? AND ended_at IS NULL",
     [serverId]
   );
   for (const inc of open) {
-    const durationS = Math.round((new Date(nowIso) - new Date(inc.started_at)) / 1000);
     // Claim the incident first; recordHistory() may be resolving it concurrently,
     // and only the writer that actually closes it appends the "resolved" update.
     const [upd] = await db.query(
-      "UPDATE status_incidents SET status='resolved', ended_at=?, duration_s=? WHERE id=? AND status <> 'resolved'",
-      [new Date(nowIso), durationS, inc.id]
+      `UPDATE status_incidents
+          SET status='resolved',
+              ended_at=NOW(),
+              duration_s=GREATEST(0, TIMESTAMPDIFF(SECOND, started_at, NOW()))
+        WHERE id=? AND ended_at IS NULL`,
+      [inc.id]
     );
     if (!upd.affectedRows) continue;
     await db.query(
-      "INSERT INTO status_incident_updates (incident_id, status, message, created_at) VALUES (?,?,?,?)",
-      [inc.id, "resolved", `Service recovered — automatically detected at ${new Date(nowIso).toUTCString()}.`, new Date(nowIso)]
+      "INSERT INTO status_incident_updates (incident_id, status, message, created_at) VALUES (?,?,?,NOW())",
+      [inc.id, "resolved", `Service recovered — automatically detected at ${new Date(nowIso).toUTCString()}.`]
     );
   }
 }
@@ -7056,23 +7110,33 @@ app.post("/api/admin/incidents", requireAdmin, async (req, res) => {
 app.post("/api/admin/incidents/resolve-all", requireAdmin, async (req, res) => {
   try {
     const [open] = await db.query(
-      "SELECT id, server_id, started_at FROM status_incidents WHERE ended_at IS NULL"
+      "SELECT id FROM status_incidents WHERE ended_at IS NULL"
     );
     if (!open.length) return res.json({ ok: true, resolved: 0 });
-    const now = new Date();
+    let resolved = 0;
     for (const inc of open) {
-      const durS = Math.max(0, Math.round((now - new Date(inc.started_at)) / 1000));
-      await db.query(
-        "UPDATE status_incidents SET ended_at=NOW(), duration_s=?, status='resolved' WHERE id=?",
-        [durS, inc.id]
+      // ended_at and duration_s both DB-side, from one clock, and claimed on
+      // `ended_at IS NULL` — see autoResolveIncidents() (T-0836). ended_at was
+      // already NOW() here while duration_s came from this process's `new Date()`,
+      // so the two could disagree by the length of the loop; and with no claim
+      // predicate a concurrent poll-path resolve could be overwritten.
+      const [upd] = await db.query(
+        `UPDATE status_incidents
+            SET ended_at=NOW(),
+                duration_s=GREATEST(0, TIMESTAMPDIFF(SECOND, started_at, NOW())),
+                status='resolved'
+          WHERE id=? AND ended_at IS NULL`,
+        [inc.id]
       );
+      if (!upd.affectedRows) continue;
+      resolved += 1;
       await db.query(
         "INSERT INTO status_incident_updates (incident_id, status, message) VALUES (?,?,?)",
         [inc.id, "resolved", "Resolved by operator via bulk resolve"]
       );
     }
-    addAuditLog({ userId: req.session.userId, username: req.session.username, action:"incident.resolve-all", resourceType:"incident", resourceId:"bulk", resourceName: `${open.length} incidents`, ip: req.ip });
-    res.json({ ok: true, resolved: open.length });
+    addAuditLog({ userId: req.session.userId, username: req.session.username, action:"incident.resolve-all", resourceType:"incident", resourceId:"bulk", resourceName: `${resolved} incidents`, ip: req.ip });
+    res.json({ ok: true, resolved });
   } catch(e) { res.status(500).json({ error: e.message }); }
 });
 
@@ -7146,11 +7210,18 @@ app.post("/api/admin/incidents/:id/updates", requireAdmin, async (req, res) => {
     );
     // Mirror the latest status onto the parent row + close if resolved
     if (status === "resolved" && !inc.ended_at) {
-      const now = new Date();
-      const dur = Math.round((now - new Date(inc.started_at)) / 1000);
+      // ended_at and duration_s both DB-side, from one clock, and claimed on
+      // `ended_at IS NULL` — see autoResolveIncidents() (T-0836). Binding a JS
+      // Date through the `timezone: "local"` pool against a started_at written by
+      // NOW() is the skew this avoids, and the claim stops this operator action
+      // from overwriting an ended_at a concurrent poll-path resolve just wrote.
       await db.query(
-        "UPDATE status_incidents SET status='resolved', ended_at=?, duration_s=? WHERE id=?",
-        [now, dur, inc.id]
+        `UPDATE status_incidents
+            SET status='resolved',
+                ended_at=NOW(),
+                duration_s=GREATEST(0, TIMESTAMPDIFF(SECOND, started_at, NOW()))
+          WHERE id=? AND ended_at IS NULL`,
+        [inc.id]
       );
     } else {
       await db.query("UPDATE status_incidents SET status=? WHERE id=?", [status, inc.id]);

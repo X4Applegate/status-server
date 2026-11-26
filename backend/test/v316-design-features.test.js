@@ -111,7 +111,14 @@ test("resolve-all returns resolved count", () => {
     'app.post("/api/admin/incidents/resolve-all"',
     'app.get("/api/admin/incidents"'
   );
-  assert.match(route, /resolved.*open\.length|resolved: open\.length/);
+  // The count is the number of incidents this call actually CLOSED, not the
+  // number it selected. Since T-0836 the UPDATE claims each row with
+  // `ended_at IS NULL`, so a row a concurrent poll-path resolve already closed
+  // is skipped and must not be counted — `open.length` would over-report it.
+  assert.match(route, /res\.json\(\{ ok: true, resolved \}\)/,
+    "resolve-all reports a resolved count");
+  assert.match(route, /if \(!upd\.affectedRows\) continue;\s*\n\s*resolved \+= 1;/,
+    "the count increments only for rows the UPDATE actually claimed");
 });
 
 test("resolve-all records audit log with bulk action", () => {

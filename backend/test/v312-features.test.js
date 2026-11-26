@@ -52,9 +52,15 @@ test("autoResolveIncidents helper function is defined", () => {
 
 test("autoResolveIncidents queries open incidents and marks them resolved", () => {
   const fn = sourceBetween("async function autoResolveIncidents", "const _lastPolled");
-  assert.match(fn, /status NOT IN.*resolved/);
+  // "Open" is `ended_at IS NULL`, the column the close actually writes. It was
+  // `status NOT IN ('resolved')` until T-0836, which (a) did not exclude the
+  // other resolve path, since that one claims on ended_at, and (b) matched rows
+  // an operator had moved off 'resolved' AFTER they closed, re-stamping a
+  // finished incident's ended_at on the next successful poll.
+  assert.match(fn, /ended_at IS NULL/);
+  assert.doesNotMatch(fn, /status NOT IN.*resolved/);
   assert.match(fn, /INSERT INTO status_incident_updates/);
-  assert.match(fn, /UPDATE status_incidents.*SET status='resolved'/);
+  assert.match(fn, /UPDATE status_incidents[\s\S]*SET status='resolved'/);
 });
 
 test("autoResolveIncidents is called on service recovery", () => {
